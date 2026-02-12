@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>E-katalog UZ Demo</title>
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body>
+  <header>
+    <nav>
+      <strong>E-katalog UZ</strong>
+      <a class="active" href="/">Главная</a>
+      <a href="/catalog.html">Смартфоны</a>
+      <a href="/compare.html">Сравнение</a>
+      <a href="/shops.html">Магазины</a>
+      <a href="/register.html">Регистрация</a>
+    </nav>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <h1>Сравнение цен смартфонов в Узбекистане</h1>
+      <p>RU + UZ интерфейс, отзывы, регистрация, сравнение характеристик и цены в UZS.</p>
+      <a class="btn" href="/catalog.html">Открыть каталог смартфонов</a>
+    </section>
+
+    <section class="grid products" id="featuredProducts"></section>
+  </main>
+
+  <script src="/js/common.js"></script>
+  <script>
+    renderProducts('#featuredProducts', { limit: 3, showCompare: true });
+  </script>
+</body>
+</html>

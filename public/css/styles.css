@@ -1,0 +1,69 @@
+:root {
+  --bg: #f6f7fb;
+  --card: #ffffff;
+  --primary: #275efe;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+header {
+  background: #111827;
+  color: #fff;
+  padding: 14px 20px;
+  position: sticky;
+  top: 0;
+}
+nav { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
+nav a { color: #cfd5e3; text-decoration: none; font-weight: 600; }
+nav a:hover, nav a.active { color: #fff; }
+.container { max-width: 1150px; margin: 0 auto; padding: 20px; }
+.hero {
+  background: linear-gradient(125deg, #1d4ed8, #0f172a);
+  color: #fff;
+  border-radius: 16px;
+  padding: 28px;
+  margin-bottom: 20px;
+}
+.grid { display: grid; gap: 16px; }
+.grid.products { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px;
+}
+.card img { width: 100%; height: 170px; object-fit: cover; border-radius: 10px; }
+.price { font-size: 1.1rem; font-weight: 700; color: #0f766e; }
+.meta { color: var(--muted); font-size: 0.9rem; }
+.btn {
+  border: none;
+  background: var(--primary);
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+}
+.btn.secondary { background: #374151; }
+.filters { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+input, select {
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 12px; overflow: hidden; }
+th, td { padding: 10px; border-bottom: 1px solid var(--border); text-align: left; }
+.review { border-left: 3px solid var(--primary); padding-left: 10px; margin-bottom: 10px; }
+.notice { background: #ecfeff; border: 1px solid #a5f3fc; padding: 10px; border-radius: 10px; margin-top: 12px; }
+@media (max-width: 700px) {
+  .hero { padding: 20px; }
+}

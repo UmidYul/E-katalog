@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Каталог смартфонов</title>
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body>
+  <header>
+    <nav>
+      <strong>E-katalog UZ</strong>
+      <a href="/">Главная</a>
+      <a class="active" href="/catalog.html">Смартфоны</a>
+      <a href="/compare.html">Сравнение</a>
+      <a href="/shops.html">Магазины</a>
+      <a href="/register.html">Регистрация</a>
+    </nav>
+  </header>
+  <main class="container">
+    <h1>Каталог смартфонов</h1>
+    <div class="filters">
+      <input id="searchInput" placeholder="Поиск по модели" />
+      <select id="brandFilter">
+        <option value="">Все бренды</option>
+        <option>Samsung</option>
+        <option>Apple</option>
+        <option>Xiaomi</option>
+      </select>
+      <select id="langSwitch">
+        <option value="ru">Русский</option>
+        <option value="uz">O'zbekcha</option>
+      </select>
+    </div>
+    <div class="grid products" id="catalogProducts"></div>
+  </main>
+  <script src="/js/common.js"></script>
+  <script src="/js/catalog.js"></script>
+</body>
+</html>
