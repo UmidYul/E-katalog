@@ -1,0 +1,56 @@
+<%- include('partials/header', { title: `${phone.brand} ${phone.model}` }) %>
+
+<section class="product-layout">
+  <div>
+    <img class="product-image" src="<%= phone.image %>" alt="<%= phone.model %>" />
+    <h1><%= phone.brand %> <%= phone.model %></h1>
+    <p>Минимальная цена: <strong><%= cheapest.priceText %></strong> в магазине <strong><%= cheapest.store %></strong>.</p>
+    <a class="btn" href="/compare?items=<%= phone.slug %>">Добавить в сравнение</a>
+  </div>
+
+  <aside class="panel">
+    <h2>Характеристики</h2>
+    <ul>
+      <li><strong>Экран:</strong> <%= phone.specs.display %></li>
+      <li><strong>Процессор:</strong> <%= phone.specs.chipset %></li>
+      <li><strong>Камера:</strong> <%= phone.specs.camera %></li>
+      <li><strong>Батарея:</strong> <%= phone.specs.battery %></li>
+      <li><strong>ОС:</strong> <%= phone.specs.os %></li>
+      <li><strong>Память:</strong> <%= phone.memory.join(', ') %></li>
+      <li><strong>Цвета:</strong> <%= phone.colors.join(', ') %></li>
+    </ul>
+  </aside>
+</section>
+
+<section>
+  <h2>Где купить</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Магазин</th>
+        <th>Цена</th>
+        <th>Наличие</th>
+        <th>Доставка</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% offers.forEach(offer => { %>
+        <tr>
+          <td><%= offer.store %></td>
+          <td><strong><%= offer.priceText %></strong></td>
+          <td><%= offer.inStock ? 'В наличии' : 'Нет' %></td>
+          <td><%= offer.delivery %></td>
+          <td><a href="<%= offer.url %>">Перейти в магазин</a></td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>История минимальной цены</h2>
+  <p class="muted">Последние 5 обновлений: <%= history.join(' → ') %></p>
+</section>
+
+<%- include('partials/footer') %>
