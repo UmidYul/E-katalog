@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Регистрация</title>
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body>
+  <header>
+    <nav>
+      <strong>E-katalog UZ</strong>
+      <a href="/">Главная</a>
+      <a href="/catalog.html">Смартфоны</a>
+      <a href="/compare.html">Сравнение</a>
+      <a href="/shops.html">Магазины</a>
+      <a class="active" href="/register.html">Регистрация</a>
+    </nav>
+  </header>
+  <main class="container">
+    <h1>Регистрация пользователя</h1>
+    <form id="registerForm" class="card" style="max-width:480px;">
+      <label>Имя<br /><input required name="name" /></label><br /><br />
+      <label>Email<br /><input required type="email" name="email" /></label><br /><br />
+      <label>Пароль<br /><input required type="password" name="password" /></label><br /><br />
+      <label>Язык интерфейса<br />
+        <select name="language">
+          <option value="ru">Русский</option>
+          <option value="uz">O'zbekcha</option>
+        </select>
+      </label><br /><br />
+      <button class="btn" type="submit">Создать аккаунт</button>
+    </form>
+    <div id="registerResult"></div>
+  </main>
+  <script src="/js/register.js"></script>
+</body>
+</html>
