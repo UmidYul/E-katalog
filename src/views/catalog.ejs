@@ -1,0 +1,40 @@
+<%- include('partials/header', { title: 'Каталог смартфонов' }) %>
+
+<section>
+  <h1>Каталог смартфонов</h1>
+  <form class="filters" method="GET" action="/catalog">
+    <input type="text" name="q" placeholder="Поиск по названию" value="<%= filters.q %>" />
+    <select name="brand">
+      <option value="">Все бренды</option>
+      <% brands.forEach(item => { %>
+        <option value="<%= item %>" <%= filters.brand === item ? 'selected' : '' %>><%= item %></option>
+      <% }) %>
+    </select>
+    <select name="sort">
+      <option value="popular" <%= filters.sort === 'popular' ? 'selected' : '' %>>Популярные</option>
+      <option value="price_asc" <%= filters.sort === 'price_asc' ? 'selected' : '' %>>Цена по возрастанию</option>
+      <option value="price_desc" <%= filters.sort === 'price_desc' ? 'selected' : '' %>>Цена по убыванию</option>
+    </select>
+    <button class="btn" type="submit">Применить</button>
+  </form>
+
+  <div class="grid">
+    <% if (!phones.length) { %>
+      <p>По вашему запросу ничего не найдено.</p>
+    <% } %>
+    <% phones.forEach(phone => { %>
+      <article class="card">
+        <img src="<%= phone.image %>" alt="<%= phone.model %>" />
+        <h3><%= phone.brand %> <%= phone.model %></h3>
+        <p><strong><%= phone.minPriceText %></strong> • <%= phone.offersCount %> магазинов</p>
+        <p><%= phone.specs.display %> • <%= phone.specs.chipset %></p>
+        <div class="card-links">
+          <a href="/phone/<%= phone.slug %>">Карточка</a>
+          <a href="/compare?items=<%= phone.slug %>">Сравнить</a>
+        </div>
+      </article>
+    <% }) %>
+  </div>
+</section>
+
+<%- include('partials/footer') %>

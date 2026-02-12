@@ -1,0 +1,16 @@
+{
+  "name": "e-katalog",
+  "version": "1.0.0",
+  "description": "MVP E-Katalog on Express.js",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "keywords": ["express", "catalog", "price-comparison"],
+  "license": "MIT",
+  "dependencies": {
+    "ejs": "^3.1.10",
+    "express": "^4.21.2"
+  }
+}

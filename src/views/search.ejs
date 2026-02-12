@@ -1,0 +1,34 @@
+<%- include('partials/header', { title: 'Поиск' }) %>
+
+<section>
+  <h1>Поиск смартфонов</h1>
+  <form class="filters" action="/search" method="GET">
+    <input type="text" name="q" placeholder="Например: iPhone 15" value="<%= query %>" />
+    <button class="btn" type="submit">Найти</button>
+  </form>
+
+  <% if (!query) { %>
+    <p>Популярные запросы:</p>
+    <ul>
+      <% suggestions.forEach(item => { %>
+        <li><a href="/search?q=<%= encodeURIComponent(item) %>"><%= item %></a></li>
+      <% }) %>
+    </ul>
+  <% } else { %>
+    <h2>Результаты: <%= results.length %></h2>
+    <div class="grid">
+      <% results.forEach(phone => { %>
+        <article class="card">
+          <h3><%= phone.brand %> <%= phone.model %></h3>
+          <p>от <strong><%= phone.minPriceText %></strong></p>
+          <a href="/phone/<%= phone.slug %>">Открыть карточку</a>
+        </article>
+      <% }) %>
+      <% if (!results.length) { %>
+        <p>Совпадений не найдено.</p>
+      <% } %>
+    </div>
+  <% } %>
+</section>
+
+<%- include('partials/footer') %>
