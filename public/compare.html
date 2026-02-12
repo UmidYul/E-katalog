@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Сравнение смартфонов</title>
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body>
+<header class="site-header">
+  <div class="container header-row">
+    <a href="/" class="brand"><span class="brand-mark"></span>E-katalog UZ</a>
+    <nav class="nav">
+      <a href="/" class="nav-link">Главная</a>
+      <a href="/catalog.html" class="nav-link">Каталог</a>
+      <a href="/compare.html" class="nav-link active">Сравнение</a>
+      <a href="/shops.html" class="nav-link">Магазины</a>
+      <a href="/register.html" class="nav-link">Регистрация</a>
+    </nav>
+  </div>
+</header>
+
+<main class="container">
+  <h1 class="section-title">Сравнение смартфонов</h1>
+  <div class="panel">
+    <div class="table-wrap">
+      <table class="compare-table" id="compareTable"></table>
+    </div>
+    <div style="margin-top:12px; display:flex; gap:8px;">
+      <button class="btn ghost" id="clearCompare">Очистить сравнение</button>
+      <a class="btn primary" href="/catalog.html">Добавить модели</a>
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer"><div class="container footer-row"><span>Сравнение до 3 товаров</span><span>Локальное хранилище</span></div></footer>
+<script src="/js/common.js"></script>
+<script src="/js/compare.js"></script>
+</body>
+</html>
