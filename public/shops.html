@@ -7,21 +7,26 @@
   <link rel="stylesheet" href="/css/styles.css" />
 </head>
 <body>
-  <header>
-    <nav>
-      <strong>E-katalog UZ</strong>
-      <a href="/">Главная</a>
-      <a href="/catalog.html">Смартфоны</a>
-      <a href="/compare.html">Сравнение</a>
-      <a class="active" href="/shops.html">Магазины</a>
-      <a href="/register.html">Регистрация</a>
+<header class="site-header">
+  <div class="container header-row">
+    <a href="/" class="brand"><span class="brand-mark"></span>E-katalog UZ</a>
+    <nav class="nav">
+      <a href="/" class="nav-link">Главная</a>
+      <a href="/catalog.html" class="nav-link">Каталог</a>
+      <a href="/compare.html" class="nav-link">Сравнение</a>
+      <a href="/shops.html" class="nav-link active">Магазины</a>
+      <a href="/register.html" class="nav-link">Регистрация</a>
     </nav>
-  </header>
-  <main class="container">
-    <h1>Подключённые магазины</h1>
-    <div id="shopsList" class="grid"></div>
-  </main>
-  <script src="/js/common.js"></script>
-  <script src="/js/shops.js"></script>
+  </div>
+</header>
+
+<main class="container">
+  <h1 class="section-title">Партнёрские магазины</h1>
+  <section class="grid" id="shopsGrid"></section>
+</main>
+
+<footer class="site-footer"><div class="container footer-row"><span>Покрытие по регионам Узбекистана</span><span>Доставка и самовывоз</span></div></footer>
+<script src="/js/common.js"></script>
+<script src="/js/shops.js"></script>
 </body>
 </html>

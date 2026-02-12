@@ -3,34 +3,57 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>E-katalog UZ Demo</title>
+  <title>E-katalog UZ — Смартфоны</title>
   <link rel="stylesheet" href="/css/styles.css" />
 </head>
 <body>
-  <header>
-    <nav>
-      <strong>E-katalog UZ</strong>
-      <a class="active" href="/">Главная</a>
-      <a href="/catalog.html">Смартфоны</a>
-      <a href="/compare.html">Сравнение</a>
-      <a href="/shops.html">Магазины</a>
-      <a href="/register.html">Регистрация</a>
+<header class="site-header">
+  <div class="container header-row">
+    <a href="/" class="brand"><span class="brand-mark"></span>E-katalog UZ</a>
+    <nav class="nav">
+      <a href="/" class="nav-link active">Главная</a>
+      <a href="/catalog.html" class="nav-link">Каталог</a>
+      <a href="/compare.html" class="nav-link">Сравнение</a>
+      <a href="/shops.html" class="nav-link">Магазины</a>
+      <a href="/register.html" class="nav-link">Регистрация</a>
     </nav>
-  </header>
+  </div>
+</header>
 
-  <main class="container">
-    <section class="hero">
-      <h1>Сравнение цен смартфонов в Узбекистане</h1>
-      <p>RU + UZ интерфейс, отзывы, регистрация, сравнение характеристик и цены в UZS.</p>
-      <a class="btn" href="/catalog.html">Открыть каталог смартфонов</a>
-    </section>
+<main class="container">
+  <section class="hero">
+    <div class="hero-main">
+      <h1>Смартфоны с актуальными ценами по Узбекистану</h1>
+      <p>Готовый фронтенд-прототип: каталог, фильтры, сравнение моделей, карточки товаров, магазины и регистрация. Все данные демонстрационные, но интерфейс и сценарии полностью рабочие.</p>
+      <a href="/catalog.html" class="btn primary">Перейти в каталог</a>
+    </div>
+    <div class="hero-stats">
+      <article class="stat">
+        <div class="muted">Товаров в каталоге</div>
+        <div class="stat-value" id="statsProducts">—</div>
+      </article>
+      <article class="stat">
+        <div class="muted">Подключённых магазинов</div>
+        <div class="stat-value" id="statsShops">—</div>
+      </article>
+      <article class="stat">
+        <div class="muted">Средний рейтинг</div>
+        <div class="stat-value" id="statsRating">—</div>
+      </article>
+    </div>
+  </section>
 
-    <section class="grid products" id="featuredProducts"></section>
-  </main>
+  <h2 class="section-title">Популярные модели</h2>
+  <section class="grid" id="featured"></section>
+</main>
 
-  <script src="/js/common.js"></script>
-  <script>
-    renderProducts('#featuredProducts', { limit: 3, showCompare: true });
-  </script>
+<footer class="site-footer">
+  <div class="container footer-row">
+    <span>© 2026 E-katalog UZ Demo</span>
+    <span>RU / UZ • UZS</span>
+  </div>
+</footer>
+<script src="/js/common.js"></script>
+<script src="/js/home.js"></script>
 </body>
 </html>

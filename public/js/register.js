@@ -1,28 +1,29 @@
 const form = document.querySelector('#registerForm');
-const result = document.querySelector('#registerResult');
+const messageBox = document.querySelector('#registerMessage');
 
-form.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const formData = new FormData(form);
-  const payload = Object.fromEntries(formData.entries());
+form.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  messageBox.innerHTML = '';
 
-  const res = await fetch('/api/register', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
+  const data = Object.fromEntries(new FormData(form).entries());
 
-  const data = await res.json();
-  if (!res.ok) {
-    result.innerHTML = `<div class="notice">Ошибка: ${data.message}</div>`;
-    return;
+  try {
+    const response = await fetch('/api/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      messageBox.innerHTML = `<div class="notice error">${result.message}</div>`;
+      return;
+    }
+
+    messageBox.innerHTML = `<div class="notice success">${result.message}<br>ID: ${result.profile.id}<br>${result.profile.name} (${result.profile.email})</div>`;
+    form.reset();
+  } catch (error) {
+    messageBox.innerHTML = `<div class="notice error">Ошибка сети: ${error.message}</div>`;
   }
-
-  result.innerHTML = `
-    <div class="notice">
-      ${data.message}<br />
-      Профиль: ${data.profile.name} (${data.profile.email}), язык: ${data.profile.language}
-    </div>
-  `;
-  form.reset();
 });

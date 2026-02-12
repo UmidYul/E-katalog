@@ -7,24 +7,34 @@
   <link rel="stylesheet" href="/css/styles.css" />
 </head>
 <body>
-  <header>
-    <nav>
-      <strong>E-katalog UZ</strong>
-      <a href="/">Главная</a>
-      <a href="/catalog.html">Смартфоны</a>
-      <a class="active" href="/compare.html">Сравнение</a>
-      <a href="/shops.html">Магазины</a>
-      <a href="/register.html">Регистрация</a>
+<header class="site-header">
+  <div class="container header-row">
+    <a href="/" class="brand"><span class="brand-mark"></span>E-katalog UZ</a>
+    <nav class="nav">
+      <a href="/" class="nav-link">Главная</a>
+      <a href="/catalog.html" class="nav-link">Каталог</a>
+      <a href="/compare.html" class="nav-link active">Сравнение</a>
+      <a href="/shops.html" class="nav-link">Магазины</a>
+      <a href="/register.html" class="nav-link">Регистрация</a>
     </nav>
-  </header>
-  <main class="container">
-    <h1>Сравнение выбранных моделей</h1>
+  </div>
+</header>
+
+<main class="container">
+  <h1 class="section-title">Сравнение смартфонов</h1>
+  <div class="panel">
     <div class="table-wrap">
-      <table id="compareTable"></table>
+      <table class="compare-table" id="compareTable"></table>
     </div>
-    <p class="meta">Выбери товары в каталоге кнопкой “Сравнить”.</p>
-  </main>
-  <script src="/js/common.js"></script>
-  <script src="/js/compare.js"></script>
+    <div style="margin-top:12px; display:flex; gap:8px;">
+      <button class="btn ghost" id="clearCompare">Очистить сравнение</button>
+      <a class="btn primary" href="/catalog.html">Добавить модели</a>
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer"><div class="container footer-row"><span>Сравнение до 3 товаров</span><span>Локальное хранилище</span></div></footer>
+<script src="/js/common.js"></script>
+<script src="/js/compare.js"></script>
 </body>
 </html>

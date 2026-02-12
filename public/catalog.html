@@ -7,34 +7,50 @@
   <link rel="stylesheet" href="/css/styles.css" />
 </head>
 <body>
-  <header>
-    <nav>
-      <strong>E-katalog UZ</strong>
-      <a href="/">Главная</a>
-      <a class="active" href="/catalog.html">Смартфоны</a>
-      <a href="/compare.html">Сравнение</a>
-      <a href="/shops.html">Магазины</a>
-      <a href="/register.html">Регистрация</a>
+<header class="site-header">
+  <div class="container header-row">
+    <a href="/" class="brand"><span class="brand-mark"></span>E-katalog UZ</a>
+    <nav class="nav">
+      <a href="/" class="nav-link">Главная</a>
+      <a href="/catalog.html" class="nav-link active">Каталог</a>
+      <a href="/compare.html" class="nav-link">Сравнение</a>
+      <a href="/shops.html" class="nav-link">Магазины</a>
+      <a href="/register.html" class="nav-link">Регистрация</a>
     </nav>
-  </header>
-  <main class="container">
-    <h1>Каталог смартфонов</h1>
-    <div class="filters">
-      <input id="searchInput" placeholder="Поиск по модели" />
-      <select id="brandFilter">
-        <option value="">Все бренды</option>
-        <option>Samsung</option>
-        <option>Apple</option>
-        <option>Xiaomi</option>
-      </select>
-      <select id="langSwitch">
-        <option value="ru">Русский</option>
-        <option value="uz">O'zbekcha</option>
-      </select>
-    </div>
-    <div class="grid products" id="catalogProducts"></div>
-  </main>
-  <script src="/js/common.js"></script>
-  <script src="/js/catalog.js"></script>
+  </div>
+</header>
+
+<main class="container">
+  <h1 class="section-title" id="catalogTitle">Каталог смартфонов</h1>
+  <section class="toolbar">
+    <input class="input" id="filterQ" placeholder="Поиск по модели" />
+    <select class="select" id="filterBrand"><option value="">Все бренды</option></select>
+    <select class="select" id="filterRam"><option value="">RAM от</option></select>
+    <select class="select" id="filterStorage"><option value="">Память от</option></select>
+    <input class="input" id="filterMinPrice" placeholder="Цена от" type="number" min="0" />
+    <input class="input" id="filterMaxPrice" placeholder="Цена до" type="number" min="0" />
+    <select class="select" id="filterSort">
+      <option value="popular">По популярности</option>
+      <option value="price_asc">Сначала дешевле</option>
+      <option value="price_desc">Сначала дороже</option>
+      <option value="rating_desc">По рейтингу</option>
+      <option value="newest">Сначала новые</option>
+    </select>
+    <label class="checkbox"><input id="filterStock" type="checkbox" /> Только в наличии</label>
+    <select class="select" id="langSwitch">
+      <option value="ru">Русский</option>
+      <option value="uz">O'zbekcha</option>
+    </select>
+  </section>
+
+  <p class="muted">Найдено: <span id="catalogCount">0</span></p>
+  <section class="grid" id="catalogGrid"></section>
+</main>
+
+<footer class="site-footer">
+  <div class="container footer-row"><span>Каталог смартфонов</span><span>Demo dataset</span></div>
+</footer>
+<script src="/js/common.js"></script>
+<script src="/js/catalog.js"></script>
 </body>
 </html>

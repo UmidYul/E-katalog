@@ -1,51 +1,77 @@
-let products = [];
+const dict = {
+  ru: {
+    title: 'Каталог смартфонов',
+    qPlaceholder: 'Поиск по модели'
+  },
+  uz: {
+    title: 'Smartfonlar katalogi',
+    qPlaceholder: 'Model bo\'yicha qidirish'
+  }
+};
 
-const text = {
-  ru: { title: 'Каталог смартфонов', search: 'Поиск по модели' },
-  uz: { title: 'Smartfonlar katalogi', search: 'Model bo\'yicha qidiruv' }
+const filters = {
+  q: '',
+  brand: '',
+  minRam: '',
+  minStorage: '',
+  minPrice: '',
+  maxPrice: '',
+  inStock: false,
+  sort: 'popular'
 };
 
 async function initCatalog() {
-  products = await fetchProducts();
-  renderList(products);
+  const meta = await api('/api/meta');
 
-  const brandFilter = document.querySelector('#brandFilter');
-  const searchInput = document.querySelector('#searchInput');
-  const langSwitch = document.querySelector('#langSwitch');
+  qs('#filterBrand').innerHTML += meta.brands.map((brand) => `<option value="${brand}">${brand}</option>`).join('');
+  qs('#filterRam').innerHTML += meta.ramOptions.map((ram) => `<option value="${ram}">${ram} GB</option>`).join('');
+  qs('#filterStorage').innerHTML += meta.storageOptions.map((s) => `<option value="${s}">${s} GB</option>`).join('');
 
-  const apply = () => {
-    const q = searchInput.value.toLowerCase();
-    const brand = brandFilter.value;
-    const filtered = products.filter((p) => {
-      const matchesBrand = !brand || p.brand === brand;
-      const matchesSearch = p.name.toLowerCase().includes(q);
-      return matchesBrand && matchesSearch;
+  const controls = [
+    ['#filterQ', 'q'],
+    ['#filterBrand', 'brand'],
+    ['#filterRam', 'minRam'],
+    ['#filterStorage', 'minStorage'],
+    ['#filterMinPrice', 'minPrice'],
+    ['#filterMaxPrice', 'maxPrice'],
+    ['#filterSort', 'sort']
+  ];
+
+  controls.forEach(([selector, key]) => {
+    qs(selector).addEventListener('input', () => {
+      filters[key] = qs(selector).value;
+      loadProducts();
     });
-    renderList(filtered);
-  };
-
-  brandFilter.addEventListener('change', apply);
-  searchInput.addEventListener('input', apply);
-  langSwitch.addEventListener('change', () => {
-    document.querySelector('h1').textContent = text[langSwitch.value].title;
-    searchInput.placeholder = text[langSwitch.value].search;
+    qs(selector).addEventListener('change', () => {
+      filters[key] = qs(selector).value;
+      loadProducts();
+    });
   });
+
+  qs('#filterStock').addEventListener('change', (e) => {
+    filters.inStock = e.target.checked;
+    loadProducts();
+  });
+
+  qs('#langSwitch').addEventListener('change', (e) => {
+    const t = dict[e.target.value];
+    qs('#catalogTitle').textContent = t.title;
+    qs('#filterQ').placeholder = t.qPlaceholder;
+  });
+
+  await loadProducts();
 }
 
-function renderList(items) {
-  const root = document.querySelector('#catalogProducts');
-  root.innerHTML = items.map((p) => `
-    <article class="card">
-      <img src="${p.image}" alt="${p.name}">
-      <h3>${p.name}</h3>
-      <div class="price">${formatUZS(p.price)}</div>
-      <p class="meta">${p.display} • ${p.ram} • ${p.storage} • ${p.battery}</p>
-      <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        <a class="btn" href="/product.html?id=${p.id}">Детали</a>
-        <button class="btn secondary" onclick="addToCompare(${p.id})">Сравнить</button>
-      </div>
-    </article>
-  `).join('');
+async function loadProducts() {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== '' && value !== false) params.set(key, value);
+  });
+
+  const { items, total } = await api(`/api/products?${params.toString()}`);
+  qs('#catalogCount').textContent = total;
+  qs('#catalogGrid').innerHTML = items.map(productCard).join('');
+  bindCompareButtons(qs('#catalogGrid'));
 }
 
 initCatalog();
