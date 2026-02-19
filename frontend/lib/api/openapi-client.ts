@@ -1,4 +1,4 @@
-﻿import { apiClient } from "@/lib/api/client";
+import { apiClient } from "@/lib/api/client";
 import type { FilterBucket, Paginated, ProductDetail, ProductListItem, ProductOffer, SortOption } from "@/types/domain";
 
 export type CatalogQuery = {

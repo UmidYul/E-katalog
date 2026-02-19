@@ -3,3 +3,7 @@ __pycache__/
 .env
 .venv/
 node_modules/
+.next/
+frontend/.next/
+frontend/node_modules/
+frontend/tsconfig.tsbuildinfo

@@ -1,4 +1,4 @@
-﻿# Frontend (Next.js 14)
+# Frontend (Next.js 14)
 
 Startup-grade marketplace frontend for the price aggregation backend.
 

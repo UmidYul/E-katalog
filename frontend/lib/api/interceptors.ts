@@ -1,4 +1,4 @@
-﻿import type { AxiosError, AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from "axios";
+import type { AxiosError, AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from "axios";
 
 import { authStore } from "@/store/auth.store";
 

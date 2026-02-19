@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { SlidersHorizontal } from "lucide-react";
 import { useMemo, useState } from "react";

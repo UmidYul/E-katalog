@@ -1,4 +1,4 @@
-﻿import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export function SpecsTable({ specs }: { specs: Record<string, string | number | boolean> }) {
   const rows = Object.entries(specs);

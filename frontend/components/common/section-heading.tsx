@@ -1,4 +1,4 @@
-﻿import { ReactNode } from "react";
+import { ReactNode } from "react";
 
 export function SectionHeading({ title, description, action }: { title: string; description?: string; action?: ReactNode }) {
   return (

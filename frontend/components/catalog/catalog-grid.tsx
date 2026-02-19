@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { ProductCard } from "@/components/catalog/product-card";
 import { EmptyState } from "@/components/common/empty-state";

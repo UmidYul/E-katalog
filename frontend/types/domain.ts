@@ -1,4 +1,4 @@
-﻿export type SortOption = "relevance" | "price_asc" | "price_desc" | "popular" | "newest" | "price_drop_7d";
+export type SortOption = "relevance" | "price_asc" | "price_desc" | "popular" | "newest" | "price_drop_7d";
 
 export type ProductListItem = {
   id: number;

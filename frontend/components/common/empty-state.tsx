@@ -1,4 +1,4 @@
-﻿import { SearchX } from "lucide-react";
+import { SearchX } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
 

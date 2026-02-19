@@ -1,4 +1,4 @@
-﻿import { FavoritesClient, ProfileClient, RecentlyViewedClient } from "@/features/user/account-pages";
+import { FavoritesClient, ProfileClient, RecentlyViewedClient } from "@/features/user/account-pages";
 
 export default function ProfilePage() {
   return <ProfileClient />;

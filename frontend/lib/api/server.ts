@@ -1,4 +1,4 @@
-﻿import { env } from "@/config/env";
+import { env } from "@/config/env";
 
 export async function serverGet<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${env.apiOrigin}${env.apiPrefix}${path}`, {

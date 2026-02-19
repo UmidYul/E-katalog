@@ -1,4 +1,4 @@
-﻿/* eslint-disable */
+/* eslint-disable */
 // Generated-style OpenAPI types (can be replaced by openapi-typescript output)
 
 export interface paths {
