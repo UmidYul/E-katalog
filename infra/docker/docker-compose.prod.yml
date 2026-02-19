@@ -1,0 +1,80 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: scraper
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d scraper"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+
+  api:
+    build:
+      context: ../..
+      dockerfile: services/api/Dockerfile
+    env_file:
+      - ../../.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  worker_scrape:
+    build:
+      context: ../..
+      dockerfile: services/worker/Dockerfile
+    env_file:
+      - ../../.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    command: ["celery", "-A", "app.celery_app:celery_app", "worker", "-Q", "scrape.high,scrape.default", "--concurrency=12", "--loglevel=INFO", "-n", "scrape@%h"]
+
+  worker_pipeline:
+    build:
+      context: ../..
+      dockerfile: services/worker/Dockerfile
+    env_file:
+      - ../../.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    command: ["celery", "-A", "app.celery_app:celery_app", "worker", "-Q", "normalize,dedupe,embedding,reindex,maintenance,export", "--concurrency=6", "--loglevel=INFO", "-n", "pipeline@%h"]
+
+  beat:
+    build:
+      context: ../..
+      dockerfile: services/worker/Dockerfile
+    env_file:
+      - ../../.env
+    depends_on:
+      redis:
+        condition: service_started
+    command: ["celery", "-A", "app.celery_app:celery_app", "beat", "--loglevel=INFO"]
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      api:
+        condition: service_started
+    ports:
+      - "80:80"
+    volumes:
+      - ../nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+volumes:
+  postgres_data:

@@ -1,0 +1,280 @@
+from __future__ import annotations
+
+from datetime import datetime
+from decimal import Decimal
+
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from shared.db.base import Base
+
+
+class CatalogCategory(Base):
+    __tablename__ = "catalog_categories"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey("catalog_categories.id", ondelete="SET NULL"))
+    slug: Mapped[str] = mapped_column(String(160), unique=True, nullable=False)
+    name_uz: Mapped[str] = mapped_column(String(255), nullable=False)
+    name_ru: Mapped[str | None] = mapped_column(String(255))
+    name_en: Mapped[str | None] = mapped_column(String(255))
+    lft: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    rgt: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CatalogBrand(Base):
+    __tablename__ = "catalog_brands"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    normalized_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    aliases: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CatalogStore(Base):
+    __tablename__ = "catalog_stores"
+    __table_args__ = (
+        CheckConstraint("trust_score >= 0 and trust_score <= 1", name="ck_catalog_stores_trust_score"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    slug: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    country_code: Mapped[str] = mapped_column(String(2), nullable=False, default="UZ", server_default="UZ")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
+    trust_score: Mapped[Decimal] = mapped_column(Numeric(3, 2), nullable=False, default=0, server_default="0")
+    crawl_priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100, server_default="100")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CatalogProduct(Base):
+    __tablename__ = "catalog_products"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    category_id: Mapped[int] = mapped_column(ForeignKey("catalog_categories.id", ondelete="RESTRICT"), nullable=False)
+    brand_id: Mapped[int | None] = mapped_column(ForeignKey("catalog_brands.id", ondelete="SET NULL"))
+    canonical_sku: Mapped[str | None] = mapped_column(String(128))
+    gtin: Mapped[str | None] = mapped_column(String(32))
+    mpn: Mapped[str | None] = mapped_column(String(128))
+    normalized_title: Mapped[str] = mapped_column(String(512), nullable=False)
+    attributes: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    specs: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active", server_default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    variants: Mapped[list[CatalogProductVariant]] = relationship(back_populates="product", cascade="all, delete-orphan")
+
+
+class CatalogProductVariant(Base):
+    __tablename__ = "catalog_product_variants"
+    __table_args__ = (UniqueConstraint("product_id", "variant_key", name="uq_catalog_product_variant_key"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("catalog_products.id", ondelete="CASCADE"), nullable=False)
+    variant_key: Mapped[str] = mapped_column(String(190), nullable=False)
+    color: Mapped[str | None] = mapped_column(String(64))
+    storage: Mapped[str | None] = mapped_column(String(64))
+    ram: Mapped[str | None] = mapped_column(String(64))
+    other_attrs: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    product: Mapped[CatalogProduct] = relationship(back_populates="variants")
+
+
+class CatalogStoreProduct(Base):
+    __tablename__ = "catalog_store_products"
+    __table_args__ = (UniqueConstraint("store_id", "external_id", name="uq_catalog_store_products_store_external"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("catalog_stores.id", ondelete="CASCADE"), nullable=False)
+    product_id: Mapped[int | None] = mapped_column(ForeignKey("catalog_products.id", ondelete="SET NULL"))
+    external_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    external_url: Mapped[str] = mapped_column(Text, nullable=False)
+    title_raw: Mapped[str] = mapped_column(Text, nullable=False)
+    title_clean: Mapped[str | None] = mapped_column(Text)
+    description_raw: Mapped[str | None] = mapped_column(Text)
+    image_url: Mapped[str | None] = mapped_column(Text)
+    availability: Mapped[str | None] = mapped_column(String(32))
+    rating: Mapped[Decimal | None] = mapped_column(Numeric(3, 2))
+    review_count: Mapped[int | None] = mapped_column(Integer)
+    metadata_json: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default=dict, server_default="{}")
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CatalogOffer(Base):
+    __tablename__ = "catalog_offers"
+    __table_args__ = (
+        CheckConstraint("price_amount >= 0", name="ck_catalog_offers_price_nonnegative"),
+        CheckConstraint("old_price_amount is null or old_price_amount >= 0", name="ck_catalog_offers_old_price_nonnegative"),
+        CheckConstraint("shipping_cost is null or shipping_cost >= 0", name="ck_catalog_offers_shipping_nonnegative"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    store_product_id: Mapped[int] = mapped_column(ForeignKey("catalog_store_products.id", ondelete="CASCADE"), nullable=False)
+    product_variant_id: Mapped[int | None] = mapped_column(ForeignKey("catalog_product_variants.id", ondelete="SET NULL"))
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="UZS", server_default="UZS")
+    price_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    old_price_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    in_stock: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
+    shipping_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    scraped_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    is_valid: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class CatalogPriceHistory(Base):
+    __tablename__ = "catalog_price_history"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    offer_id: Mapped[int] = mapped_column(ForeignKey("catalog_offers.id", ondelete="CASCADE"), nullable=False)
+    price_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    in_stock: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class CatalogProductEmbedding(Base):
+    __tablename__ = "catalog_product_embeddings"
+
+    product_id: Mapped[int] = mapped_column(
+        ForeignKey("catalog_products.id", ondelete="CASCADE"), nullable=False, primary_key=True
+    )
+    embedding: Mapped[list[float]] = mapped_column(Vector(768), nullable=False)
+    model_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    model_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class CatalogProductSearch(Base):
+    __tablename__ = "catalog_product_search"
+
+    product_id: Mapped[int] = mapped_column(
+        ForeignKey("catalog_products.id", ondelete="CASCADE"), nullable=False, primary_key=True
+    )
+    tsv: Mapped[str] = mapped_column(TSVECTOR, nullable=False)
+    min_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    max_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    store_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class CatalogDuplicateCandidate(Base):
+    __tablename__ = "catalog_duplicate_candidates"
+    __table_args__ = (
+        UniqueConstraint("product_id_a", "product_id_b", name="uq_catalog_duplicate_pair"),
+        CheckConstraint("score >= 0 and score <= 1", name="ck_catalog_duplicate_score"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    product_id_a: Mapped[int] = mapped_column(ForeignKey("catalog_products.id", ondelete="CASCADE"), nullable=False)
+    product_id_b: Mapped[int] = mapped_column(ForeignKey("catalog_products.id", ondelete="CASCADE"), nullable=False)
+    score: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
+    reason: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", server_default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CatalogCrawlJob(Base):
+    __tablename__ = "catalog_crawl_jobs"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("catalog_stores.id", ondelete="CASCADE"), nullable=False)
+    category_id: Mapped[int | None] = mapped_column(ForeignKey("catalog_categories.id", ondelete="SET NULL"))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    error_summary: Mapped[str | None] = mapped_column(Text)
+
+
+class CatalogCrawlJobItem(Base):
+    __tablename__ = "catalog_crawl_job_items"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    crawl_job_id: Mapped[int] = mapped_column(ForeignKey("catalog_crawl_jobs.id", ondelete="CASCADE"), nullable=False)
+    external_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    last_error: Mapped[str | None] = mapped_column(Text)
+
+
+class CatalogAIEnrichmentJob(Base):
+    __tablename__ = "catalog_ai_enrichment_jobs"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("catalog_products.id", ondelete="CASCADE"), nullable=False)
+    stage: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+Index("ix_catalog_categories_parent_id", CatalogCategory.parent_id)
+Index("ix_catalog_categories_lft_rgt", CatalogCategory.lft, CatalogCategory.rgt)
+Index("ix_catalog_brands_normalized_name", CatalogBrand.normalized_name)
+Index("ix_catalog_stores_is_active", CatalogStore.is_active)
+Index("ix_catalog_stores_crawl_priority", CatalogStore.crawl_priority)
+Index("ix_catalog_products_category_brand", CatalogProduct.category_id, CatalogProduct.brand_id)
+Index("ix_catalog_products_status", CatalogProduct.status)
+Index("ix_catalog_store_products_store_id", CatalogStoreProduct.store_id)
+Index("ix_catalog_store_products_product_id", CatalogStoreProduct.product_id)
+Index("ix_catalog_store_products_last_seen_at", CatalogStoreProduct.last_seen_at)
+Index("ix_catalog_offers_store_product_scraped", CatalogOffer.store_product_id, CatalogOffer.scraped_at.desc())
+Index("ix_catalog_offers_valid_stock_price", CatalogOffer.is_valid, CatalogOffer.in_stock, CatalogOffer.price_amount)
+Index("ix_catalog_offers_scraped_at", CatalogOffer.scraped_at)
+Index("ix_catalog_price_history_offer_captured", CatalogPriceHistory.offer_id, CatalogPriceHistory.captured_at.desc())
+Index("ix_catalog_price_history_captured_at", CatalogPriceHistory.captured_at)
+Index("ix_catalog_product_search_min_price", CatalogProductSearch.min_price)
+Index("ix_catalog_product_search_max_price", CatalogProductSearch.max_price)
+Index("ix_catalog_product_search_store_count", CatalogProductSearch.store_count)
+Index("ix_catalog_product_embeddings_model", CatalogProductEmbedding.model_name, CatalogProductEmbedding.model_version)
+Index("ix_catalog_duplicate_status_score", CatalogDuplicateCandidate.status, CatalogDuplicateCandidate.score.desc())
+Index("ix_catalog_ai_jobs_status_stage", CatalogAIEnrichmentJob.status, CatalogAIEnrichmentJob.stage)
+Index("ix_catalog_ai_jobs_product_id", CatalogAIEnrichmentJob.product_id)
+Index("ix_catalog_crawl_jobs_store_started", CatalogCrawlJob.store_id, CatalogCrawlJob.started_at.desc())
+Index("ix_catalog_crawl_job_items_job_status", CatalogCrawlJobItem.crawl_job_id, CatalogCrawlJobItem.status)
+
+# Postgres-specific indexes to create in migrations:
+# - lower(normalized_title) gin_trgm_ops
+# - GIN on attributes/specs
+# - GIN on product_search.tsv
+# - IVFFLAT on product_embeddings.embedding
