@@ -11,13 +11,15 @@ class Settings(BaseSettings):
     environment: Literal["local", "staging", "production"] = "local"
     log_level: str = "INFO"
 
-    database_url: str = Field(default="postgresql+asyncpg://postgres:postgres@db:5432/scraper")
-    redis_url: str = Field(default="redis://redis:6379/0")
+    database_url: str = Field(default="postgresql+asyncpg://postgres:postgres@localhost:5432/scraper")
+    redis_url: str = Field(default="redis://localhost:6379/0")
 
-    celery_broker_url: str = Field(default="redis://redis:6379/1")
-    celery_result_backend: str = Field(default="redis://redis:6379/2")
+    celery_broker_url: str = Field(default="redis://localhost:6379/1")
+    celery_result_backend: str = Field(default="redis://localhost:6379/2")
 
     default_timeout_seconds: float = 20.0
+    http_verify_ssl: bool = True
+    http_ca_bundle: str | None = None
     request_concurrency: int = 20
     max_retries: int = 5
     crawl_interval_minutes: int = 360
@@ -33,7 +35,7 @@ class Settings(BaseSettings):
     )
     proxies: list[str] = Field(default_factory=list)
 
-    example_store_base_url: HttpUrl = "https://example-store.uz"
+    example_store_base_url: HttpUrl = "https://example.com"
     example_store_category_paths: list[str] = Field(default_factory=lambda: ["/phones", "/laptops"])
 
 

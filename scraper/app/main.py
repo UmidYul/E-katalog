@@ -22,6 +22,9 @@ async def run() -> None:
     for task in pending:
         task.cancel()
 
+    if scraper_task in done:
+        await scraper_task
+
     if stop_task in done:
         logger.info("shutdown_signal_received")
         scraper_task.cancel()

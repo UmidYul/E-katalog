@@ -1,0 +1,84 @@
+offer_id,updated_at,price,old_price,availability,link,product_id,product_title,shop_id,shop_name
+28,2026-02-18 18:21:21.093189+00:00,19342000.00,28000000.00,unknown,https://uzum.uz/ru/product/1983388,104,"IPhone 17 Pro/Pro Max,256/512/17 Pro Max 256  по цене 17 Pro /Apple/IMEI-пройден",4,Example Store UZ
+30,2026-02-18 18:18:22.409308+00:00,4499000.00,11071000.00,unknown,https://uzum.uz/ru/product/2066222,106,"Ударопрочный смартфон HONOR X9d 5G, телефон с NFC, 8/12/256 GB, 6.79”, батарея 8300 мАч",4,Example Store UZ
+83,2026-02-18 18:15:05.181940+00:00,14890000.00,14890000.00,unknown,https://uzum.uz/ru/product/2307627,159,"Ноутбук ASUS TUF F16, i7-14650HX, 16GB DDR5, 512GB SSD, RTX 5060 8GB, 165Hz",4,Example Store UZ
+82,2026-02-18 18:15:05.181940+00:00,4590000.00,4590000.00,unknown,https://uzum.uz/ru/product/2304255,158,"Ноутбук HP 15-fd0133wm, i3-N305, 8 ГБ DDR4, 256 ГБ SSD, 15.6"" FHD, Win11",4,Example Store UZ
+81,2026-02-18 18:15:05.181940+00:00,3220000.00,6000000.00,unknown,https://uzum.uz/ru/product/2279241,157,"Ноутбук KEETAB INTEL N4505 8GB DDR4 256GB 15,6 FHD IPS SILVER  ENG/RU",4,Example Store UZ
+80,2026-02-18 18:15:05.181940+00:00,2880000.00,6000000.00,unknown,https://uzum.uz/ru/product/2278995,156,"Ноутбук KEETAB NKSHC AMD 3020E 8GB DDR4 256GB SSD M.2 15,6 FHD IPS GREY ENG/RU",4,Example Store UZ
+79,2026-02-18 18:15:05.181940+00:00,9999000.00,9999000.00,unknown,https://uzum.uz/ru/product/2270301,155,"Ноутбук Nitro V15 ANV15-52 15.6""/i5-13420H/16/512/RTX 5050",4,Example Store UZ
+78,2026-02-18 18:15:05.181940+00:00,5799000.00,10000000.00,unknown,https://uzum.uz/ru/product/2250699,154,Ноутбук Asus Expertbook Core 5 210H 15.6 FHD IPS RAM 8 GB DDR5 / 512GB SSD,4,Example Store UZ
+77,2026-02-18 18:15:05.181940+00:00,6999900.00,10000000.00,unknown,https://uzum.uz/ru/product/2225479,153,"Ноутбук Acer Lite,Intel Core i7-1355U, RAM 16 GB DDR5, SSD 512 GB, 16″ Full HD IPS",4,Example Store UZ
+76,2026-02-18 18:15:05.181940+00:00,5790000.00,5790000.00,unknown,https://uzum.uz/ru/product/2189054,152,"Lenovo IdeaPad Slim 3 (i5-13420H / 8GB / 512GB SSD / 15.6"" FHD IPS / Wi-Fi 6 /Arctic Grey)",4,Example Store UZ
+75,2026-02-18 18:15:05.181940+00:00,5399000.00,6550000.00,unknown,https://uzum.uz/ru/product/2163698,151,"Ноутбук HP AMD Ryzen 5-7520U, DDR5 8GB/512GB FHD IPS 15.6 Win 11, Office",4,Example Store UZ
+74,2026-02-18 18:15:05.181940+00:00,13999990.00,24000000.00,unknown,https://uzum.uz/ru/product/2133057,150,"Ноутбук Lenovo Legion,Intel Core i7-13650HX, RAM 24 GB DDR5, SSD 1 TB, 15.6″ Full HD IPS",4,Example Store UZ
+73,2026-02-18 18:15:05.181940+00:00,3400000.00,3400000.00,unknown,https://uzum.uz/ru/product/2126884,149,Ноутбук Asus Vivobook E410 N4500 4/128Gb eMMS(+M2 Slot) 14.0” NumPad in TouchPad,4,Example Store UZ
+72,2026-02-18 18:15:05.181940+00:00,2545000.00,3000000.00,unknown,https://uzum.uz/ru/product/2123646,148,"Lunix 15.6 ноутбук для офисной работы windows 10pro 256 ГБ ssd, 12 ГБ оперативной памяти",4,Example Store UZ
+71,2026-02-18 18:15:05.181940+00:00,2999000.00,5999000.00,unknown,https://uzum.uz/ru/product/2104167,147,"Ноутбук для офиса, дома, учебы и работы, установлен ​​Windows",4,Example Store UZ
+70,2026-02-18 18:15:05.181940+00:00,5999990.00,9900000.00,unknown,https://uzum.uz/ru/product/2091017,146,"Ноутбук Acer Aspire Lite 16, Intel Core i5-1334U (16"" WUXGA IPS) 8GB DDR5, SSD 512GB",4,Example Store UZ
+69,2026-02-18 18:15:05.181940+00:00,4164000.00,5000000.00,unknown,https://uzum.uz/ru/product/2083629,145,Ноутбук HP 255 G10 AMD Ryzen 3-7320U/ DDR5 8GB/ SSD 256GB/ FullHD 15.6/ Windows 11,4,Example Store UZ
+68,2026-02-18 18:15:05.181940+00:00,7357480.00,9650000.00,unknown,https://uzum.uz/ru/product/2021435,144,"Ноутбук HP 15-fd0499nia, Intel Core i5-1334U, DDR4 16ГБ, 512ГБ SSD, 15.6"" FHD, Windows 11",4,Example Store UZ
+67,2026-02-18 18:15:05.181940+00:00,9199900.00,17000000.00,unknown,https://uzum.uz/ru/product/2014714,143,"Ноутбук HP Victus 15 R7-7445HS, 16GB DDR5, 512GB SSD 15.6"" FHD IPS 144 Hz, RTX 3050 6GB",4,Example Store UZ
+66,2026-02-18 18:15:05.181940+00:00,4199000.00,6500000.00,unknown,https://uzum.uz/ru/product/2005404,142,"Ноутбук 15.6"", Intel Celeron N5095, RAM 16 ГБ, SSD 512 ГБ",4,Example Store UZ
+65,2026-02-18 18:15:05.181940+00:00,2060000.00,3500000.00,unknown,https://uzum.uz/ru/product/2000757,141,Ноутбук SN140PZN4,4,Example Store UZ
+64,2026-02-18 18:15:05.181940+00:00,5599990.00,12000000.00,unknown,https://uzum.uz/ru/product/2000488,140,Ноутбук Asus Expertbook Ryzen 5 7535HS 15.6 FHD IPS RAM8GB DDR5 /512GB SSD ,4,Example Store UZ
+63,2026-02-18 18:15:05.181940+00:00,3879990.00,6000000.00,unknown,https://uzum.uz/ru/product/1981285,139,"Ноутбук HP AMD ATHLON 7120 DDR5 8GB 256GB 15.6"" FHD SILVER WINDOWS 11",4,Example Store UZ
+62,2026-02-18 18:15:05.181940+00:00,9199900.00,16000000.00,unknown,https://uzum.uz/ru/product/1977920,138,"Ноутбук Gigabyte A16, Intel Core I5-13420H, 16.0 FHD IPS RTX 4050 / 6 GB RAM 16 GB/ 512 GB",4,Example Store UZ
+61,2026-02-18 18:15:05.181940+00:00,6499990.00,9000000.00,unknown,https://uzum.uz/ru/product/1962857,137,"Ноутбук HP Probook 455 G10, Ryzen 5 7530U, 15.6"" FHD IPS, 12GB, SSD 512GB, Fingerprint",4,Example Store UZ
+60,2026-02-18 18:15:05.181940+00:00,2190000.00,5000000.00,unknown,https://uzum.uz/ru/product/1913299,136,Ноутбук Adreamer LeoBook 13.3 2.5K UHD,4,Example Store UZ
+59,2026-02-18 18:15:05.181940+00:00,5499900.00,8000000.00,unknown,https://uzum.uz/ru/product/1785078,135,"Ноутбук Lenovo V15 G4, Intel Core I5-13420H, (15.6"" FHD IPS) 8GB RAM, SSD 256GB, Iron Gray",4,Example Store UZ
+58,2026-02-18 18:15:05.181940+00:00,1999000.00,2999000.00,unknown,https://uzum.uz/ru/product/1694031,134,"Ноутбук iTech для офиса, дома, учебы и работы, с установленной Windows",4,Example Store UZ
+57,2026-02-18 18:15:05.181940+00:00,4299000.00,7500000.00,unknown,https://uzum.uz/ru/product/1635282,133,"Ноутбук 15.6, Intel Celeron N5095, RAM 16 ГБ, SSD 512 ГБ",4,Example Store UZ
+56,2026-02-18 18:15:05.181940+00:00,4169000.00,5600000.00,unknown,https://uzum.uz/ru/product/1604628,132,"Ноутбук HP Core i3-1315U, DDR4 4GB, SSD 256GB, 15,6"" FHD + Windows 11 Pro, Backlit",4,Example Store UZ
+55,2026-02-18 18:15:05.181940+00:00,5833000.00,9800000.00,unknown,https://uzum.uz/ru/product/1588100,131,"Ноутбук Acer Gadget Core i5-12450H, DDR4 16GB, SSD 512GB, QHD 2K, 14"", Windows 11",4,Example Store UZ
+54,2026-02-18 18:15:05.181940+00:00,8499900.00,20000000.00,unknown,https://uzum.uz/ru/product/1582305,130,Ноутбук HP Victus Intel Core I5-13420H 15.6 FHD IPS 144Hz RTX 3050/6GB RAM8GB/512GB SSD,4,Example Store UZ
+53,2026-02-18 18:15:05.181940+00:00,3297000.00,4500000.00,unknown,https://uzum.uz/ru/product/1529603,129,"Ноутбук HP 250 G9 N4500U,4GB RAM,256GB SSD,15.6 +Windows 11 Pro+Мышка+Коврик в подарок",4,Example Store UZ
+52,2026-02-18 18:15:05.181940+00:00,3957480.00,4850000.00,unknown,https://uzum.uz/ru/product/1459364,128,"Ноутбук Lenovo V15 G2 IJL, Intel Celeron N4500, DDR4 8GB, 256GB SSD, 15.6"" FHD TN, Win11",4,Example Store UZ
+51,2026-02-18 18:15:05.181940+00:00,3499000.00,9000000.00,unknown,https://uzum.uz/ru/product/1380021,127,"Ноутбук HP 15.6” N4120, 8ГБ DDR4, 256ГБ SSD, Windows 11 + Office 365, мышка в подарок",4,Example Store UZ
+50,2026-02-18 18:15:05.181940+00:00,3880000.00,5000000.00,unknown,https://uzum.uz/ru/product/1362691,126,"Ноутбук Lenovo V15 N4500/DDR4 8GB/SSD 256GB/15.6""FHD+WINDOWS и офисные программы",4,Example Store UZ
+49,2026-02-18 18:15:05.181940+00:00,6099000.00,7100000.00,unknown,https://uzum.uz/ru/product/1342214,125,"Ноутбук Acer Gadget Etbook  i5-12450H, DDR4 16ГБ/ 512ГБ, UHD, IPS 14""QHD Подсветка+мышка",4,Example Store UZ
+48,2026-02-18 18:15:05.181940+00:00,4999000.00,8000000.00,unknown,https://uzum.uz/ru/product/1279858,124,"Ноутбук HP ryzen 5 7520U 8/512, Microsoft Office, Windows серый, Ful HD 15.6",4,Example Store UZ
+47,2026-02-18 18:15:05.181940+00:00,4699000.00,6500000.00,unknown,https://uzum.uz/ru/product/1253027,123,"Ноутбук HP  Athlon 7120U, SSD 512GB, 8GB DDR5, 15.6"" FHD + Windows и офисные программы",4,Example Store UZ
+46,2026-02-18 18:15:05.181940+00:00,4965000.00,9000000.00,unknown,https://uzum.uz/ru/product/1221087,122,"Ноутбук Acer aspire 3, core i3 - 1215U, 8 Гб RAM - 512 Nvme GB SSD",4,Example Store UZ
+45,2026-02-18 18:15:05.181940+00:00,3788000.00,4400000.00,unknown,https://uzum.uz/ru/product/1220102,121,Ноутбук Acer Aspire Lite Celeron N4500/ DDR4 8GB/ SSD 256GB/ 15.6 FHD IPS/ Windows 11,4,Example Store UZ
+44,2026-02-18 18:15:05.181940+00:00,2999000.00,5999000.00,unknown,https://uzum.uz/ru/product/1206951,120,"Ноутбук для офиса, дома, учебы и работы, установлен ​​Windows",4,Example Store UZ
+43,2026-02-18 18:15:05.181940+00:00,5399000.00,7000000.00,unknown,https://uzum.uz/ru/product/1158134,119,"Ноутбук HP AMD Ryzen 5-7520U, DDR5 8GB, SSD 512GB, Windows 11 Pro, 15.6 IPS, Windows 11",4,Example Store UZ
+42,2026-02-18 18:15:05.181940+00:00,3999000.00,5600000.00,unknown,https://uzum.uz/ru/product/1050059,118,"Ноутбук HP 250 G9 N4500U/8GB RAM/256GB SSD/15.6 +Windows 11 Pro, Мышка+Коврик",4,Example Store UZ
+41,2026-02-18 18:15:05.181940+00:00,653400.00,749000.00,unknown,https://uzum.uz/ru/product/2374309,117,"IPhone 17 Pro Max Mini смартфон, большой экран, мощная батарея",4,Example Store UZ
+40,2026-02-18 18:15:05.181940+00:00,2299000.00,2600000.00,unknown,https://uzum.uz/ru/product/2365031,116,Смартфон Infinix HOT 60 Pro 8GB + 256GB c подарком,4,Example Store UZ
+39,2026-02-18 18:15:05.181940+00:00,1849000.00,2800000.00,unknown,https://uzum.uz/ru/product/2345196,115,"Смартфон Samsung Galaxy A16, Super AMOLED, 90Hz 6.7"", 50 MP",4,Example Store UZ
+38,2026-02-18 18:15:05.181940+00:00,2199000.00,3329000.00,unknown,https://uzum.uz/ru/product/2319559,114,"Игровой смартфон Nubia Neo 3 5G 8/256GB, Unisoc T8300, 6.8"" 120Hz, 6000mAh, NFC Dual SIM",4,Example Store UZ
+37,2026-02-18 18:15:05.181940+00:00,2429000.00,3643500.00,unknown,https://uzum.uz/ru/product/2288895,113,"Смартфон Xiaomi Redmi Note 15, 8+256ГБ, 108МП камера, 6.77"" FHD+ AMOLED дисплей, 6000 мА/ч",4,Example Store UZ
+36,2026-02-18 18:15:05.181940+00:00,1918000.00,1918000.00,unknown,https://uzum.uz/ru/product/2284200,112,"Смартфон Samsung Galaxy A16 4/128ГБ,2 SIM-карт, AMOLED, камера 50 Мп, 1 год гарантия",4,Example Store UZ
+35,2026-02-18 18:15:05.181940+00:00,2699000.00,10000000.00,unknown,https://uzum.uz/ru/product/2265918,111,"Смартфон Xiaomi Redmi Note 15, 8+256ГБ, 108МП камера, 6.77"" FHD+ AMOLED дисплей, 6000 мА/ч",4,Example Store UZ
+34,2026-02-18 18:15:05.181940+00:00,1979000.00,4900000.00,unknown,https://uzum.uz/ru/product/2227710,110,Cмартфон T 888 tinstar 17 Pro max 8 ГБ + 256 ГБ,4,Example Store UZ
+33,2026-02-18 18:15:05.181940+00:00,699000.00,699000.00,unknown,https://uzum.uz/ru/product/2213273,109,Смартфон сенсорный мини-телефон для маленьких детей небольшой размер Android 12  2/16 Гб,4,Example Store UZ
+32,2026-02-18 18:15:05.181940+00:00,8699990.00,9699990.00,unknown,https://uzum.uz/ru/product/2148652,108,"Смартфон Apple iPhone 13 Pro Max 128 ГБ, зарегистрированный SIM+E-SIM",4,Example Store UZ
+31,2026-02-18 18:15:05.181940+00:00,799000.00,1200000.00,unknown,https://uzum.uz/ru/product/2104678,107,"Смартфон Ajib I1 4/64 Gb, заряд на  4500 Mah, экран 90Hz",4,Example Store UZ
+29,2026-02-18 18:15:05.181940+00:00,1450800.00,2711000.00,unknown,https://uzum.uz/ru/product/2006963,105,"Смартфон Tecno Spark 30C, SONY IMX582 48МП, 5000мАч 18вт, IP54, 6.67"" 120ГЦ, Андроид 14",4,Example Store UZ
+27,2026-02-18 18:15:05.181940+00:00,2799000.00,10000000.00,unknown,https://uzum.uz/ru/product/1978967,103,"Смартфон Samsung Galaxy A17 4G 8/256GB, 6.7"" AMOLED 90 Гц, 50 МП, 5000 мА·ч, 25",4,Example Store UZ
+26,2026-02-18 18:15:05.181940+00:00,2299000.00,4000000.00,unknown,https://uzum.uz/ru/product/1970501,102,"Смартфон Samsung Galaxy A17 4G, 6/128, 8/256, sAMOLED 90 Hz, 50 Mp, 5000 mA/h, 25 Вт",4,Example Store UZ
+25,2026-02-18 18:15:05.181940+00:00,1309000.00,3085000.00,unknown,https://uzum.uz/ru/product/1963899,101,"Cмартфон с ИИ HONOR X5c/X5c Plus, 4/64/128 GB, 6.74’, аккумулятор 5260 мАч",4,Example Store UZ
+24,2026-02-18 18:15:05.181940+00:00,3799000.00,10000000.00,unknown,https://uzum.uz/ru/product/1955625,100,"Смартфон Honor X9C, AMOLED 120 Гц, 108 МП камера, 12/256 ГБ 6600 мА/ч, 66 Вт",4,Example Store UZ
+23,2026-02-18 18:15:05.181940+00:00,1627000.00,10000000.00,unknown,https://uzum.uz/ru/product/1939114,99,"Смартфон Xiaomi Redmi 15C, 6.9"" IPS 120 Гц, 50 Мп, батарея 6000 мАч, 33 Вт",4,Example Store UZ
+22,2026-02-18 18:15:05.181940+00:00,1622000.00,2433000.00,unknown,https://uzum.uz/ru/product/1919113,98,"Смартфон Redmi 15C, 8/256Гб, 6000мА/ч, 6.9""дисплей, 50МП камера с ИИ, 33Вт быстрая зарядка",4,Example Store UZ
+21,2026-02-18 18:15:05.181940+00:00,979000.00,1529000.00,unknown,https://uzum.uz/ru/product/1917913,97,"Смартфон Tecno Spark Go 2, экран 6.67″ 120 Гц, батарея 5000 mAh, Android 15",4,Example Store UZ
+20,2026-02-18 18:15:05.181940+00:00,1479000.00,2200000.00,unknown,https://uzum.uz/ru/product/1904243,96,"Смартфон Samsung Galaxy A07, 4/128GB, 6/128GB, 50 MP, 90Hz, 2 SIM, 5000 mAh",4,Example Store UZ
+19,2026-02-18 18:15:05.181940+00:00,1749000.00,2623500.00,unknown,https://uzum.uz/ru/product/1868672,95,"Смартфон Redmi 15, 8/256 ГБ, 6.9"" IPS-дисплей, 50 Мп, 7000 мАч, быстрая зарядка 33 Вт",4,Example Store UZ
+18,2026-02-18 18:15:05.181940+00:00,1459000.00,5900000.00,unknown,https://uzum.uz/ru/product/1823608,94,"Jiaenova S25 Ultra — телефон 8ГБ/256ГБ, Titanium Black",4,Example Store UZ
+17,2026-02-18 18:15:05.181940+00:00,999000.00,1498500.00,unknown,https://uzum.uz/ru/product/1797693,93,"Смартфон Xiaomi Poco C71, 4+128ГБ, 32 Мп двойная камера, 6,88"" дисплей",4,Example Store UZ
+16,2026-02-18 18:15:05.181940+00:00,1669000.00,2503500.00,unknown,https://uzum.uz/ru/product/1768915,92,"Смартфон Honor X6c, 6+256ГБ, с 120Гц экраном, 5300мАч батарея, 35Вт зарядка, 50МП камера",4,Example Store UZ
+15,2026-02-18 18:15:05.181940+00:00,3198320.00,4200000.00,unknown,https://uzum.uz/ru/product/1757896,91,"Смартфон Honor 400 Lite 5G 8/256 Гб, 108 МП улучшенная камера с ИИ, AMOLED дисплей 5230мАч",4,Example Store UZ
+14,2026-02-18 18:15:05.181940+00:00,3279000.00,3279000.00,unknown,https://uzum.uz/ru/product/1654787,90,"Смартфон Infinix Note 50 Pro, 12+12/256Гб, AMOLED 144Гц, 5200mAч 90W, беспроводная зарядка",4,Example Store UZ
+13,2026-02-18 18:15:05.181940+00:00,1199000.00,1799000.00,unknown,https://uzum.uz/ru/product/1623619,89,"Смартфон Xiaomi Redmi A5 4GB 128GB, дисплей 6.88"" IPS, 32mp камера, 5200 mAh",4,Example Store UZ
+12,2026-02-18 18:15:05.181940+00:00,2107000.00,3160500.00,unknown,https://uzum.uz/ru/product/1580240,88,"Смартфон Honor X7c, 16 ГБ (8+8) + 512ГБ, водонепроницаемый, мощная батарея, долго работает",4,Example Store UZ
+11,2026-02-18 18:15:05.181940+00:00,2329000.00,3493500.00,unknown,https://uzum.uz/ru/product/1580227,87,"Смартфон Honor X8c 8GB 512GB, 6.7"", AMOLED, 108 МП, 5000 мАч",4,Example Store UZ
+10,2026-02-18 18:15:05.181940+00:00,14473000.00,24867000.00,unknown,https://uzum.uz/ru/product/1508302,86,"Смартфон Samsung Galaxy S25 ultra, гарантия 1 год",4,Example Store UZ
+9,2026-02-18 18:15:05.181940+00:00,4499000.00,9000000.00,unknown,https://uzum.uz/ru/product/1468971,85,"Смартфон Xiaomi Poco X7 Pro 5G, 50MP, 6000 мА/ч, NFC",4,Example Store UZ
+8,2026-02-18 18:15:05.181940+00:00,1999000.00,2999000.00,unknown,https://uzum.uz/ru/product/1436848,84,"Смартфон Redmi Note 14, 8 GB+256 GB, AMOLED 120Hz дисплей, 6.67""",4,Example Store UZ
+7,2026-02-18 18:13:06.515447+00:00,9999000.00,20000000.00,unknown,https://uzum.uz/ru/product/2391879,81,Ноутбук Apple MacBook Air 13 M2/16/256GB,4,Example Store UZ
+6,2026-02-18 18:13:06.515447+00:00,4299000.00,6200000.00,unknown,https://uzum.uz/ru/product/2164565,67,"Ноутбук HP 15-FC0171nia, 8/256 ГБ, 15,6"" Full HD, AMD Athlon™ Silver 7120U, гарантия 1 год",4,Example Store UZ
+5,2026-02-18 18:13:06.515447+00:00,2999000.00,4444000.00,unknown,https://uzum.uz/ru/product/1915830,51,"Ноутбук HP 250 G9 Celeron N4500/ DDR4 4GB/ SSD 256GB/ 15.6"" FullHD/ Windows 11 Pro",4,Example Store UZ
+4,2026-02-18 18:13:06.515447+00:00,3599000.00,7000000.00,unknown,https://uzum.uz/ru/product/1221083,40,"Ноутбук Lenovo N4500, DDR 8 ГБ, SSD 256 ГБ, 15.6 FHD",4,Example Store UZ
+3,2026-02-18 18:13:06.515447+00:00,4398220.00,7000000.00,unknown,https://uzum.uz/ru/product/2328896,27,"Смартфон HONOR X9d 5G 6.79"" AMOLED, Snapdragon 6 Gen 4, 108 Мп, 8300 мА·ч",4,Example Store UZ
+2,2026-02-18 18:13:06.515447+00:00,1199000.00,10000000.00,unknown,https://uzum.uz/ru/product/1939132,11,"Смартфон Xiaomi Redmi A5, 6.88 IPS дисплей, 32 Мп камера, батарея 5200 мАч",4,Example Store UZ
+1,2026-02-18 18:13:06.515447+00:00,1890000.00,2835000.00,unknown,https://uzum.uz/ru/product/1353031,1,"Смартфон Samsung Galaxy A16 8+256GB, Super AMOLED, 90Hz 6.7"", 50 MP",4,Example Store UZ

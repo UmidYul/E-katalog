@@ -21,10 +21,14 @@ class ScraperService:
         shop = await self._product_service.get_or_create_shop(name=self._parser.shop_name, url=self._parser.shop_url)
 
         for category_url in category_urls:
-            links = await self._parser.discover_product_links(category_url)
+            try:
+                links = await self._parser.discover_product_links(category_url)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("category_discovery_failed", category_url=category_url, error=str(exc))
+                continue
             logger.info("category_links_discovered", category_url=category_url, count=len(links))
-            tasks = [self._parse_and_upsert(link, shop) for link in links]
-            await asyncio.gather(*tasks)
+            for link in links:
+                await self._parse_and_upsert(link, shop)
 
         await self._session.commit()
 

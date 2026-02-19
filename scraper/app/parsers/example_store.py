@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import asyncio
+import json
+import re
 from decimal import Decimal
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from playwright.async_api import async_playwright
 from selectolax.parser import HTMLParser
 
 from app.core.config import settings
+from app.core.logging import logger
 from app.parsers.base import ParseResult, ParsedProduct, StoreParser
 from app.utils.http_client import ScraperHTTPClient
+from app.utils.specs import normalize_product_specs
 
 
 class ExampleStoreParser(StoreParser):
@@ -17,24 +22,106 @@ class ExampleStoreParser(StoreParser):
 
     def __init__(self) -> None:
         self._http = ScraperHTTPClient(rate_limit_per_second=8)
+        self._product_cache: dict[str, ParsedProduct] = {}
 
     async def discover_product_links(self, category_url: str) -> list[str]:
         response = await self._http.get(category_url)
-        tree = HTMLParser(response.text)
-        links: set[str] = set()
-        for node in tree.css("a.product-card"):
-            href = node.attributes.get("href")
-            if href:
-                links.add(urljoin(category_url, href))
+        links = self._extract_product_links(response.text, category_url)
+        if links:
+            logger.info("category_links_extracted_http", category_url=category_url, count=len(links))
+            return links
+
+        # Dynamic storefront fallback when initial HTML has no product anchors.
+        graphql_product_ids: set[str] = set()
+
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(headless=settings.playwright_headless)
+            context = await browser.new_context()
+            page = await context.new_page()
+            graphql_responses = []
+            page.on(
+                "response",
+                lambda resp: graphql_responses.append(resp)
+                if "graphql.uzum.uz" in resp.url and resp.request.method == "POST"
+                else None,
+            )
+
+            await page.goto(category_url, wait_until="domcontentloaded")
+            for _ in range(8):
+                await page.mouse.wheel(0, 4000)
+                await asyncio.sleep(0.45)
+            await asyncio.sleep(2.0)
+            for graphql_response in graphql_responses:
+                try:
+                    body = await graphql_response.text()
+                except Exception:  # noqa: BLE001
+                    continue
+                graphql_product_ids.update(re.findall(r'"productId"\s*:\s*(\d+)', body))
+                self._cache_products_from_graphql(body, category_url)
+
+            html = await page.content()
+            dom_hrefs = await page.eval_on_selector_all("a[href]", "els => els.map(el => el.getAttribute('href'))")
+            state_chunks = await page.evaluate(
+                """() => {
+                    const keys = ['__NUXT__', '__INITIAL_STATE__', '__APOLLO_STATE__', '__NEXT_DATA__'];
+                    const out = [];
+                    for (const key of keys) {
+                        const value = window[key];
+                        if (!value) continue;
+                        try { out.push(JSON.stringify(value)); } catch (e) {}
+                    }
+                    return out;
+                }"""
+            )
+            await context.close()
+            await browser.close()
+
+        links = set(self._extract_product_links(html, category_url))
+        from_state = 0
+        for chunk in state_chunks:
+            extracted = self._extract_product_links(chunk, category_url)
+            from_state += len(extracted)
+            links.update(extracted)
+        from_dom = 0
+        for href in dom_hrefs:
+            if href and "/product/" in href:
+                normalized = self._normalize_product_url(urljoin(category_url, href))
+                if normalized:
+                    links.add(normalized)
+                    from_dom += 1
+        parsed = urlparse(category_url)
+        locale = "ru"
+        locale_match = re.search(r"/(ru|uz)(/|$)", parsed.path)
+        if locale_match:
+            locale = locale_match.group(1)
+        for product_id in graphql_product_ids:
+            product_url = f"{parsed.scheme}://{parsed.netloc}/{locale}/product/{product_id}"
+            links.add(product_url)
+        await self._enrich_cached_products_from_api(parsed.scheme, parsed.netloc, locale, graphql_product_ids)
+        logger.info(
+            "category_links_extracted_playwright",
+            category_url=category_url,
+            count=len(links),
+            dom_anchors=len(dom_hrefs),
+            dom_product_hrefs=from_dom,
+            state_candidates=from_state,
+            graphql_product_ids=len(graphql_product_ids),
+            graphql_responses=len(graphql_responses),
+        )
         return sorted(links)
 
     async def parse_product(self, product_url: str) -> ParsedProduct:
+        cached = self._product_cache.get(product_url)
+        if cached:
+            return cached
+
         # Playwright for dynamic content fallback
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(headless=settings.playwright_headless)
-            context = await browser.new_context(user_agent=settings.user_agents[0])
+            context = await browser.new_context()
             page = await context.new_page()
-            await page.goto(product_url, wait_until="networkidle")
+            await page.goto(product_url, wait_until="domcontentloaded", timeout=60000)
+            await page.wait_for_timeout(1200)
             html = await page.content()
             await context.close()
             await browser.close()
@@ -82,3 +169,220 @@ class ExampleStoreParser(StoreParser):
     def _parse_price(raw: str) -> Decimal:
         filtered = "".join(ch for ch in raw if ch.isdigit() or ch in {".", ","}).replace(",", ".")
         return Decimal(filtered)
+
+    @staticmethod
+    def _extract_product_links(html: str, base_url: str) -> list[str]:
+        links: set[str] = set()
+        tree = HTMLParser(html)
+        for node in tree.css("a[href]"):
+            href = node.attributes.get("href")
+            if href and "/product/" in href:
+                normalized = ExampleStoreParser._normalize_product_url(urljoin(base_url, href))
+                if normalized:
+                    links.add(normalized)
+
+        normalized = html.replace("\\/", "/")
+
+        patterns = [
+            r"(https?://[^\"'\\s<>]*/product/[^\"'\\s<>]+)",
+            r"(/(?:ru|uz)/product/[^\"'\\s<>]+)",
+            r"(/product/[^\"'\\s<>]+)",
+        ]
+        for pattern in patterns:
+            for href in re.findall(pattern, normalized):
+                normalized_href = ExampleStoreParser._normalize_product_url(urljoin(base_url, href))
+                if normalized_href:
+                    links.add(normalized_href)
+        return sorted(links)
+
+    @staticmethod
+    def _normalize_product_url(url: str) -> str | None:
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return None
+        path = parsed.path.rstrip("/")
+        if "/product/" not in path:
+            return None
+
+        # Valid variants:
+        # - /ru/product/1234567
+        # - /product/some-slug-1234567
+        if re.fullmatch(r"/(?:ru|uz)/product/\d+", path):
+            return f"{parsed.scheme}://{parsed.netloc}{path}"
+        slug_match = re.fullmatch(r"/product/[\w\-]+-(\d+)", path)
+        if slug_match:
+            product_id = slug_match.group(1)
+            return f"{parsed.scheme}://{parsed.netloc}/ru/product/{product_id}"
+        return None
+
+    def _cache_products_from_graphql(self, body: str, category_url: str) -> None:
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            return
+
+        items = payload.get("data", {}).get("makeSearch", {}).get("items", [])
+        if not isinstance(items, list):
+            return
+
+        parsed_category = urlparse(category_url)
+        locale = "ru"
+        locale_match = re.search(r"/(ru|uz)(/|$)", parsed_category.path)
+        if locale_match:
+            locale = locale_match.group(1)
+
+        for item in items:
+            catalog_card = item.get("catalogCard") if isinstance(item, dict) else None
+            if not isinstance(catalog_card, dict):
+                continue
+
+            product_id = catalog_card.get("productId")
+            title = catalog_card.get("title")
+            min_sell_price = catalog_card.get("minSellPrice")
+            if not product_id or not title or min_sell_price is None:
+                continue
+
+            try:
+                price = Decimal(str(min_sell_price))
+            except Exception:  # noqa: BLE001
+                continue
+
+            old_price_raw = catalog_card.get("minFullPrice")
+            old_price: Decimal | None = None
+            if old_price_raw is not None:
+                try:
+                    old_price = Decimal(str(old_price_raw))
+                except Exception:  # noqa: BLE001
+                    old_price = None
+
+            photos = catalog_card.get("photos") or []
+            images = []
+            if isinstance(photos, list):
+                for photo in photos:
+                    if not isinstance(photo, dict):
+                        continue
+                    high = ((photo.get("link") or {}).get("high")) if isinstance(photo.get("link"), dict) else None
+                    if high:
+                        images.append(high)
+
+            specs: dict[str, str] = {}
+            char_values = catalog_card.get("characteristicValues") or []
+            if isinstance(char_values, list):
+                for entry in char_values:
+                    if not isinstance(entry, dict):
+                        continue
+                    key = entry.get("title")
+                    value = entry.get("value")
+                    if key and value:
+                        specs[str(key)] = str(value)
+            specs = normalize_product_specs(str(title), specs, category_url)
+
+            product_url = f"{parsed_category.scheme}://{parsed_category.netloc}/{locale}/product/{product_id}"
+            self._product_cache[product_url] = ParsedProduct(
+                title=str(title),
+                price=price,
+                old_price=old_price,
+                availability=self._availability_from_catalog_card(catalog_card),
+                images=images,
+                specifications=specs,
+                product_url=product_url,
+                description=None,
+            )
+
+    async def _enrich_cached_products_from_api(
+        self,
+        scheme: str,
+        netloc: str,
+        locale: str,
+        product_ids: set[str],
+    ) -> None:
+        async def enrich(product_id: str) -> None:
+            product_url = f"{scheme}://{netloc}/{locale}/product/{product_id}"
+            cached = self._product_cache.get(product_url)
+            if not cached or cached.specifications:
+                return
+
+            try:
+                response = await self._http.get(f"https://api.uzum.uz/api/v2/product/{product_id}")
+                payload = response.json().get("payload", {}).get("data", {})
+            except Exception:  # noqa: BLE001
+                return
+
+            specs = normalize_product_specs(
+                cached.title,
+                self._extract_specs_from_product_api(payload),
+                extra_text=str(payload.get("description") or ""),
+            )
+            availability = self._availability_from_product_api(payload)
+            if not specs and availability == "unknown":
+                return
+
+            self._product_cache[product_url] = ParsedProduct(
+                title=cached.title,
+                price=cached.price,
+                old_price=cached.old_price,
+                availability=availability if availability != "unknown" else cached.availability,
+                images=cached.images,
+                specifications=specs or cached.specifications,
+                product_url=cached.product_url,
+                description=cached.description,
+            )
+
+        semaphore = asyncio.Semaphore(6)
+
+        async def guarded(product_id: str) -> None:
+            async with semaphore:
+                await enrich(product_id)
+
+        await asyncio.gather(*(guarded(pid) for pid in product_ids))
+
+    @staticmethod
+    def _extract_specs_from_product_api(payload: dict) -> dict[str, str]:
+        specs: dict[str, str] = {}
+
+        characteristics = payload.get("characteristics") or []
+        if isinstance(characteristics, list):
+            for characteristic in characteristics:
+                if not isinstance(characteristic, dict):
+                    continue
+                title = characteristic.get("title")
+                values = characteristic.get("values") or []
+                if not title or not isinstance(values, list):
+                    continue
+                value_titles = [str(v.get("title")) for v in values if isinstance(v, dict) and v.get("title")]
+                if value_titles:
+                    specs[str(title)] = ", ".join(value_titles)
+
+        attributes = payload.get("attributes") or []
+        if isinstance(attributes, list):
+            for attribute in attributes:
+                if not isinstance(attribute, dict):
+                    continue
+                title = attribute.get("title")
+                value = attribute.get("value")
+                if title and value:
+                    specs[str(title)] = str(value)
+
+        return specs
+
+    @staticmethod
+    def _availability_from_catalog_card(catalog_card: dict) -> str:
+        buying_options = catalog_card.get("buyingOptions") or {}
+        if not isinstance(buying_options, dict):
+            return "unknown"
+        delivery_options = buying_options.get("deliveryOptions") or {}
+        if isinstance(delivery_options, dict) and delivery_options.get("stockType"):
+            return "in_stock"
+        return "unknown"
+
+    @staticmethod
+    def _availability_from_product_api(payload: dict) -> str:
+        total_available = payload.get("totalAvailableAmount")
+        try:
+            if total_available is not None and int(total_available) > 0:
+                return "in_stock"
+            if total_available is not None and int(total_available) <= 0:
+                return "out_of_stock"
+        except Exception:  # noqa: BLE001
+            return "unknown"
+        return "unknown"

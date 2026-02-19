@@ -22,10 +22,21 @@ services:
 
   app:
     build:
-      context: .
-      dockerfile: docker/Dockerfile
+      context: ..
+      dockerfile: scraper/docker/Dockerfile
     env_file:
-      - .env
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@db:5432/scraper}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/2}
+      HTTP_VERIFY_SSL: ${HTTP_VERIFY_SSL:-true}
+      HTTP_CA_BUNDLE: ${HTTP_CA_BUNDLE:-}
+    volumes:
+      - ./certs:/srv/scraper/certs:ro
+      - ./exports:/srv/scraper/exports
     depends_on:
       db:
         condition: service_healthy
@@ -35,10 +46,21 @@ services:
 
   worker:
     build:
-      context: .
-      dockerfile: docker/Dockerfile
+      context: ..
+      dockerfile: scraper/docker/Dockerfile
     env_file:
-      - .env
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@db:5432/scraper}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/2}
+      HTTP_VERIFY_SSL: ${HTTP_VERIFY_SSL:-true}
+      HTTP_CA_BUNDLE: ${HTTP_CA_BUNDLE:-}
+    volumes:
+      - ./certs:/srv/scraper/certs:ro
+      - ./exports:/srv/scraper/exports
     depends_on:
       db:
         condition: service_healthy
@@ -48,10 +70,21 @@ services:
 
   beat:
     build:
-      context: .
-      dockerfile: docker/Dockerfile
+      context: ..
+      dockerfile: scraper/docker/Dockerfile
     env_file:
-      - .env
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@db:5432/scraper}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/2}
+      HTTP_VERIFY_SSL: ${HTTP_VERIFY_SSL:-true}
+      HTTP_CA_BUNDLE: ${HTTP_CA_BUNDLE:-}
+    volumes:
+      - ./certs:/srv/scraper/certs:ro
+      - ./exports:/srv/scraper/exports
     depends_on:
       redis:
         condition: service_started

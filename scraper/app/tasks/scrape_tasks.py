@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+from urllib.parse import urljoin
 
 from app.core.config import settings
 from app.core.logging import configure_logging, logger
+from app.db.init_db import init_db
 from app.db.session import AsyncSessionLocal
 from app.parsers.example_store import ExampleStoreParser
 from app.services.scraper_service import ScraperService
@@ -25,13 +27,18 @@ def enqueue_example_store_scrape(self) -> str:
 
 
 async def _run_example_store_scrape() -> str:
+    await init_db()
+
     parser = ExampleStoreParser()
-    category_urls = [f"{settings.example_store_base_url}{path}" for path in settings.example_store_category_paths]
+    base_url = str(settings.example_store_base_url).rstrip("/") + "/"
+    category_urls = [urljoin(base_url, path.lstrip("/")) for path in settings.example_store_category_paths]
 
-    async with AsyncSessionLocal() as session:
-        service = ScraperService(session, parser, max_concurrency=settings.request_concurrency)
-        await service.scrape_categories(category_urls)
+    try:
+        async with AsyncSessionLocal() as session:
+            service = ScraperService(session, parser, max_concurrency=min(settings.request_concurrency, 4))
+            await service.scrape_categories(category_urls)
+    finally:
+        await parser.aclose()
 
-    await parser.aclose()
     logger.info("scrape_completed", store=parser.shop_name, categories=len(category_urls))
     return "ok"
