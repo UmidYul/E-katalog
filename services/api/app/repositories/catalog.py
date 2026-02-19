@@ -59,13 +59,29 @@ class CatalogRepository:
         row = (await self.session.execute(stmt)).one_or_none()
         if row is None:
             return None
+        specs = row.specs if isinstance(row.specs, dict) else {}
+        if not specs:
+            fallback_specs_stmt = text(
+                """
+                select metadata->'specifications' as specs
+                from catalog_store_products
+                where canonical_product_id = :product_id
+                  and jsonb_typeof(metadata->'specifications') = 'object'
+                  and (metadata->'specifications') <> '{}'::jsonb
+                order by (select count(*) from jsonb_each(metadata->'specifications')) desc, last_seen_at desc
+                limit 1
+                """
+            )
+            fallback_row = (await self.session.execute(fallback_specs_stmt, {"product_id": product_id})).one_or_none()
+            if fallback_row and isinstance(fallback_row.specs, dict):
+                specs = fallback_row.specs
         return {
             "id": row.id,
             "title": row.normalized_title,
             "category": row.category_name,
             "brand": row.brand_name,
             "main_image": row.main_image,
-            "specs": row.specs if isinstance(row.specs, dict) else {},
+            "specs": specs,
         }
 
     async def get_offers_by_store(

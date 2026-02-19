@@ -16,7 +16,13 @@ from app.platform.models import (
     CatalogStore,
     CatalogStoreProduct,
 )
-from app.platform.services.normalization import normalize_seller_name, normalize_specs, normalize_title
+from app.platform.services.normalization import (
+    build_canonical_title,
+    enrich_specs_from_title,
+    normalize_seller_name,
+    normalize_specs,
+    normalize_title,
+)
 from app.celery_app import celery_app
 
 
@@ -96,14 +102,16 @@ async def _normalize_product_batch(limit: int) -> dict:
         for store_product, product, store in rows:
             title_source = store_product.title_clean or store_product.title_raw
             normalized = normalize_title(title_source)
+            canonical_title = build_canonical_title(title_source)
             metadata = store_product.metadata_json if isinstance(store_product.metadata_json, dict) else {}
             specs = normalize_specs(metadata.get("specifications") or metadata.get("specs"))
+            specs = enrich_specs_from_title(title_source, specs)
             category_id = product.category_id if product and product.category_id else 1
             brand_id = product.brand_id if product else None
 
             canonical = await _resolve_or_create_canonical(
                 session,
-                title=normalized,
+                title=canonical_title,
                 category_id=category_id,
                 brand_id=brand_id,
                 specs=specs,

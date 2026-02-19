@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     http_verify_ssl: bool = True
     http_ca_bundle: str | None = None
     request_concurrency: int = 20
+    scrape_product_limit: int = 0
     max_retries: int = 5
     task_retry_backoff_max_seconds: int = 600
     crawl_interval_minutes: int = 360
@@ -30,6 +31,9 @@ class Settings(BaseSettings):
     ai_spec_enrichment_enabled: bool = False
     ai_spec_strict_mode: bool = False
     ai_spec_max_attempts: int = 2
+    ai_request_max_retries: int = 4
+    ai_request_base_delay_seconds: float = 1.5
+    ai_request_max_delay_seconds: float = 20.0
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
 
@@ -47,7 +51,12 @@ class Settings(BaseSettings):
     )
     proxies: list[str] = Field(default_factory=list)
 
-    scraper_provider: Literal["texnomart", "example"] = "texnomart"
+    scraper_provider: Literal["mediapark", "texnomart", "example"] = "texnomart"
+
+    mediapark_base_url: HttpUrl = "https://mediapark.uz"
+    mediapark_category_paths: list[str] = Field(
+        default_factory=lambda: ["/products/category/smartfony-po-brendu-660/smartfony-apple-iphone-211"]
+    )
 
     texnomart_base_url: HttpUrl = "https://texnomart.uz"
     texnomart_category_paths: list[str] = Field(default_factory=lambda: ["/ru/katalog/smartfony"])

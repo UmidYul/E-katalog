@@ -27,9 +27,8 @@ SYNC_SQL_STATEMENTS = [
         is_active = true
     """,
     """
-    insert into catalog_canonical_products (id, normalized_title, main_image, category_id, brand_id, specs)
+    insert into catalog_canonical_products (normalized_title, main_image, category_id, brand_id, specs)
     select
-      p.id,
       lower(p.title),
       (
         select nullif(o2.images->>0, '')
@@ -40,17 +39,50 @@ SYNC_SQL_STATEMENTS = [
       ),
       1,
       null,
-      '{}'::jsonb
+      coalesce(
+        (
+          select o3.specifications
+          from offers o3
+          where o3.product_id = p.id
+            and coalesce(o3.specifications, '{}'::jsonb) <> '{}'::jsonb
+          order by (select count(*) from jsonb_each(o3.specifications)) desc, o3.id desc
+          limit 1
+        ),
+        '{}'::jsonb
+      )
     from products p
-    on conflict (id) do update
-    set normalized_title = excluded.normalized_title,
-        main_image = coalesce(excluded.main_image, catalog_canonical_products.main_image)
+    on conflict do nothing
+    """,
+    """
+    update catalog_canonical_products cp
+    set specs = src.specs
+    from (
+      select
+        lower(p.title) as normalized_title,
+        coalesce(
+          (
+            select o3.specifications
+            from offers o3
+            where o3.product_id = p.id
+              and coalesce(o3.specifications, '{}'::jsonb) <> '{}'::jsonb
+            order by (select count(*) from jsonb_each(o3.specifications)) desc, o3.id desc
+            limit 1
+          ),
+          '{}'::jsonb
+        ) as specs
+      from products p
+    ) src
+    where cp.category_id = 1
+      and cp.brand_id is null
+      and lower(cp.normalized_title) = src.normalized_title
+      and coalesce(cp.specs, '{}'::jsonb) = '{}'::jsonb
+      and src.specs <> '{}'::jsonb
     """,
     """
     insert into catalog_products (id, canonical_product_id, category_id, brand_id, normalized_title, attributes, specs, status)
     select
       p.id,
-      p.id,
+      cp.id,
       1,
       null,
       lower(p.title),
@@ -58,6 +90,10 @@ SYNC_SQL_STATEMENTS = [
       '{}'::jsonb,
       'active'
     from products p
+    join catalog_canonical_products cp
+      on cp.category_id = 1
+     and cp.brand_id is null
+     and lower(cp.normalized_title) = lower(p.title)
     on conflict (id) do update
     set canonical_product_id = excluded.canonical_product_id,
         normalized_title = excluded.normalized_title,
@@ -71,7 +107,7 @@ SYNC_SQL_STATEMENTS = [
     select
       o.id,
       o.shop_id,
-      p.id,
+      cp.id,
       o.product_id,
       o.id::text,
       o.link,
@@ -86,6 +122,10 @@ SYNC_SQL_STATEMENTS = [
       now()
     from offers o
     join products p on p.id = o.product_id
+    join catalog_canonical_products cp
+      on cp.category_id = 1
+     and cp.brand_id is null
+     and lower(cp.normalized_title) = lower(p.title)
     on conflict (id) do update
     set store_id = excluded.store_id,
         canonical_product_id = excluded.canonical_product_id,
@@ -117,7 +157,7 @@ SYNC_SQL_STATEMENTS = [
     )
     select
       o.id,
-      p.id,
+      cp.id,
       o.shop_id,
       cs.id,
       o.id,
@@ -133,6 +173,10 @@ SYNC_SQL_STATEMENTS = [
       true
     from offers o
     join products p on p.id = o.product_id
+    join catalog_canonical_products cp
+      on cp.category_id = 1
+     and cp.brand_id is null
+     and lower(cp.normalized_title) = lower(p.title)
     join shops s on s.id = o.shop_id
     left join catalog_sellers cs
       on cs.store_id = o.shop_id

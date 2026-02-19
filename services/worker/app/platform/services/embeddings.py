@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 from typing import Iterable
 
 
 def simple_embedding(text: str, dim: int = 768) -> list[float]:
-    seed = abs(hash(text))
+    # Python's built-in hash is process-randomized, so use a stable digest.
+    digest = hashlib.sha256(text.encode("utf-8")).digest()
+    seed = int.from_bytes(digest[:8], "big", signed=False)
     return [((seed + i * 31) % 1000) / 1000 for i in range(dim)]
 
 

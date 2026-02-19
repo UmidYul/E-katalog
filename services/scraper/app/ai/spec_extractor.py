@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import random
 import re
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
 
 from app.core.config import settings
+from app.core.logging import logger
 
 ALLOWED_KEYS = {
     "device_type",
@@ -80,6 +85,29 @@ def _sanitize(payload: dict[str, Any]) -> dict[str, str]:
     return out
 
 
+def _retry_after_seconds(value: str | None) -> float | None:
+    if not value:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+
+    try:
+        seconds = float(stripped)
+        return max(0.0, seconds)
+    except ValueError:
+        pass
+
+    try:
+        dt = parsedate_to_datetime(stripped)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        delta = (dt - datetime.now(UTC)).total_seconds()
+        return max(0.0, delta)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 async def ai_extract_specs(
     title: str,
     description: str | None,
@@ -113,12 +141,54 @@ async def ai_extract_specs(
         "temperature": 0,
     }
 
-    try:
-        async with httpx.AsyncClient(timeout=25) as client:
-            resp = await client.post("https://api.openai.com/v1/responses", headers=headers, json=body)
-            resp.raise_for_status()
-            data = resp.json()
-    except Exception:  # noqa: BLE001
+    attempts = max(1, settings.ai_request_max_retries)
+    data: dict[str, Any] | None = None
+
+    async with httpx.AsyncClient(timeout=25) as client:
+        for attempt in range(attempts):
+            try:
+                resp = await client.post("https://api.openai.com/v1/responses", headers=headers, json=body)
+            except Exception as exc:  # noqa: BLE001
+                if attempt >= attempts - 1:
+                    logger.warning("ai_specs_request_failed", error=str(exc), attempt=attempt + 1)
+                    return {}
+                delay = min(
+                    settings.ai_request_max_delay_seconds,
+                    settings.ai_request_base_delay_seconds * (2**attempt),
+                ) + random.uniform(0, 0.35)
+                await asyncio.sleep(delay)
+                continue
+
+            if resp.status_code < 400:
+                data = resp.json()
+                break
+
+            if resp.status_code == 429 or resp.status_code >= 500:
+                if attempt >= attempts - 1:
+                    logger.warning(
+                        "ai_specs_request_rate_limited",
+                        status_code=resp.status_code,
+                        attempt=attempt + 1,
+                        body=resp.text[:400],
+                    )
+                    return {}
+                retry_after = _retry_after_seconds(resp.headers.get("Retry-After"))
+                backoff = min(
+                    settings.ai_request_max_delay_seconds,
+                    settings.ai_request_base_delay_seconds * (2**attempt),
+                )
+                delay = (retry_after if retry_after is not None else backoff) + random.uniform(0, 0.35)
+                await asyncio.sleep(delay)
+                continue
+
+            logger.warning(
+                "ai_specs_request_bad_status",
+                status_code=resp.status_code,
+                body=resp.text[:400],
+            )
+            return {}
+
+    if data is None:
         return {}
 
     text_out = ""

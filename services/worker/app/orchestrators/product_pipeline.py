@@ -10,10 +10,10 @@ from app.tasks.reindex_tasks import enqueue_reindex_batches
 
 def run_product_pipeline() -> str:
     workflow = chain(
-        enqueue_dirty_products.s(),
-        enqueue_dedupe_batches.s(),
-        enqueue_embedding_batches.s(),
-        enqueue_reindex_batches.s(),
+        enqueue_dirty_products.si(),
+        enqueue_dedupe_batches.si(),
+        enqueue_embedding_batches.si(),
+        enqueue_reindex_batches.si(),
     )
     result = workflow.apply_async()
     return result.id

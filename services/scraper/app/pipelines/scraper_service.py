@@ -21,8 +21,12 @@ class ScraperService:
 
     async def scrape_categories(self, category_urls: list[str]) -> None:
         shop = await self._product_service.get_or_create_shop(name=self._parser.shop_name, url=self._parser.shop_url)
+        product_limit = max(0, settings.scrape_product_limit)
+        processed = 0
 
         for category_url in category_urls:
+            if product_limit and processed >= product_limit:
+                break
             try:
                 links = await self._parser.discover_product_links(category_url)
             except UpstreamRateLimitedError as exc:
@@ -37,6 +41,9 @@ class ScraperService:
             except Exception as exc:  # noqa: BLE001
                 logger.error("category_discovery_failed", category_url=category_url, error=str(exc))
                 continue
+            if product_limit:
+                remaining = max(0, product_limit - processed)
+                links = links[:remaining]
             logger.info("category_links_discovered", category_url=category_url, count=len(links))
             for link in links:
                 if await self._parse_and_upsert(link, shop):
@@ -49,6 +56,9 @@ class ScraperService:
                     await asyncio.sleep(settings.rate_limit_cooldown_seconds)
                     await self._session.commit()
                     return
+                processed += 1
+                if product_limit and processed >= product_limit:
+                    break
 
         await self._session.commit()
 
