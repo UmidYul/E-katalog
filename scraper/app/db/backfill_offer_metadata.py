@@ -8,10 +8,11 @@ from typing import Any
 import httpx
 from sqlalchemy import select
 
+from app.ai.spec_extractor import ai_extract_specs
 from app.core.config import settings
 from app.db.models import Offer, Product
 from app.db.session import AsyncSessionLocal
-from app.utils.specs import normalize_product_specs
+from app.utils.specs import missing_required_fields, needs_ai_enrichment, normalize_product_specs
 
 
 def parse_args() -> argparse.Namespace:
@@ -21,6 +22,12 @@ def parse_args() -> argparse.Namespace:
         "--only-missing",
         action="store_true",
         help="Update only offers where availability='unknown' or specifications is empty.",
+    )
+    parser.add_argument(
+        "--progress-every",
+        type=int,
+        default=100,
+        help="Print progress every N scanned offers.",
     )
     return parser.parse_args()
 
@@ -76,7 +83,7 @@ def extract_availability(payload: dict[str, Any]) -> str:
     return "unknown"
 
 
-async def backfill(limit: int, only_missing: bool) -> None:
+async def backfill(limit: int, only_missing: bool, progress_every: int) -> None:
     verify: bool | str = settings.http_verify_ssl
     if settings.http_ca_bundle:
         verify = settings.http_ca_bundle
@@ -99,8 +106,13 @@ async def backfill(limit: int, only_missing: bool) -> None:
         updated = 0
         skipped = 0
 
+        batch_size = 50
+        since_commit = 0
+
         for offer, product_title in rows:
             scanned += 1
+            if progress_every > 0 and scanned % progress_every == 0:
+                print(f"Progress: scanned={scanned}, updated={updated}, skipped={skipped}", flush=True)
 
             if only_missing and offer.availability != "unknown" and bool(offer.specifications):
                 skipped += 1
@@ -126,6 +138,27 @@ async def backfill(limit: int, only_missing: bool) -> None:
                 {**(offer.specifications or {}), **specs},
                 extra_text=str(payload.get("description") or ""),
             )
+            if needs_ai_enrichment(normalized_specs):
+                ai_specs = await ai_extract_specs(
+                    title=product_title or "",
+                    description=str(payload.get("description") or ""),
+                    category_hint=offer.link,
+                )
+                for key, value in ai_specs.items():
+                    normalized_specs.setdefault(key, value)
+            if settings.ai_spec_strict_mode:
+                for _ in range(max(0, settings.ai_spec_max_attempts - 1)):
+                    missing = missing_required_fields(normalized_specs)
+                    if not missing:
+                        break
+                    ai_specs = await ai_extract_specs(
+                        title=product_title or "",
+                        description=str(payload.get("description") or ""),
+                        category_hint=offer.link,
+                        required_keys=missing,
+                    )
+                    for key, value in ai_specs.items():
+                        normalized_specs.setdefault(key, value)
 
             changed = False
             if normalized_specs and normalized_specs != (offer.specifications or {}):
@@ -137,6 +170,11 @@ async def backfill(limit: int, only_missing: bool) -> None:
 
             if changed:
                 updated += 1
+                since_commit += 1
+
+            if since_commit >= batch_size:
+                await session.commit()
+                since_commit = 0
 
         await session.commit()
 
@@ -147,7 +185,10 @@ async def backfill(limit: int, only_missing: bool) -> None:
 
 async def _main() -> None:
     args = parse_args()
-    await backfill(args.limit, args.only_missing)
+    try:
+        await backfill(args.limit, args.only_missing, args.progress_every)
+    except KeyboardInterrupt:
+        print("Interrupted by user (Ctrl+C). Partial progress was committed.")
 
 
 if __name__ == "__main__":

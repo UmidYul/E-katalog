@@ -2,6 +2,11 @@ from __future__ import annotations
 
 import re
 
+REQUIRED_BY_DEVICE: dict[str, list[str]] = {
+    "smartphone": ["cpu", "ram_gb", "storage_gb", "battery_mah", "camera_mp", "display_inches"],
+    "laptop": ["cpu", "ram_gb", "storage_gb", "display_inches"],
+}
+
 
 def normalize_product_specs(
     title: str,
@@ -74,6 +79,26 @@ def normalize_product_specs(
         set_if_missing("network", "4G")
 
     return specs
+
+
+def needs_ai_enrichment(specs: dict[str, str]) -> bool:
+    device = specs.get("device_type")
+    if device not in {"smartphone", "laptop"}:
+        return False
+
+    if device == "smartphone":
+        core = ["ram_gb", "storage_gb", "cpu", "battery_mah", "camera_mp", "display_inches"]
+    else:
+        core = ["ram_gb", "storage_gb", "cpu", "display_inches"]
+
+    present = sum(1 for key in core if specs.get(key))
+    return present < max(2, len(core) // 2)
+
+
+def missing_required_fields(specs: dict[str, str]) -> list[str]:
+    device = specs.get("device_type")
+    required = REQUIRED_BY_DEVICE.get(device or "", [])
+    return [key for key in required if not specs.get(key)]
 
 
 def _map_key(key: str) -> str | None:

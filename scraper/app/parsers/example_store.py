@@ -11,9 +11,10 @@ from selectolax.parser import HTMLParser
 
 from app.core.config import settings
 from app.core.logging import logger
+from app.ai.spec_extractor import ai_extract_specs
 from app.parsers.base import ParseResult, ParsedProduct, StoreParser
 from app.utils.http_client import ScraperHTTPClient
-from app.utils.specs import normalize_product_specs
+from app.utils.specs import missing_required_fields, needs_ai_enrichment, normalize_product_specs
 
 
 class ExampleStoreParser(StoreParser):
@@ -313,6 +314,27 @@ class ExampleStoreParser(StoreParser):
                 self._extract_specs_from_product_api(payload),
                 extra_text=str(payload.get("description") or ""),
             )
+            if needs_ai_enrichment(specs):
+                ai_specs = await ai_extract_specs(
+                    title=cached.title,
+                    description=str(payload.get("description") or ""),
+                    category_hint=locale,
+                )
+                for key, value in ai_specs.items():
+                    specs.setdefault(key, value)
+            if settings.ai_spec_strict_mode:
+                for _ in range(max(0, settings.ai_spec_max_attempts - 1)):
+                    missing = missing_required_fields(specs)
+                    if not missing:
+                        break
+                    ai_specs = await ai_extract_specs(
+                        title=cached.title,
+                        description=str(payload.get("description") or ""),
+                        category_hint=locale,
+                        required_keys=missing,
+                    )
+                    for key, value in ai_specs.items():
+                        specs.setdefault(key, value)
             availability = self._availability_from_product_api(payload)
             if not specs and availability == "unknown":
                 return

@@ -1,5 +1,5 @@
 from celery import Celery
-from celery.schedules import crontab
+from celery.schedules import schedule
 
 from app.core.config import settings
 
@@ -21,9 +21,9 @@ celery_app.conf.update(
     task_track_started=True,
     broker_connection_retry_on_startup=True,
     beat_schedule={
-        "scrape-all-stores-every-6-hours": {
+        "scrape-all-stores-interval": {
             "task": "app.tasks.scrape_tasks.enqueue_example_store_scrape",
-            "schedule": crontab(minute=0, hour="*/6"),
+            "schedule": schedule(run_every=max(1, settings.crawl_interval_minutes) * 60),
         }
     },
 )

@@ -18,9 +18,9 @@ configure_logging(settings.log_level)
     bind=True,
     autoretry_for=(Exception,),
     retry_backoff=True,
-    retry_backoff_max=600,
+    retry_backoff_max=settings.task_retry_backoff_max_seconds,
     retry_jitter=True,
-    max_retries=5,
+    max_retries=settings.max_retries,
 )
 def enqueue_example_store_scrape(self) -> str:
     return asyncio.run(_run_example_store_scrape())
@@ -35,7 +35,7 @@ async def _run_example_store_scrape() -> str:
 
     try:
         async with AsyncSessionLocal() as session:
-            service = ScraperService(session, parser, max_concurrency=min(settings.request_concurrency, 4))
+            service = ScraperService(session, parser, max_concurrency=max(1, settings.request_concurrency))
             await service.scrape_categories(category_urls)
     finally:
         await parser.aclose()

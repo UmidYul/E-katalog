@@ -22,9 +22,15 @@ class Settings(BaseSettings):
     http_ca_bundle: str | None = None
     request_concurrency: int = 20
     max_retries: int = 5
+    task_retry_backoff_max_seconds: int = 600
     crawl_interval_minutes: int = 360
 
     playwright_headless: bool = True
+    ai_spec_enrichment_enabled: bool = False
+    ai_spec_strict_mode: bool = False
+    ai_spec_max_attempts: int = 2
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-4o-mini"
 
     user_agents: list[str] = Field(
         default_factory=lambda: [
