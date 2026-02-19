@@ -19,11 +19,11 @@ export async function generateMetadata({ params }: { params: { slug: string } })
   }
 
   try {
-    const product = await serverGet<{ normalized_title: string }>(`/products/${id}`);
+    const product = await serverGet<{ title: string }>(`/products/${id}`);
     return {
-      title: product.normalized_title,
+      title: product.title,
       openGraph: {
-        title: product.normalized_title,
+        title: product.title,
         url: `${env.appUrl}/product/${params.slug}`
       },
       alternates: { canonical: `${env.appUrl}/product/${params.slug}` }

@@ -15,7 +15,8 @@ const brands = ["Apple", "Samsung", "Xiaomi", "HP", "Lenovo", "Sony"];
 export function HomeClient() {
   const trending = useCatalogProducts({ limit: 6, sort: "popular" });
   const categories = useCategories();
-  const recent = useRecentlyViewedStore((s) => s.items.slice(0, 6));
+  const recentItems = useRecentlyViewedStore((s) => s.items);
+  const recent = recentItems.slice(0, 6);
 
   return (
     <div className="container space-y-12 py-6">

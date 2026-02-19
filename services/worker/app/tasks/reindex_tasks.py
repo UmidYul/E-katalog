@@ -28,17 +28,16 @@ async def _run(limit: int) -> dict:
             text(
                 """
                 insert into catalog_product_search (product_id, tsv, min_price, max_price, store_count, updated_at)
-                select p.id,
-                       to_tsvector('simple', coalesce(p.normalized_title, '')),
+                select cp.id,
+                       to_tsvector('simple', coalesce(cp.normalized_title, '')),
                        min(o.price_amount) as min_price,
                        max(o.price_amount) as max_price,
-                       count(distinct sp.store_id) as store_count,
+                       count(distinct o.store_id) as store_count,
                        now()
-                from catalog_products p
-                left join catalog_store_products sp on sp.product_id = p.id
-                left join catalog_offers o on o.store_product_id = sp.id and o.is_valid = true and o.in_stock = true
-                group by p.id
-                order by p.id
+                from catalog_canonical_products cp
+                left join catalog_offers o on o.canonical_product_id = cp.id and o.is_valid = true and o.in_stock = true
+                group by cp.id
+                order by cp.id
                 limit :limit
                 on conflict (product_id) do update
                   set tsv = excluded.tsv,

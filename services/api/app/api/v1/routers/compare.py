@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.core.rate_limit import enforce_rate_limit
+from app.core.rate_limit import enforce_rate_limit
 from app.api.deps import get_db_session, get_redis
 from app.schemas.catalog import CompareRequest
 from app.core.config import settings
@@ -25,10 +25,10 @@ async def compare_products(payload: CompareRequest, request: Request, db: AsyncS
             raise HTTPException(status_code=404, detail=f"product {product_id} not found")
         products.append(
             {
-                "id": product.id,
-                "normalized_title": product.normalized_title,
-                "attributes": product.attributes,
-                "specs": product.specs,
+                "id": product["id"],
+                "normalized_title": product["title"],
+                "attributes": {},
+                "specs": product["specs"],
             }
         )
     return {"items": products, "request_id": request.state.request_id}

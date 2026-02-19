@@ -13,7 +13,13 @@ export async function generateMetadata({ params }: { params: { slug: string } })
 }
 
 export default async function CategoryPage({ params }: { params: { slug: string } }) {
-  const categories = await serverGet<Array<{ id: number; slug: string; name: string }>>("/categories");
+  let categories: Array<{ id: number; slug: string; name: string }> = [];
+  try {
+    categories = await serverGet<Array<{ id: number; slug: string; name: string }>>("/categories");
+  } catch {
+    notFound();
+  }
+
   const category = categories.find((item) => item.slug === params.slug);
 
   if (!category) {

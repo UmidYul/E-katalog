@@ -35,7 +35,10 @@ export const attachInterceptors = (client: AxiosInstance) => {
     async (error: AxiosError) => {
       const original = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
 
-      if (error.response?.status === 401 && !original?._retry) {
+      const isRefreshCall = Boolean(original?.url?.includes("/auth/refresh"));
+      const isGuestOptionalCall = Boolean(original?.url?.includes("/users/favorites"));
+
+      if (error.response?.status === 401 && !original?._retry && !isRefreshCall && !isGuestOptionalCall) {
         original._retry = true;
 
         if (!isRefreshing) {
@@ -52,9 +55,6 @@ export const attachInterceptors = (client: AxiosInstance) => {
           isRefreshing = false;
           refreshPromise = null;
           authStore.getState().clearSession();
-          if (typeof window !== "undefined") {
-            window.location.href = "/login";
-          }
         }
       }
 

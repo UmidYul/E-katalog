@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Offer, PriceHistory, Product, Shop
@@ -18,8 +19,16 @@ class ProductService:
             return shop
         shop = Shop(name=name, url=url)
         self.session.add(shop)
-        await self.session.flush()
-        return shop
+        try:
+            await self.session.flush()
+            return shop
+        except IntegrityError:
+            await self.session.rollback()
+            result = await self.session.execute(select(Shop).where(Shop.name == name))
+            existing = result.scalar_one_or_none()
+            if existing is None:
+                raise
+            return existing
 
     async def upsert_offer(self, parsed: ParsedProduct, shop: Shop, category_id: int | None = None) -> Offer:
         result = await self.session.execute(select(Offer).where(Offer.shop_id == shop.id, Offer.link == parsed.product_url))

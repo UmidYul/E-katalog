@@ -15,12 +15,12 @@ export function ProductCard({ product, favorite, onFavorite }: { product: Produc
   return (
     <motion.div layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
       <Card className="group overflow-hidden">
-        <div className="relative aspect-[4/3] bg-muted/40">
+        <div className="relative aspect-[4/3] bg-muted/30 p-2">
           <Image
             src={product.image_url ?? "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&w=1200&q=80"}
             alt={product.normalized_title}
             fill
-            className="object-cover transition-transform duration-300 group-hover:scale-105"
+            className="object-contain transition-transform duration-300 group-hover:scale-[1.02]"
             sizes="(max-width: 768px) 100vw, 30vw"
           />
           <Button

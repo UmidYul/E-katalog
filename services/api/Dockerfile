@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir -r /srv/requirements.txt
 COPY services /srv/services
 COPY shared /srv/shared
 COPY migrations /srv/migrations
+COPY scripts /srv/scripts
 
 WORKDIR /srv/services/api
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

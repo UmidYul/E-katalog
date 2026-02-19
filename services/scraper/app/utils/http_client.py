@@ -3,6 +3,7 @@ from collections.abc import Mapping
 import httpx
 
 from app.core.config import settings
+from app.core.errors import UpstreamRateLimitedError
 from app.utils.proxy import ProxyRotator
 from app.utils.rate_limiter import AsyncRateLimiter
 from app.utils.user_agent import UserAgentRotator
@@ -31,6 +32,9 @@ class ScraperHTTPClient:
         proxy = self._proxy_rotator.next_proxy()
         client = self._get_client(proxy)
         response = await client.get(url, headers=merged_headers)
+        body_lower = response.text.lower()
+        if response.status_code in {403, 429, 503} and ("error 1015" in body_lower or "you are being rate limited" in body_lower):
+            raise UpstreamRateLimitedError(f"upstream blocked requests for {url} (cloudflare 1015)")
         response.raise_for_status()
         return response
 

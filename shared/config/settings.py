@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     api_port: int = 8000
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000", "http://localhost:5173"])
     cursor_secret: str = "change-me-cursor-secret"
+    admin_seed_enabled: bool = True
+    admin_email: str = "admin@zinc.local"
+    admin_password: str = "Admin12345"
+    admin_full_name: str = "Platform Admin"
+    admin_role: Literal["admin", "moderator"] = "admin"
 
     user_agents: list[str] = Field(
         default_factory=lambda: [

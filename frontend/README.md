@@ -59,14 +59,44 @@ npm run start
 - Auth strategy: cookie-based JWT (no localStorage token), refresh flow in `lib/api/interceptors.ts`.
 - Backend auth endpoints used by frontend: `/api/v1/auth/{register,login,refresh,logout,me}`.
 - Favorites endpoints used by frontend: `/api/v1/users/favorites`.
-- Protected routes: `middleware.ts` for `/profile`, `/favorites`, `/recently-viewed`.
+- Protected routes: `middleware.ts` for `/profile`, `/favorites`, `/recently-viewed`, `/dashboard`.
 - Server state: TanStack Query; UI/local state: Zustand.
 - Catalog filters are URL-synced and support dynamic attribute filters from `/filters`.
 - PDP injects Product schema.org structured data.
+- Admin panel uses the same UI Kit primitives from `components/ui`.
+- Admin background operations are integrated with backend tasks:
+  - `POST /api/v1/admin/scrape/run`
+  - `POST /api/v1/admin/embeddings/rebuild`
+  - `POST /api/v1/admin/dedupe/run`
+  - `POST /api/v1/admin/reindex/products`
 
 ## Main Paths
 
 - `app/(public)` home/catalog/category/product
 - `app/(auth)` login/register
 - `app/(account)` profile/favorites/recently-viewed
+- `app/(dashboard)` admin panel:
+  - `/dashboard`
+  - `/dashboard/users`
+  - `/dashboard/products`
+  - `/dashboard/categories`
+  - `/dashboard/orders`
+  - `/dashboard/analytics`
+  - `/dashboard/settings`
+
+## Admin UI Kit
+
+Reusable primitives under `components/ui`:
+
+- Buttons, inputs, select, textarea, checkbox, switch, radio-group
+- Modal, drawer, tabs, accordion
+- Card, badge, table, avatar, tooltip, skeleton
+
+Reusable admin building blocks:
+
+- `components/layout/*` dashboard shell, sidebar, topbar, footer
+- `components/tables/admin-table.tsx`
+- `components/forms/search-form.tsx`
+- `components/charts/mini-bar-chart.tsx`
+- `components/modals/confirm-modal.tsx`
 

@@ -15,21 +15,33 @@ export type ProductListItem = {
 
 export type ProductDetail = {
   id: number;
-  normalized_title: string;
-  attributes: Record<string, string | number | boolean>;
+  title: string;
+  category: string;
+  brand?: string | null;
+  main_image?: string | null;
   specs: Record<string, string | number | boolean>;
-  status: string;
+  offers_by_store: OffersByStore[];
 };
 
 export type ProductOffer = {
   id: number;
+  seller_id?: number | null;
+  seller_name: string;
   price_amount: number;
   old_price_amount?: number | null;
   in_stock: boolean;
   currency: string;
+  delivery_days?: number | null;
   scraped_at: string;
-  store: { id: number; name: string };
-  external_url: string;
+  link: string;
+};
+
+export type OffersByStore = {
+  store_id: number;
+  store: string;
+  minimal_price: number;
+  offers_count: number;
+  offers: ProductOffer[];
 };
 
 export type Paginated<T> = {

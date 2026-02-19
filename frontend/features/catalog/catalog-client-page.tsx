@@ -19,8 +19,11 @@ const toQueryString = (filters: FilterState & { cursor?: string }) => {
   if (filters.sort) params.set("sort", filters.sort);
   if (filters.minPrice !== undefined) params.set("min_price", String(filters.minPrice));
   if (filters.maxPrice !== undefined) params.set("max_price", String(filters.maxPrice));
+  if (filters.maxDeliveryDays !== undefined) params.set("max_delivery_days", String(filters.maxDeliveryDays));
   if (filters.cursor) params.set("cursor", filters.cursor);
   filters.brands.forEach((brand) => params.append("brand", String(brand)));
+  filters.stores.forEach((store) => params.append("store", String(store)));
+  filters.sellers.forEach((seller) => params.append("seller", String(seller)));
   Object.entries(filters.attrs ?? {}).forEach(([key, values]) => {
     values.forEach((value) => params.append("attr", `${key}:${value}`));
   });
@@ -37,7 +40,10 @@ export function CatalogClientPage({ categoryId }: { categoryId?: number }) {
     sort: fromUrl.sort,
     minPrice: fromUrl.min_price,
     maxPrice: fromUrl.max_price,
+    maxDeliveryDays: fromUrl.max_delivery_days,
     brands: fromUrl.brand_id ?? [],
+    stores: fromUrl.store_id ?? [],
+    sellers: fromUrl.seller_id ?? [],
     attrs: fromUrl.attrs
   };
 
@@ -49,7 +55,10 @@ export function CatalogClientPage({ categoryId }: { categoryId?: number }) {
       sort: debounced.sort,
       min_price: debounced.minPrice,
       max_price: debounced.maxPrice,
+      max_delivery_days: debounced.maxDeliveryDays,
       brand_id: debounced.brands,
+      store_id: debounced.stores,
+      seller_id: debounced.sellers,
       attrs: debounced.attrs,
       category_id: categoryId,
       cursor: fromUrl.cursor,
@@ -75,7 +84,14 @@ export function CatalogClientPage({ categoryId }: { categoryId?: number }) {
     <div className="container space-y-6 py-6">
       <SectionHeading title="Catalog" description="Compare prices across trusted stores in seconds." />
       <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
-        <CatalogFilters brands={brands.data ?? []} dynamicAttributes={dynamicFilters.data?.attributes} value={filters} onChange={onFiltersChange} />
+        <CatalogFilters
+          brands={brands.data ?? []}
+          stores={dynamicFilters.data?.stores}
+          sellers={dynamicFilters.data?.sellers}
+          dynamicAttributes={dynamicFilters.data?.attributes}
+          value={filters}
+          onChange={onFiltersChange}
+        />
 
         <div className="space-y-4">
           <CatalogGrid loading={products.isLoading} items={products.data?.items ?? []} />

@@ -1,7 +1,7 @@
 "use client";
 
 import { SlidersHorizontal } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,24 +13,35 @@ export type FilterState = {
   q?: string;
   sort: "relevance" | "price_asc" | "price_desc" | "popular" | "newest";
   brands: number[];
+  stores: number[];
+  sellers: number[];
   minPrice?: number;
   maxPrice?: number;
+  maxDeliveryDays?: number;
   attrs?: Record<string, string[]>;
 };
 
 export function CatalogFilters({
   brands,
+  stores,
+  sellers,
   dynamicAttributes,
   value,
   onChange
 }: {
   brands: Array<{ id: number; name: string }>;
+  stores?: Array<{ id: number; name: string }>;
+  sellers?: Array<{ id: number; name: string }>;
   dynamicAttributes?: Array<{ key: string; label: string; values: Array<{ value: string; label: string; count?: number }> }>;
   value: FilterState;
   onChange: (v: FilterState) => void;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [priceRange, setPriceRange] = useState<[number, number]>([value.minPrice ?? 0, value.maxPrice ?? 100_000_000]);
+
+  useEffect(() => {
+    setPriceRange([value.minPrice ?? 0, value.maxPrice ?? 100_000_000]);
+  }, [value.maxPrice, value.minPrice]);
 
   const priceLabel = useMemo(() => `${priceRange[0].toLocaleString()} - ${priceRange[1].toLocaleString()} UZS`, [priceRange]);
 
@@ -92,6 +103,66 @@ export function CatalogFilters({
             );
           })}
         </div>
+      </div>
+
+      {!!stores?.length && (
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Stores</label>
+          <div className="space-y-2">
+            {stores.map((store) => {
+              const active = value.stores.includes(store.id);
+              return (
+                <label key={store.id} className="flex cursor-pointer items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={active}
+                    onChange={() => {
+                      const next = active ? value.stores.filter((id) => id !== store.id) : [...value.stores, store.id];
+                      onChange({ ...value, stores: next });
+                    }}
+                  />
+                  {store.name}
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {!!sellers?.length && (
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Sellers</label>
+          <div className="space-y-2">
+            {sellers.slice(0, 20).map((seller) => {
+              const active = value.sellers.includes(seller.id);
+              return (
+                <label key={seller.id} className="flex cursor-pointer items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={active}
+                    onChange={() => {
+                      const next = active ? value.sellers.filter((id) => id !== seller.id) : [...value.sellers, seller.id];
+                      onChange({ ...value, sellers: next });
+                    }}
+                  />
+                  {seller.name}
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Max Delivery Days</label>
+        <Input
+          type="number"
+          min={0}
+          max={30}
+          value={value.maxDeliveryDays ?? ""}
+          onChange={(e) => onChange({ ...value, maxDeliveryDays: e.target.value ? Number(e.target.value) : undefined })}
+          placeholder="Any"
+        />
       </div>
 
       {dynamicAttributes?.map((attribute) => (

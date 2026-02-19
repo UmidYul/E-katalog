@@ -5,7 +5,7 @@ from contextlib import suppress
 
 from app.core.config import settings
 from app.core.logging import configure_logging, logger
-from app.tasks.scrape_tasks import _run_example_store_scrape
+from app.tasks.scrape_tasks import _run_marketplace_scrape
 from app.utils.shutdown import ShutdownSignal
 
 
@@ -14,7 +14,7 @@ async def run() -> None:
     shutdown = ShutdownSignal()
     shutdown.install()
 
-    scraper_task = asyncio.create_task(_run_example_store_scrape())
+    scraper_task = asyncio.create_task(_run_marketplace_scrape())
     stop_task = asyncio.create_task(shutdown.wait())
 
     done, pending = await asyncio.wait({scraper_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)

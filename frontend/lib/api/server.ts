@@ -1,8 +1,12 @@
 import { env } from "@/config/env";
 
 export async function serverGet<T>(path: string, init?: RequestInit): Promise<T> {
+  const timeoutSignal = AbortSignal.timeout(5000);
+  const mergedSignal = init?.signal ?? timeoutSignal;
+
   const response = await fetch(`${env.apiInternalOrigin}${env.apiPrefix}${path}`, {
     ...init,
+    signal: mergedSignal,
     cache: "no-store",
     headers: {
       "Content-Type": "application/json",

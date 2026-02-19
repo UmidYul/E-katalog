@@ -5,7 +5,6 @@ from sqlalchemy import text
 from app.core.logging import configure_logging, logger
 from app.db.base import Base
 from app.db.models import *  # noqa: F401,F403
-from app.platform.models import *  # noqa: F401,F403
 from app.db.session import engine
 
 

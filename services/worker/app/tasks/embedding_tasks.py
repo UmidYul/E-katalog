@@ -8,7 +8,7 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.core.logging import logger
 from app.db.session import AsyncSessionLocal
-from app.platform.models import CatalogAIEnrichmentJob, CatalogProduct, CatalogProductEmbedding
+from app.platform.models import CatalogAIEnrichmentJob, CatalogCanonicalProduct
 from app.platform.services.embeddings import simple_embedding
 from app.celery_app import celery_app
 
@@ -29,25 +29,13 @@ async def _run(limit: int) -> dict:
     async with AsyncSessionLocal() as session:
         products = (
             await session.execute(
-                select(CatalogProduct).where(CatalogProduct.status == "active").order_by(CatalogProduct.updated_at.asc()).limit(limit)
+                select(CatalogCanonicalProduct).order_by(CatalogCanonicalProduct.updated_at.asc()).limit(limit)
             )
         ).scalars().all()
 
         for product in products:
             embedding = simple_embedding(product.normalized_title)
-            entity = await session.get(CatalogProductEmbedding, product.id)
-            if entity is None:
-                entity = CatalogProductEmbedding(
-                    product_id=product.id,
-                    embedding=embedding,
-                    model_name="hash-embedding",
-                    model_version="v1",
-                )
-            else:
-                entity.embedding = embedding
-                entity.model_name = "hash-embedding"
-                entity.model_version = "v1"
-            session.add(entity)
+            product.embedding = embedding
             session.add(
                 CatalogAIEnrichmentJob(
                     product_id=product.id,

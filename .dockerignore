@@ -1,0 +1,43 @@
+# VCS and local metadata
+.git
+.gitignore
+
+# Python caches
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.pytest_cache
+.mypy_cache
+
+# Node caches
+**/node_modules
+**/.next
+**/.nuxt
+
+# Virtual envs
+.venv
+venv
+
+# OS/editor
+.DS_Store
+.vscode
+.idea
+
+# Runtime artifacts
+*.log
+*.tmp
+*.swp
+
+# Large/generated data
+infra/monitoring/grafana
+
+# Keep required project sources for Dockerfiles
+!requirements.txt
+!services/**
+!shared/**
+!migrations/**
+!scripts/**
+!frontend/**
+!infra/nginx/**
+!infra/postgres/**

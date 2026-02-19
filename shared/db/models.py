@@ -65,6 +65,8 @@ class CatalogStore(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     slug: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False, default="generic", server_default="generic")
+    base_url: Mapped[str | None] = mapped_column(Text)
     country_code: Mapped[str] = mapped_column(String(2), nullable=False, default="UZ", server_default="UZ")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
     trust_score: Mapped[Decimal] = mapped_column(Numeric(3, 2), nullable=False, default=0, server_default="0")
@@ -75,10 +77,45 @@ class CatalogStore(Base):
     )
 
 
+class CatalogCanonicalProduct(Base):
+    __tablename__ = "catalog_canonical_products"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    normalized_title: Mapped[str] = mapped_column(String(512), nullable=False)
+    main_image: Mapped[str | None] = mapped_column(Text)
+    category_id: Mapped[int] = mapped_column(ForeignKey("catalog_categories.id", ondelete="RESTRICT"), nullable=False)
+    brand_id: Mapped[int | None] = mapped_column(ForeignKey("catalog_brands.id", ondelete="SET NULL"))
+    specs: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CatalogScrapeSource(Base):
+    __tablename__ = "catalog_scrape_sources"
+    __table_args__ = (UniqueConstraint("store_id", "url", name="uq_catalog_scrape_sources_store_url"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("catalog_stores.id", ondelete="CASCADE"), nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False, default="category", server_default="category")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100, server_default="100")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class CatalogProduct(Base):
     __tablename__ = "catalog_products"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    canonical_product_id: Mapped[int | None] = mapped_column(
+        ForeignKey("catalog_canonical_products.id", ondelete="SET NULL"), nullable=True
+    )
     category_id: Mapped[int] = mapped_column(ForeignKey("catalog_categories.id", ondelete="RESTRICT"), nullable=False)
     brand_id: Mapped[int | None] = mapped_column(ForeignKey("catalog_brands.id", ondelete="SET NULL"))
     canonical_sku: Mapped[str | None] = mapped_column(String(128))
@@ -121,6 +158,9 @@ class CatalogStoreProduct(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("catalog_stores.id", ondelete="CASCADE"), nullable=False)
+    canonical_product_id: Mapped[int | None] = mapped_column(
+        ForeignKey("catalog_canonical_products.id", ondelete="SET NULL"), nullable=True
+    )
     product_id: Mapped[int | None] = mapped_column(ForeignKey("catalog_products.id", ondelete="SET NULL"))
     external_id: Mapped[str] = mapped_column(String(255), nullable=False)
     external_url: Mapped[str] = mapped_column(Text, nullable=False)
@@ -139,6 +179,22 @@ class CatalogStoreProduct(Base):
     )
 
 
+class CatalogSeller(Base):
+    __tablename__ = "catalog_sellers"
+    __table_args__ = (UniqueConstraint("store_id", "normalized_name", name="uq_catalog_sellers_store_normalized_name"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("catalog_stores.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    normalized_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    rating: Mapped[Decimal | None] = mapped_column(Numeric(3, 2))
+    metadata_json: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default=dict, server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class CatalogOffer(Base):
     __tablename__ = "catalog_offers"
     __table_args__ = (
@@ -148,12 +204,19 @@ class CatalogOffer(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    canonical_product_id: Mapped[int] = mapped_column(
+        ForeignKey("catalog_canonical_products.id", ondelete="CASCADE"), nullable=False
+    )
+    store_id: Mapped[int] = mapped_column(ForeignKey("catalog_stores.id", ondelete="CASCADE"), nullable=False)
+    seller_id: Mapped[int | None] = mapped_column(ForeignKey("catalog_sellers.id", ondelete="SET NULL"))
     store_product_id: Mapped[int] = mapped_column(ForeignKey("catalog_store_products.id", ondelete="CASCADE"), nullable=False)
     product_variant_id: Mapped[int | None] = mapped_column(ForeignKey("catalog_product_variants.id", ondelete="SET NULL"))
+    offer_url: Mapped[str | None] = mapped_column(Text)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="UZS", server_default="UZS")
     price_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     old_price_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     in_stock: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
+    delivery_days: Mapped[int | None] = mapped_column(Integer)
     shipping_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     scraped_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     is_valid: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
@@ -203,8 +266,8 @@ class CatalogDuplicateCandidate(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    product_id_a: Mapped[int] = mapped_column(ForeignKey("catalog_products.id", ondelete="CASCADE"), nullable=False)
-    product_id_b: Mapped[int] = mapped_column(ForeignKey("catalog_products.id", ondelete="CASCADE"), nullable=False)
+    product_id_a: Mapped[int] = mapped_column(ForeignKey("catalog_canonical_products.id", ondelete="CASCADE"), nullable=False)
+    product_id_b: Mapped[int] = mapped_column(ForeignKey("catalog_canonical_products.id", ondelete="CASCADE"), nullable=False)
     score: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
     reason: Mapped[str] = mapped_column(String(128), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", server_default="pending")
@@ -239,7 +302,7 @@ class CatalogAIEnrichmentJob(Base):
     __tablename__ = "catalog_ai_enrichment_jobs"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    product_id: Mapped[int] = mapped_column(ForeignKey("catalog_products.id", ondelete="CASCADE"), nullable=False)
+    product_id: Mapped[int] = mapped_column(ForeignKey("catalog_canonical_products.id", ondelete="CASCADE"), nullable=False)
     stage: Mapped[str] = mapped_column(String(32), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
@@ -253,11 +316,24 @@ Index("ix_catalog_categories_lft_rgt", CatalogCategory.lft, CatalogCategory.rgt)
 Index("ix_catalog_brands_normalized_name", CatalogBrand.normalized_name)
 Index("ix_catalog_stores_is_active", CatalogStore.is_active)
 Index("ix_catalog_stores_crawl_priority", CatalogStore.crawl_priority)
+Index("ix_catalog_stores_provider", CatalogStore.provider)
+Index("ix_catalog_scrape_sources_store_id", CatalogScrapeSource.store_id)
+Index("ix_catalog_scrape_sources_is_active", CatalogScrapeSource.is_active)
+Index("ix_catalog_scrape_sources_priority", CatalogScrapeSource.priority)
+Index("ix_catalog_canonical_products_category_brand", CatalogCanonicalProduct.category_id, CatalogCanonicalProduct.brand_id)
+Index("ix_catalog_canonical_products_specs", CatalogCanonicalProduct.specs, postgresql_using="gin")
 Index("ix_catalog_products_category_brand", CatalogProduct.category_id, CatalogProduct.brand_id)
 Index("ix_catalog_products_status", CatalogProduct.status)
+Index("ix_catalog_products_canonical_product_id", CatalogProduct.canonical_product_id)
 Index("ix_catalog_store_products_store_id", CatalogStoreProduct.store_id)
 Index("ix_catalog_store_products_product_id", CatalogStoreProduct.product_id)
+Index("ix_catalog_store_products_canonical_product_id", CatalogStoreProduct.canonical_product_id)
 Index("ix_catalog_store_products_last_seen_at", CatalogStoreProduct.last_seen_at)
+Index("ix_catalog_sellers_store_id", CatalogSeller.store_id)
+Index("ix_catalog_sellers_normalized_name", CatalogSeller.normalized_name)
+Index("ix_catalog_offers_canonical_product_id", CatalogOffer.canonical_product_id)
+Index("ix_catalog_offers_store_id", CatalogOffer.store_id)
+Index("ix_catalog_offers_seller_id", CatalogOffer.seller_id)
 Index("ix_catalog_offers_store_product_scraped", CatalogOffer.store_product_id, CatalogOffer.scraped_at.desc())
 Index("ix_catalog_offers_valid_stock_price", CatalogOffer.is_valid, CatalogOffer.in_stock, CatalogOffer.price_amount)
 Index("ix_catalog_offers_scraped_at", CatalogOffer.scraped_at)

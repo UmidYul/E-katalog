@@ -11,10 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.db.models import (
     CatalogBrand,
+    CatalogCanonicalProduct,
     CatalogCategory,
     CatalogOffer,
-    CatalogProduct,
     CatalogProductSearch,
+    CatalogSeller,
     CatalogStore,
     CatalogStoreProduct,
 )
@@ -41,45 +42,136 @@ class CatalogRepository:
             raise ValueError("invalid cursor signature")
         return data["d"]
 
-    async def get_product(self, product_id: int) -> CatalogProduct | None:
-        result = await self.session.execute(select(CatalogProduct).where(CatalogProduct.id == product_id))
-        return result.scalar_one_or_none()
+    async def get_product(self, product_id: int) -> dict | None:
+        stmt = (
+            select(
+                CatalogCanonicalProduct.id,
+                CatalogCanonicalProduct.normalized_title,
+                CatalogCanonicalProduct.main_image,
+                CatalogCanonicalProduct.specs,
+                CatalogCategory.name_uz.label("category_name"),
+                CatalogBrand.name.label("brand_name"),
+            )
+            .join(CatalogCategory, CatalogCategory.id == CatalogCanonicalProduct.category_id)
+            .outerjoin(CatalogBrand, CatalogBrand.id == CatalogCanonicalProduct.brand_id)
+            .where(CatalogCanonicalProduct.id == product_id)
+        )
+        row = (await self.session.execute(stmt)).one_or_none()
+        if row is None:
+            return None
+        return {
+            "id": row.id,
+            "title": row.normalized_title,
+            "category": row.category_name,
+            "brand": row.brand_name,
+            "main_image": row.main_image,
+            "specs": row.specs if isinstance(row.specs, dict) else {},
+        }
 
-    async def get_offers(self, product_id: int, limit: int, in_stock: bool | None) -> list[dict]:
+    async def get_offers_by_store(
+        self,
+        product_id: int,
+        limit: int,
+        in_stock: bool | None,
+        sort: str = "price",
+        store_ids: list[int] | None = None,
+        seller_ids: list[int] | None = None,
+        max_delivery_days: int | None = None,
+    ) -> list[dict]:
         stmt = (
             select(
                 CatalogOffer.id,
+                CatalogOffer.store_id,
+                CatalogStore.name.label("store_name"),
+                CatalogOffer.seller_id,
+                CatalogSeller.name.label("seller_name"),
                 CatalogOffer.price_amount,
                 CatalogOffer.old_price_amount,
                 CatalogOffer.in_stock,
                 CatalogOffer.currency,
+                CatalogOffer.delivery_days,
                 CatalogOffer.scraped_at,
-                CatalogStore.id.label("store_id"),
-                CatalogStore.name.label("store_name"),
-                CatalogStoreProduct.external_url,
+                func.coalesce(CatalogOffer.offer_url, CatalogStoreProduct.external_url).label("link"),
             )
+            .join(CatalogStore, CatalogStore.id == CatalogOffer.store_id)
             .join(CatalogStoreProduct, CatalogStoreProduct.id == CatalogOffer.store_product_id)
-            .join(CatalogStore, CatalogStore.id == CatalogStoreProduct.store_id)
-            .where(CatalogStoreProduct.product_id == product_id)
-            .order_by(CatalogOffer.price_amount.asc(), CatalogOffer.id.asc())
-            .limit(limit)
+            .outerjoin(CatalogSeller, CatalogSeller.id == CatalogOffer.seller_id)
+            .where(
+                CatalogOffer.canonical_product_id == product_id,
+                CatalogOffer.is_valid.is_(True),
+            )
         )
         if in_stock is not None:
             stmt = stmt.where(CatalogOffer.in_stock == in_stock)
+        if store_ids:
+            stmt = stmt.where(CatalogOffer.store_id.in_(store_ids))
+        if seller_ids:
+            stmt = stmt.where(CatalogOffer.seller_id.in_(seller_ids))
+        if max_delivery_days is not None:
+            stmt = stmt.where(CatalogOffer.delivery_days.is_not(None), CatalogOffer.delivery_days <= max_delivery_days)
+
+        order_map = {
+            "price": CatalogOffer.price_amount.asc(),
+            "delivery": CatalogOffer.delivery_days.asc().nulls_last(),
+            "seller_rating": CatalogSeller.rating.desc().nulls_last(),
+        }
+        stmt = stmt.order_by(order_map.get(sort, order_map["price"]), CatalogOffer.id.asc()).limit(limit)
         rows = (await self.session.execute(stmt)).all()
-        return [
-            {
-                "id": r.id,
-                "price_amount": r.price_amount,
-                "old_price_amount": r.old_price_amount,
-                "in_stock": r.in_stock,
-                "currency": r.currency,
-                "scraped_at": r.scraped_at,
-                "store": {"id": r.store_id, "name": r.store_name},
-                "external_url": r.external_url,
+
+        by_store: dict[int, dict] = {}
+        for row in rows:
+            if row.store_id not in by_store:
+                by_store[row.store_id] = {
+                    "store_id": row.store_id,
+                    "store": row.store_name,
+                    "minimal_price": None,
+                    "offers_count": 0,
+                    "offers": [],
+                }
+            bucket = by_store[row.store_id]
+            offer_payload = {
+                "id": row.id,
+                "seller_id": row.seller_id,
+                "seller_name": row.seller_name or row.store_name,
+                "price_amount": float(row.price_amount),
+                "old_price_amount": float(row.old_price_amount) if row.old_price_amount is not None else None,
+                "in_stock": row.in_stock,
+                "currency": row.currency,
+                "delivery_days": row.delivery_days,
+                "scraped_at": row.scraped_at,
+                "link": row.link,
             }
-            for r in rows
-        ]
+            bucket["offers"].append(offer_payload)
+            bucket["offers_count"] += 1
+            if bucket["minimal_price"] is None or offer_payload["price_amount"] < bucket["minimal_price"]:
+                bucket["minimal_price"] = offer_payload["price_amount"]
+
+        result = sorted(
+            by_store.values(),
+            key=lambda item: (item["minimal_price"] if item["minimal_price"] is not None else 10**18),
+        )
+        return result
+
+    async def get_offers(
+        self,
+        product_id: int,
+        limit: int,
+        in_stock: bool | None,
+        sort: str = "price",
+        store_ids: list[int] | None = None,
+        seller_ids: list[int] | None = None,
+        max_delivery_days: int | None = None,
+    ) -> list[dict]:
+        offers_by_store = await self.get_offers_by_store(
+            product_id=product_id,
+            limit=limit,
+            in_stock=in_stock,
+            sort=sort,
+            store_ids=store_ids,
+            seller_ids=seller_ids,
+            max_delivery_days=max_delivery_days,
+        )
+        return [offer for group in offers_by_store for offer in group["offers"]]
 
     async def search_products(
         self,
@@ -90,16 +182,19 @@ class CatalogRepository:
         min_price: Decimal | None,
         max_price: Decimal | None,
         in_stock: bool | None,
+        store_ids: list[int] | None,
+        seller_ids: list[int] | None,
+        max_delivery_days: int | None,
         sort: str,
         limit: int,
         cursor: str | None,
     ) -> tuple[list[dict], str | None]:
         rank_expr = func.ts_rank_cd(CatalogProductSearch.tsv, func.websearch_to_tsquery("simple", q or ""))
-
         stmt = (
             select(
-                CatalogProduct.id,
-                CatalogProduct.normalized_title,
+                CatalogCanonicalProduct.id,
+                CatalogCanonicalProduct.normalized_title,
+                CatalogCanonicalProduct.main_image,
                 CatalogBrand.id.label("brand_id"),
                 CatalogBrand.name.label("brand_name"),
                 CatalogCategory.id.label("category_id"),
@@ -109,53 +204,79 @@ class CatalogRepository:
                 CatalogProductSearch.store_count,
                 rank_expr.label("rank"),
             )
-            .join(CatalogProductSearch, CatalogProductSearch.product_id == CatalogProduct.id)
-            .join(CatalogCategory, CatalogCategory.id == CatalogProduct.category_id)
-            .outerjoin(CatalogBrand, CatalogBrand.id == CatalogProduct.brand_id)
+            .join(CatalogProductSearch, CatalogProductSearch.product_id == CatalogCanonicalProduct.id)
+            .join(CatalogCategory, CatalogCategory.id == CatalogCanonicalProduct.category_id)
+            .outerjoin(CatalogBrand, CatalogBrand.id == CatalogCanonicalProduct.brand_id)
         )
 
         filters = []
         if q:
             filters.append(CatalogProductSearch.tsv.op("@@")(func.websearch_to_tsquery("simple", q)))
         if category_id:
-            filters.append(CatalogProduct.category_id == category_id)
+            filters.append(CatalogCanonicalProduct.category_id == category_id)
         if brand_ids:
-            filters.append(CatalogProduct.brand_id.in_(brand_ids))
+            filters.append(CatalogCanonicalProduct.brand_id.in_(brand_ids))
         if min_price is not None:
             filters.append(CatalogProductSearch.min_price >= min_price)
         if max_price is not None:
             filters.append(CatalogProductSearch.min_price <= max_price)
         if in_stock is True:
             filters.append(CatalogProductSearch.store_count > 0)
-
+        if store_ids:
+            filters.append(
+                CatalogCanonicalProduct.id.in_(
+                    select(CatalogOffer.canonical_product_id).where(
+                        CatalogOffer.store_id.in_(store_ids),
+                        CatalogOffer.is_valid.is_(True),
+                    )
+                )
+            )
+        if seller_ids:
+            filters.append(
+                CatalogCanonicalProduct.id.in_(
+                    select(CatalogOffer.canonical_product_id).where(
+                        CatalogOffer.seller_id.in_(seller_ids),
+                        CatalogOffer.is_valid.is_(True),
+                    )
+                )
+            )
+        if max_delivery_days is not None:
+            filters.append(
+                CatalogCanonicalProduct.id.in_(
+                    select(CatalogOffer.canonical_product_id).where(
+                        CatalogOffer.delivery_days.is_not(None),
+                        CatalogOffer.delivery_days <= max_delivery_days,
+                        CatalogOffer.is_valid.is_(True),
+                    )
+                )
+            )
         if filters:
             stmt = stmt.where(and_(*filters))
 
         sort_map = {
-            "relevance": [literal_column("rank").desc(), CatalogProduct.id.asc()],
-            "price_asc": [CatalogProductSearch.min_price.asc().nulls_last(), CatalogProduct.id.asc()],
-            "price_desc": [CatalogProductSearch.min_price.desc().nulls_last(), CatalogProduct.id.asc()],
-            "newest": [CatalogProduct.created_at.desc(), CatalogProduct.id.asc()],
-            "popular": [CatalogProductSearch.store_count.desc(), CatalogProduct.id.asc()],
+            "relevance": [literal_column("rank").desc(), CatalogCanonicalProduct.id.asc()],
+            "price_asc": [CatalogProductSearch.min_price.asc().nulls_last(), CatalogCanonicalProduct.id.asc()],
+            "price_desc": [CatalogProductSearch.min_price.desc().nulls_last(), CatalogCanonicalProduct.id.asc()],
+            "newest": [CatalogCanonicalProduct.created_at.desc(), CatalogCanonicalProduct.id.asc()],
+            "popular": [CatalogProductSearch.store_count.desc(), CatalogCanonicalProduct.id.asc()],
         }
-        order = sort_map.get(sort, sort_map["relevance"])
-        stmt = stmt.order_by(*order)
+        stmt = stmt.order_by(*sort_map.get(sort, sort_map["relevance"]))
 
         decoded = self.decode_cursor(cursor)
         if decoded:
             last_price = Decimal(decoded["last_price"]) if "last_price" in decoded else None
             if sort == "price_asc":
                 stmt = stmt.where(
-                    (CatalogProductSearch.min_price > last_price) |
-                    ((CatalogProductSearch.min_price == last_price) & (CatalogProduct.id > decoded["last_id"]))
+                    (CatalogProductSearch.min_price > last_price)
+                    | ((CatalogProductSearch.min_price == last_price) & (CatalogCanonicalProduct.id > decoded["last_id"]))
                 )
             elif sort == "price_desc":
                 stmt = stmt.where(
-                    (CatalogProductSearch.min_price < last_price) |
-                    ((CatalogProductSearch.min_price == last_price) & (CatalogProduct.id > decoded["last_id"]))
+                    (CatalogProductSearch.min_price < last_price)
+                    | ((CatalogProductSearch.min_price == last_price) & (CatalogCanonicalProduct.id > decoded["last_id"]))
                 )
             else:
-                stmt = stmt.where(CatalogProduct.id > decoded["last_id"])
+                stmt = stmt.where(CatalogCanonicalProduct.id > decoded["last_id"])
 
         rows = (await self.session.execute(stmt.limit(limit + 1))).all()
         has_next = len(rows) > limit
@@ -165,10 +286,11 @@ class CatalogRepository:
             {
                 "id": r.id,
                 "normalized_title": r.normalized_title,
+                "image_url": r.main_image,
                 "brand": {"id": r.brand_id, "name": r.brand_name} if r.brand_id else None,
                 "category": {"id": r.category_id, "name": r.category_name},
-                "min_price": r.min_price,
-                "max_price": r.max_price,
+                "min_price": float(r.min_price) if r.min_price is not None else None,
+                "max_price": float(r.max_price) if r.max_price is not None else None,
                 "store_count": r.store_count,
                 "score": float(r.rank or 0),
             }
@@ -204,8 +326,8 @@ class CatalogRepository:
 
     async def list_brands(self, q: str | None = None, category_id: int | None = None, limit: int = 100) -> list[dict]:
         stmt = (
-            select(CatalogBrand.id, CatalogBrand.name, func.count(CatalogProduct.id).label("products_count"))
-            .join(CatalogProduct, CatalogProduct.brand_id == CatalogBrand.id, isouter=True)
+            select(CatalogBrand.id, CatalogBrand.name, func.count(CatalogCanonicalProduct.id).label("products_count"))
+            .join(CatalogCanonicalProduct, CatalogCanonicalProduct.brand_id == CatalogBrand.id, isouter=True)
             .group_by(CatalogBrand.id, CatalogBrand.name)
             .order_by(CatalogBrand.name.asc())
             .limit(limit)
@@ -213,7 +335,7 @@ class CatalogRepository:
         if q:
             stmt = stmt.where(CatalogBrand.name.ilike(f"%{q}%"))
         if category_id:
-            stmt = stmt.where(CatalogProduct.category_id == category_id)
+            stmt = stmt.where(CatalogCanonicalProduct.category_id == category_id)
         rows = (await self.session.execute(stmt)).all()
         return [{"id": r.id, "name": r.name, "products_count": r.products_count} for r in rows]
 
@@ -222,20 +344,33 @@ class CatalogRepository:
             select(
                 func.min(CatalogProductSearch.min_price),
                 func.max(CatalogProductSearch.max_price),
-                func.count(CatalogProduct.id),
+                func.count(CatalogCanonicalProduct.id),
             )
-            .join(CatalogProduct, CatalogProduct.id == CatalogProductSearch.product_id)
+            .join(CatalogCanonicalProduct, CatalogCanonicalProduct.id == CatalogProductSearch.product_id)
         )
         if category_id:
-            base = base.where(CatalogProduct.category_id == category_id)
+            base = base.where(CatalogCanonicalProduct.category_id == category_id)
         if q:
             base = base.where(CatalogProductSearch.tsv.op("@@")(func.websearch_to_tsquery("simple", q)))
 
         min_price, max_price, count = (await self.session.execute(base)).one()
         brands = await self.list_brands(category_id=category_id, limit=50)
+        sellers_stmt = (
+            select(CatalogSeller.id, CatalogSeller.name, func.count(CatalogOffer.id).label("offers_count"))
+            .join(CatalogOffer, CatalogOffer.seller_id == CatalogSeller.id)
+            .join(CatalogCanonicalProduct, CatalogCanonicalProduct.id == CatalogOffer.canonical_product_id)
+            .group_by(CatalogSeller.id, CatalogSeller.name)
+            .order_by(func.count(CatalogOffer.id).desc())
+            .limit(100)
+        )
+        if category_id:
+            sellers_stmt = sellers_stmt.where(CatalogCanonicalProduct.category_id == category_id)
+        sellers_rows = (await self.session.execute(sellers_stmt)).all()
         return {
             "price": {"min": min_price, "max": max_price},
             "brands": brands,
+            "stores": await self.list_stores(active_only=True),
+            "sellers": [{"id": row.id, "name": row.name, "offers_count": row.offers_count} for row in sellers_rows],
             "total_products": count,
         }
 
@@ -247,8 +382,7 @@ class CatalogRepository:
                    max(ph.price_amount) as max_price
             from catalog_price_history ph
             join catalog_offers o on o.id = ph.offer_id
-            join catalog_store_products sp on sp.id = o.store_product_id
-            where sp.product_id = :product_id
+            where o.canonical_product_id = :product_id
               and ph.captured_at >= now() - (:days || ' days')::interval
             group by 1
             order by 1 asc

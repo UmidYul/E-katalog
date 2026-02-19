@@ -10,6 +10,7 @@ from playwright.async_api import async_playwright
 from selectolax.parser import HTMLParser
 
 from app.core.config import settings
+from app.core.errors import UpstreamRateLimitedError
 from app.core.logging import logger
 from app.ai.spec_extractor import ai_extract_specs
 from app.parsers.base import ParseResult, ParsedProduct, StoreParser
@@ -27,6 +28,7 @@ class ExampleStoreParser(StoreParser):
 
     async def discover_product_links(self, category_url: str) -> list[str]:
         response = await self._http.get(category_url)
+        self._cache_products_from_texnomart_jsonld(response.text, category_url)
         links = self._extract_product_links(response.text, category_url)
         if links:
             logger.info("category_links_extracted_http", category_url=category_url, count=len(links))
@@ -61,6 +63,7 @@ class ExampleStoreParser(StoreParser):
                 self._cache_products_from_graphql(body, category_url)
 
             html = await page.content()
+            self._raise_if_rate_limited_page(html, category_url)
             dom_hrefs = await page.eval_on_selector_all("a[href]", "els => els.map(el => el.getAttribute('href'))")
             state_chunks = await page.evaluate(
                 """() => {
@@ -121,22 +124,40 @@ class ExampleStoreParser(StoreParser):
             browser = await pw.chromium.launch(headless=settings.playwright_headless)
             context = await browser.new_context()
             page = await context.new_page()
-            await page.goto(product_url, wait_until="domcontentloaded", timeout=60000)
+            response = await page.goto(product_url, wait_until="domcontentloaded", timeout=60000)
             await page.wait_for_timeout(1200)
             html = await page.content()
+            if response is not None and response.status in {403, 429, 503}:
+                self._raise_if_rate_limited_page(html, product_url)
+            self._raise_if_rate_limited_page(html, product_url)
             await context.close()
             await browser.close()
 
         tree = HTMLParser(html)
-        title = tree.css_first("h1.product-title").text(strip=True)
-        price_raw = tree.css_first("span.price-current").text(strip=True)
+        title_node = tree.css_first("h1.product-title") or tree.css_first("h1")
+        title = title_node.text(strip=True) if title_node else ""
+
+        price_node = (
+            tree.css_first("span.price-current")
+            or tree.css_first("[data-testid='product-price']")
+            or tree.css_first(".product-price")
+        )
+        price_raw = price_node.text(strip=True) if price_node else ""
         old_price_node = tree.css_first("span.price-old")
         availability_node = tree.css_first("div.stock-status")
 
-        price = self._parse_price(price_raw)
-        old_price = self._parse_price(old_price_node.text(strip=True)) if old_price_node else None
+        if not title:
+            title = self._extract_title_from_jsonld_or_meta(html) or "Unknown product"
+
+        price = self._parse_price_safe(price_raw)
+        if price is None and cached:
+            price = cached.price
+        if price is None:
+            raise ValueError("price not found")
+
+        old_price = self._parse_price_safe(old_price_node.text(strip=True)) if old_price_node else None
         availability = availability_node.text(strip=True) if availability_node else "unknown"
-        images = [img.attributes.get("src", "") for img in tree.css("img.product-image") if img.attributes.get("src")]
+        images = self._extract_product_images(tree=tree, html=html, product_url=product_url)
         specs = {
             row.css_first("span.spec-name").text(strip=True): row.css_first("span.spec-value").text(strip=True)
             for row in tree.css("div.spec-row")
@@ -156,6 +177,53 @@ class ExampleStoreParser(StoreParser):
             description=description,
         )
 
+    @staticmethod
+    def _extract_product_images(tree: HTMLParser, html: str, product_url: str, limit: int = 12) -> list[str]:
+        def normalize(url: str | None) -> str | None:
+            if not url:
+                return None
+            value = url.strip()
+            if not value or value.startswith("data:"):
+                return None
+            if value.startswith("//"):
+                value = "https:" + value
+            return urljoin(product_url, value)
+
+        candidates: list[str] = []
+        for img in tree.css("img"):
+            attrs = img.attributes
+            for key in ("src", "data-src", "data-original", "data-lazy", "data-zoom-image"):
+                value = normalize(attrs.get(key))
+                if value:
+                    candidates.append(value)
+            srcset = attrs.get("srcset") or attrs.get("data-srcset")
+            if srcset:
+                for part in srcset.split(","):
+                    value = normalize(part.strip().split(" ")[0])
+                    if value:
+                        candidates.append(value)
+
+        for pattern in [
+            r'"image"\s*:\s*"([^"]+)"',
+            r'"imageUrl"\s*:\s*"([^"]+)"',
+            r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
+        ]:
+            for match in re.findall(pattern, html):
+                value = normalize(match.replace("\\/", "/"))
+                if value:
+                    candidates.append(value)
+
+        unique: list[str] = []
+        seen: set[str] = set()
+        for value in candidates:
+            if value in seen:
+                continue
+            seen.add(value)
+            unique.append(value)
+            if len(unique) >= limit:
+                break
+        return unique
+
     async def parse_category(self, category_url: str) -> ParseResult:
         links = await self.discover_product_links(category_url)
         products = []
@@ -172,12 +240,65 @@ class ExampleStoreParser(StoreParser):
         return Decimal(filtered)
 
     @staticmethod
+    def _parse_price_safe(raw: str | None) -> Decimal | None:
+        if not raw:
+            return None
+        filtered = "".join(ch for ch in raw if ch.isdigit() or ch in {".", ","}).replace(",", ".")
+        if not filtered:
+            return None
+        try:
+            return Decimal(filtered)
+        except Exception:  # noqa: BLE001
+            return None
+
+    @staticmethod
+    def _extract_title_from_jsonld_or_meta(html: str) -> str | None:
+        script_pattern = r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>'
+        for script_text in re.findall(script_pattern, html, flags=re.DOTALL | re.IGNORECASE):
+            try:
+                payload = json.loads(script_text.strip())
+            except Exception:  # noqa: BLE001
+                continue
+            blocks = payload if isinstance(payload, list) else [payload]
+            for block in blocks:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("@type") in {"Product", "Offer", "ItemList"}:
+                    name = block.get("name")
+                    if isinstance(name, str) and name.strip():
+                        return name.strip()
+                if block.get("@type") == "ItemList":
+                    items = block.get("itemListElement")
+                    if isinstance(items, list):
+                        for element in items:
+                            item = element.get("item") if isinstance(element, dict) else None
+                            if isinstance(item, dict):
+                                name = item.get("name")
+                                if isinstance(name, str) and name.strip():
+                                    return name.strip()
+
+        og_title_match = re.search(
+            r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']',
+            html,
+            flags=re.IGNORECASE,
+        )
+        if og_title_match:
+            return og_title_match.group(1).strip()
+        return None
+
+    @staticmethod
+    def _raise_if_rate_limited_page(html: str, url: str) -> None:
+        lowered = html.lower()
+        if "error 1015" in lowered and "you are being rate limited" in lowered:
+            raise UpstreamRateLimitedError(f"upstream blocked requests for {url} (cloudflare 1015)")
+
+    @staticmethod
     def _extract_product_links(html: str, base_url: str) -> list[str]:
         links: set[str] = set()
         tree = HTMLParser(html)
         for node in tree.css("a[href]"):
             href = node.attributes.get("href")
-            if href and "/product/" in href:
+            if href and ("/product/" in href or "/product/detail/" in href):
                 normalized = ExampleStoreParser._normalize_product_url(urljoin(base_url, href))
                 if normalized:
                     links.add(normalized)
@@ -185,8 +306,11 @@ class ExampleStoreParser(StoreParser):
         normalized = html.replace("\\/", "/")
 
         patterns = [
+            r"(https?://[^\"'\\s<>]*/product/detail/\d+/?[^\"'\\s<>]*)",
             r"(https?://[^\"'\\s<>]*/product/[^\"'\\s<>]+)",
+            r"(/(?:ru|uz)/product/detail/\d+/?[^\"'\\s<>]*)",
             r"(/(?:ru|uz)/product/[^\"'\\s<>]+)",
+            r"(/product/detail/\d+/?[^\"'\\s<>]*)",
             r"(/product/[^\"'\\s<>]+)",
         ]
         for pattern in patterns:
@@ -208,13 +332,77 @@ class ExampleStoreParser(StoreParser):
         # Valid variants:
         # - /ru/product/1234567
         # - /product/some-slug-1234567
+        # - /ru/product/detail/123456
         if re.fullmatch(r"/(?:ru|uz)/product/\d+", path):
+            return f"{parsed.scheme}://{parsed.netloc}{path}"
+        if re.fullmatch(r"/(?:ru|uz)/product/detail/\d+", path):
             return f"{parsed.scheme}://{parsed.netloc}{path}"
         slug_match = re.fullmatch(r"/product/[\w\-]+-(\d+)", path)
         if slug_match:
             product_id = slug_match.group(1)
             return f"{parsed.scheme}://{parsed.netloc}/ru/product/{product_id}"
         return None
+
+    def _cache_products_from_texnomart_jsonld(self, html: str, category_url: str) -> None:
+        script_pattern = r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>'
+        scripts = re.findall(script_pattern, html, flags=re.DOTALL | re.IGNORECASE)
+        if not scripts:
+            return
+
+        for script_text in scripts:
+            script_text = script_text.strip()
+            if not script_text:
+                continue
+            try:
+                payload = json.loads(script_text)
+            except json.JSONDecodeError:
+                continue
+
+            blocks = payload if isinstance(payload, list) else [payload]
+            for block in blocks:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("@type") != "ItemList":
+                    continue
+                items = block.get("itemListElement")
+                if not isinstance(items, list):
+                    continue
+                for element in items:
+                    item = element.get("item") if isinstance(element, dict) else None
+                    if not isinstance(item, dict):
+                        continue
+
+                    product_url = item.get("url")
+                    title = item.get("name")
+                    image = item.get("image")
+                    offer = item.get("offers") if isinstance(item.get("offers"), dict) else {}
+                    price_raw = offer.get("price")
+
+                    if not product_url or not title or price_raw is None:
+                        continue
+                    normalized_url = self._normalize_product_url(urljoin(category_url, str(product_url)))
+                    if not normalized_url:
+                        continue
+                    try:
+                        price = Decimal(str(price_raw))
+                    except Exception:  # noqa: BLE001
+                        continue
+
+                    images: list[str] = []
+                    if image:
+                        normalized_image = urljoin(category_url, str(image))
+                        images.append(normalized_image)
+
+                    self._product_cache[normalized_url] = ParsedProduct(
+                        title=str(title),
+                        price=price,
+                        old_price=None,
+                        availability="in_stock",
+                        images=images,
+                        specifications={},
+                        product_url=normalized_url,
+                        description=None,
+                    )
 
     def _cache_products_from_graphql(self, body: str, category_url: str) -> None:
         try:

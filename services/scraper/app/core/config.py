@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     max_retries: int = 5
     task_retry_backoff_max_seconds: int = 600
     crawl_interval_minutes: int = 360
+    rate_limit_cooldown_seconds: int = 1800
 
     playwright_headless: bool = True
     ai_spec_enrichment_enabled: bool = False
@@ -45,6 +46,11 @@ class Settings(BaseSettings):
         ]
     )
     proxies: list[str] = Field(default_factory=list)
+
+    scraper_provider: Literal["texnomart", "example"] = "texnomart"
+
+    texnomart_base_url: HttpUrl = "https://texnomart.uz"
+    texnomart_category_paths: list[str] = Field(default_factory=lambda: ["/ru/katalog/smartfony"])
 
     example_store_base_url: HttpUrl = "https://example.com"
     example_store_category_paths: list[str] = Field(default_factory=lambda: ["/phones", "/laptops"])

@@ -9,11 +9,13 @@ from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 
 from app.api.deps import get_redis
+from app.core.config import settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 ACCESS_COOKIE = "access_token"
 REFRESH_COOKIE = "refresh_token"
+ROLE_COOKIE = "user_role"
 ACCESS_TTL_SECONDS = 60 * 15
 REFRESH_TTL_SECONDS = 60 * 60 * 24 * 30
 
@@ -38,6 +40,7 @@ async def _get_user_by_email(redis: Redis, email: str) -> dict | None:
         "id": int(payload["id"]),
         "email": payload["email"],
         "full_name": payload["full_name"],
+        "role": payload.get("role", "moderator"),
         "password_hash": payload["password_hash"],
     }
 
@@ -57,6 +60,9 @@ async def _set_auth_cookies(response: Response, user_id: int, redis: Redis) -> N
     }
     response.set_cookie(ACCESS_COOKIE, access, max_age=ACCESS_TTL_SECONDS, **cookie_base)
     response.set_cookie(REFRESH_COOKIE, refresh, max_age=REFRESH_TTL_SECONDS, **cookie_base)
+    user = await redis.hgetall(f"auth:user:{user_id}")
+    role = user.get("role", "moderator") if user else "moderator"
+    response.set_cookie(ROLE_COOKIE, role, max_age=REFRESH_TTL_SECONDS, **cookie_base)
 
 
 async def _resolve_user_from_access(request: Request, redis: Redis) -> dict:
@@ -72,7 +78,12 @@ async def _resolve_user_from_access(request: Request, redis: Redis) -> dict:
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="user not found")
 
-    return {"id": int(user["id"]), "email": user["email"], "full_name": user["full_name"]}
+    return {
+        "id": int(user["id"]),
+        "email": user["email"],
+        "full_name": user["full_name"],
+        "role": user.get("role", "moderator"),
+    }
 
 
 class RegisterRequest(BaseModel):
@@ -90,6 +101,7 @@ class AuthUserResponse(BaseModel):
     id: int
     email: str
     full_name: str
+    role: str = "moderator"
 
 
 @router.post("/register", response_model=AuthUserResponse)
@@ -107,6 +119,7 @@ async def register(payload: RegisterRequest, response: Response, redis: Redis = 
             "id": str(user_id),
             "email": payload.email.lower(),
             "full_name": payload.full_name,
+            "role": "moderator",
             "password_hash": _hash_password(payload.password),
             "created_at": datetime.now(UTC).isoformat(),
         },
@@ -115,7 +128,7 @@ async def register(payload: RegisterRequest, response: Response, redis: Redis = 
 
     await _set_auth_cookies(response, user_id, redis)
 
-    return AuthUserResponse(id=user_id, email=payload.email.lower(), full_name=payload.full_name)
+    return AuthUserResponse(id=user_id, email=payload.email.lower(), full_name=payload.full_name, role="moderator")
 
 
 @router.post("/login", response_model=AuthUserResponse)
@@ -125,7 +138,7 @@ async def login(payload: LoginRequest, response: Response, redis: Redis = Depend
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials")
 
     await _set_auth_cookies(response, int(user["id"]), redis)
-    return AuthUserResponse(id=int(user["id"]), email=user["email"], full_name=user["full_name"])
+    return AuthUserResponse(id=int(user["id"]), email=user["email"], full_name=user["full_name"], role=user["role"])
 
 
 @router.post("/refresh")
@@ -154,6 +167,7 @@ async def logout(request: Request, response: Response, redis: Redis = Depends(ge
 
     response.delete_cookie(ACCESS_COOKIE, path="/")
     response.delete_cookie(REFRESH_COOKIE, path="/")
+    response.delete_cookie(ROLE_COOKIE, path="/")
     return {"ok": True}
 
 
@@ -165,3 +179,39 @@ async def me(request: Request, redis: Redis = Depends(get_redis)):
 
 async def get_current_user(request: Request, redis: Redis = Depends(get_redis)) -> dict:
     return await _resolve_user_from_access(request, redis)
+
+
+async def ensure_seed_admin(redis: Redis) -> dict | None:
+    if not settings.admin_seed_enabled:
+        return None
+    if not settings.admin_email or not settings.admin_password:
+        return None
+
+    email = settings.admin_email.lower()
+    existing = await _get_user_by_email(redis, email)
+    if existing is not None:
+        user_key = f"auth:user:{existing['id']}"
+        await redis.hset(
+            user_key,
+            mapping={
+                "full_name": settings.admin_full_name,
+                "role": settings.admin_role,
+            },
+        )
+        return {"id": existing["id"], "email": email, "full_name": settings.admin_full_name, "role": settings.admin_role}
+
+    user_id = await redis.incr("auth:user:id")
+    user_key = f"auth:user:{user_id}"
+    await redis.hset(
+        user_key,
+        mapping={
+            "id": str(user_id),
+            "email": email,
+            "full_name": settings.admin_full_name,
+            "role": settings.admin_role,
+            "password_hash": _hash_password(settings.admin_password),
+            "created_at": datetime.now(UTC).isoformat(),
+        },
+    )
+    await redis.set(f"auth:user:email:{email}", str(user_id))
+    return {"id": user_id, "email": email, "full_name": settings.admin_full_name, "role": settings.admin_role}

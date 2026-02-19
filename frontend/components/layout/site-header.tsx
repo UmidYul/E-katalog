@@ -10,6 +10,9 @@ import { cn } from "@/lib/utils/cn";
 
 const links = [
   { href: "/catalog", label: "Catalog" },
+  { href: "/dashboard", label: "Admin" },
+  { href: "/login", label: "Login" },
+  { href: "/register", label: "Register" },
   { href: "/favorites", label: "Favorites" },
   { href: "/profile", label: "Profile" }
 ];

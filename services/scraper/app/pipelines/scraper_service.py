@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
+from app.core.config import settings
+from app.core.errors import UpstreamRateLimitedError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import logger
@@ -23,20 +25,43 @@ class ScraperService:
         for category_url in category_urls:
             try:
                 links = await self._parser.discover_product_links(category_url)
+            except UpstreamRateLimitedError as exc:
+                logger.error(
+                    "upstream_rate_limited_stop_scrape",
+                    category_url=category_url,
+                    cooldown_seconds=settings.rate_limit_cooldown_seconds,
+                    error=str(exc),
+                )
+                await asyncio.sleep(settings.rate_limit_cooldown_seconds)
+                break
             except Exception as exc:  # noqa: BLE001
                 logger.error("category_discovery_failed", category_url=category_url, error=str(exc))
                 continue
             logger.info("category_links_discovered", category_url=category_url, count=len(links))
             for link in links:
-                await self._parse_and_upsert(link, shop)
+                if await self._parse_and_upsert(link, shop):
+                    logger.error(
+                        "upstream_rate_limited_stop_scrape",
+                        product_url=link,
+                        cooldown_seconds=settings.rate_limit_cooldown_seconds,
+                        error="cloudflare_1015",
+                    )
+                    await asyncio.sleep(settings.rate_limit_cooldown_seconds)
+                    await self._session.commit()
+                    return
 
         await self._session.commit()
 
-    async def _parse_and_upsert(self, product_url: str, shop: Shop) -> None:
+    async def _parse_and_upsert(self, product_url: str, shop: Shop) -> bool:
         async with self._semaphore:
             try:
                 parsed = await self._parser.parse_product(product_url)
                 await self._product_service.upsert_offer(parsed=parsed, shop=shop)
                 logger.info("product_upserted", product_url=product_url)
+                return False
+            except UpstreamRateLimitedError as exc:
+                logger.error("upstream_rate_limited_product", product_url=product_url, error=str(exc))
+                return True
             except Exception as exc:  # noqa: BLE001
                 logger.error("product_parse_failed", product_url=product_url, error=str(exc))
+                return False

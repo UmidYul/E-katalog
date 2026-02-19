@@ -22,6 +22,7 @@ class ProductListItem(BaseModel):
 
     id: int
     normalized_title: str
+    image_url: str | None = None
     brand: BrandOut | None = None
     category: CategoryOut
     min_price: float | None = None
@@ -32,21 +33,36 @@ class ProductListItem(BaseModel):
 
 class OfferOut(BaseModel):
     id: int
+    seller_id: int | None = None
+    seller_name: str
     price_amount: float
     old_price_amount: float | None = None
     in_stock: bool
     currency: str
+    delivery_days: int | None = None
     scraped_at: datetime
-    store: dict
-    external_url: str
+    link: str
 
 
 class ProductDetailOut(BaseModel):
     id: int
-    normalized_title: str
-    attributes: dict
+    title: str
+    category: str
+    brand: str | None = None
+    main_image: str | None = None
     specs: dict
-    status: str
+
+
+class OffersByStoreOut(BaseModel):
+    store_id: int
+    store: str
+    minimal_price: float
+    offers_count: int
+    offers: list[OfferOut]
+
+
+class CanonicalProductDetailOut(ProductDetailOut):
+    offers_by_store: list[OffersByStoreOut] = []
 
 
 class PriceHistoryPoint(BaseModel):

@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.core.rate_limit import enforce_rate_limit
+from app.core.rate_limit import enforce_rate_limit
 from app.api.deps import get_db_session, get_redis
 from app.schemas.catalog import SearchResponse
 from app.cache.redis_cache import CacheService
@@ -19,8 +19,11 @@ async def search(
     q: str | None = Query(default=None, min_length=1, max_length=200),
     category_id: int | None = None,
     brand_id: list[int] | None = Query(default=None),
+    store_id: list[int] | None = Query(default=None),
+    seller_id: list[int] | None = Query(default=None),
     min_price: float | None = None,
     max_price: float | None = None,
+    max_delivery_days: int | None = Query(default=None, ge=0, le=30),
     in_stock: bool | None = None,
     sort: str = Query(default="relevance", pattern="^(relevance|price_asc|price_desc|popular|newest)$"),
     limit: int = Query(default=24, ge=1, le=100),
@@ -39,7 +42,10 @@ async def search(
             "brand_id": brand_id,
             "min_price": min_price,
             "max_price": max_price,
+            "max_delivery_days": max_delivery_days,
             "in_stock": in_stock,
+            "store_id": store_id,
+            "seller_id": seller_id,
             "sort": sort,
             "limit": limit,
             "cursor": cursor,
@@ -58,6 +64,9 @@ async def search(
         min_price=min_price,
         max_price=max_price,
         in_stock=in_stock,
+        store_ids=store_id,
+        seller_ids=seller_id,
+        max_delivery_days=max_delivery_days,
         sort=sort,
         limit=limit,
         cursor=cursor,

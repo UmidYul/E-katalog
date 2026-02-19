@@ -3,14 +3,25 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { userApi } from "@/lib/api/openapi-client";
+import { authStore } from "@/store/auth.store";
 
 export const useFavorites = () =>
   useQuery({
     queryKey: ["user", "favorites"],
     queryFn: async () => {
-      const { data } = await userApi.favorites();
-      return data;
-    }
+      try {
+        const { data } = await userApi.favorites();
+        return data;
+      } catch (error) {
+        const normalized = error as { status?: number };
+        if (normalized.status === 401) {
+          return [];
+        }
+        throw error;
+      }
+    },
+    retry: false,
+    enabled: authStore((s) => s.isAuthenticated),
   });
 
 export const useToggleFavorite = () => {

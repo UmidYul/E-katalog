@@ -3,9 +3,8 @@ import { Inter } from "next/font/google";
 
 import "./globals.css";
 
-import { SiteFooter } from "@/components/layout/site-footer";
-import { SiteHeader } from "@/components/layout/site-header";
 import { Providers } from "@/components/common/providers";
+import { RootShell } from "@/components/layout/root-shell";
 import { env } from "@/config/env";
 
 const inter = Inter({ subsets: ["latin", "cyrillic"] });
@@ -34,9 +33,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
         <Providers>
-          <SiteHeader />
-          <main>{children}</main>
-          <SiteFooter />
+          <RootShell>{children}</RootShell>
         </Providers>
       </body>
     </html>
