@@ -42,3 +42,5 @@ export type FilterBucket = {
   key: string;
   label: string;
   values: Array<{ value: string; label: string; count?: number }>;
+};
+

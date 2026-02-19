@@ -27,3 +27,5 @@ export const useRecentlyViewedStore = create<RecentlyViewedState>()(
     }),
     { name: "recently-viewed-store" }
   )
+);
+

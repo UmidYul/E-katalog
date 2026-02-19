@@ -18,4 +18,5 @@ export const authStore = create<AuthState>((set) => ({
   isAuthenticated: false,
   setSession: (user) => set({ user, isAuthenticated: true }),
   clearSession: () => set({ user: null, isAuthenticated: false })
-}))
+}));
+

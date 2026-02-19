@@ -12,4 +12,5 @@ export const useUiStore = create<UiState>((set, get) => ({
   theme: "light",
   setMobileFilterOpen: (mobileFilterOpen) => set({ mobileFilterOpen }),
   toggleTheme: () => set({ theme: get().theme === "dark" ? "light" : "dark" })
-}))
+}));
+
