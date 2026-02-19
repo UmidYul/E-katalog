@@ -28,10 +28,11 @@ App runs on `http://localhost:3000`.
 ## Environment
 
 ```env
-NEXT_PUBLIC_APP_URL=http://localhost:3000
-NEXT_PUBLIC_API_ORIGIN=http://localhost:8000
+NEXT_PUBLIC_APP_URL=http://localhost
+NEXT_PUBLIC_API_ORIGIN=
 NEXT_PUBLIC_API_PREFIX=/api/v1
 NEXT_PUBLIC_SITE_NAME=ZincMarket
+API_INTERNAL_ORIGIN=http://api:8000
 ```
 
 ## API Types
@@ -56,6 +57,8 @@ npm run start
 ## Architecture Notes
 
 - Auth strategy: cookie-based JWT (no localStorage token), refresh flow in `lib/api/interceptors.ts`.
+- Backend auth endpoints used by frontend: `/api/v1/auth/{register,login,refresh,logout,me}`.
+- Favorites endpoints used by frontend: `/api/v1/users/favorites`.
 - Protected routes: `middleware.ts` for `/profile`, `/favorites`, `/recently-viewed`.
 - Server state: TanStack Query; UI/local state: Zustand.
 - Catalog filters are URL-synced and support dynamic attribute filters from `/filters`.

@@ -66,10 +66,26 @@ services:
         condition: service_started
     command: ["celery", "-A", "app.celery_app:celery_app", "beat", "--loglevel=INFO"]
 
+  frontend:
+    build:
+      context: ../..
+      dockerfile: frontend/Dockerfile
+      args:
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost}
+        NEXT_PUBLIC_API_ORIGIN: ${NEXT_PUBLIC_API_ORIGIN:-}
+        NEXT_PUBLIC_API_PREFIX: ${NEXT_PUBLIC_API_PREFIX:-/api/v1}
+        NEXT_PUBLIC_SITE_NAME: ${NEXT_PUBLIC_SITE_NAME:-ZincMarket}
+        API_INTERNAL_ORIGIN: ${API_INTERNAL_ORIGIN:-http://api:8000}
+    depends_on:
+      api:
+        condition: service_started
+
   nginx:
     image: nginx:1.27-alpine
     depends_on:
       api:
+        condition: service_started
+      frontend:
         condition: service_started
     ports:
       - "80:80"

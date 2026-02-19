@@ -14,30 +14,18 @@ export type CatalogQuery = {
   cursor?: string;
 };
 
-const mapArrayParam = (key: string, values?: number[]) => {
-  if (!values?.length) {
-    return {};
-  }
-  return Object.fromEntries(values.map((v, idx) => [`${key}[${idx}]`, v]));
-};
-
-const mapAttrs = (attrs?: Record<string, string[]>) => {
-  if (!attrs) return {};
-  const entries: Array<[string, string]> = [];
-  Object.entries(attrs).forEach(([key, values]) => values.forEach((value) => entries.push([key, value])));
-  return Object.fromEntries(entries.map(([key, value], idx) => [`attr[${idx}]`, `${key}:${value}`]));
-};
-
 export const catalogApi = {
   async search(query: CatalogQuery): Promise<Paginated<ProductListItem>> {
     const { attrs, ...rest } = query;
-    const params = { ...rest, ...mapArrayParam("brand_id", query.brand_id), ...mapAttrs(attrs) };
+    const flatAttrs = attrs ? Object.entries(attrs).flatMap(([key, values]) => values.map((value) => `${key}:${value}`)) : undefined;
+    const params = { ...rest, attr: flatAttrs };
     const { data } = await apiClient.get<Paginated<ProductListItem>>("/search", { params });
     return data;
   },
   async listProducts(query: CatalogQuery): Promise<Paginated<ProductListItem>> {
     const { attrs, ...rest } = query;
-    const params = { ...rest, ...mapArrayParam("brand_id", query.brand_id), ...mapAttrs(attrs) };
+    const flatAttrs = attrs ? Object.entries(attrs).flatMap(([key, values]) => values.map((value) => `${key}:${value}`)) : undefined;
+    const params = { ...rest, attr: flatAttrs };
     const { data } = await apiClient.get<Paginated<ProductListItem>>("/products", { params });
     return data;
   },
@@ -67,7 +55,7 @@ export const catalogApi = {
 
 export const authApi = {
   login: (payload: { email: string; password: string }) => apiClient.post("/auth/login", payload),
-  register: (payload: { email: string; password: string; fullName: string }) => apiClient.post("/auth/register", payload),
+  register: (payload: { email: string; password: string; full_name: string }) => apiClient.post("/auth/register", payload),
   logout: () => apiClient.post("/auth/logout"),
   me: () => apiClient.get<{ id: number; email: string; full_name: string }>("/auth/me")
 };

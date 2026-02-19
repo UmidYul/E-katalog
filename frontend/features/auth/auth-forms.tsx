@@ -59,7 +59,7 @@ export function RegisterForm() {
         <form
           className="space-y-4"
           onSubmit={form.handleSubmit(async (values) => {
-            await register.mutateAsync({ email: values.email, password: values.password, fullName: values.fullName });
+            await register.mutateAsync({ email: values.email, password: values.password, full_name: values.fullName });
             router.push("/profile");
           })}
         >
