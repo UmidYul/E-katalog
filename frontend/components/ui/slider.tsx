@@ -1,0 +1,16 @@
+﻿"use client";
+
+import * as SliderPrimitive from "@radix-ui/react-slider";
+
+export function Slider({ value, min = 0, max = 100, onValueChange }: { value: number[]; min?: number; max?: number; onValueChange: (v: number[]) => void }) {
+  return (
+    <SliderPrimitive.Root value={value} min={min} max={max} onValueChange={onValueChange} className="relative flex w-full touch-none select-none items-center">
+      <SliderPrimitive.Track className="relative h-2 w-full grow overflow-hidden rounded-full bg-secondary">
+        <SliderPrimitive.Range className="absolute h-full bg-primary" />
+      </SliderPrimitive.Track>
+      <SliderPrimitive.Thumb className="block h-4 w-4 rounded-full border border-primary bg-background shadow" />
+      <SliderPrimitive.Thumb className="block h-4 w-4 rounded-full border border-primary bg-background shadow" />
+    </SliderPrimitive.Root>
+  );
+}
+
