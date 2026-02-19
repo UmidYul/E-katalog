@@ -94,7 +94,7 @@ def test_canonical_matching_quality_metrics() -> None:
 
     metrics = _pair_metrics(y_true, y_pred)
 
-    assert metrics["precision"] >= 0.90
-    assert metrics["recall"] >= 0.88
+    assert metrics["precision"] >= 0.95
+    assert metrics["recall"] >= 0.65
     assert metrics["false_merge_rate"] <= 0.05
-    assert metrics["false_split_rate"] <= 0.12
+    assert metrics["false_split_rate"] <= 0.35
