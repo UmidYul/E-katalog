@@ -23,7 +23,7 @@ class ExampleStoreParser(StoreParser):
     shop_url = str(settings.example_store_base_url)
 
     def __init__(self) -> None:
-        self._http = ScraperHTTPClient(rate_limit_per_second=8)
+        self._http = ScraperHTTPClient(rate_limit_per_second=2)
         self._product_cache: dict[str, ParsedProduct] = {}
 
     async def discover_product_links(self, category_url: str) -> list[str]:
@@ -124,12 +124,27 @@ class ExampleStoreParser(StoreParser):
             browser = await pw.chromium.launch(headless=settings.playwright_headless)
             context = await browser.new_context()
             page = await context.new_page()
+            api_responses = []
+            page.on(
+                "response",
+                lambda resp: api_responses.append(resp)
+                if ("graphql" in resp.url or "/api/" in resp.url or "catalog" in resp.url)
+                else None,
+            )
             response = await page.goto(product_url, wait_until="domcontentloaded", timeout=60000)
-            await page.wait_for_timeout(1200)
+            await page.wait_for_timeout(1800)
             html = await page.content()
             if response is not None and response.status in {403, 429, 503}:
                 self._raise_if_rate_limited_page(html, product_url)
             self._raise_if_rate_limited_page(html, product_url)
+            network_payloads: list[str] = []
+            for api_resp in api_responses:
+                try:
+                    body = await api_resp.text()
+                except Exception:  # noqa: BLE001
+                    continue
+                if body:
+                    network_payloads.append(body)
             await context.close()
             await browser.close()
 
@@ -153,9 +168,15 @@ class ExampleStoreParser(StoreParser):
         if price is None and cached:
             price = cached.price
         if price is None:
+            price = self._extract_price_from_html(html)
+        if price is None:
+            price = self._extract_price_from_network_payloads(network_payloads)
+        if price is None:
             raise ValueError("price not found")
 
         old_price = self._parse_price_safe(old_price_node.text(strip=True)) if old_price_node else None
+        if old_price is None:
+            old_price = self._extract_old_price_from_html(html)
         availability = availability_node.text(strip=True) if availability_node else "unknown"
         images = self._extract_product_images(tree=tree, html=html, product_url=product_url)
         specs = {
@@ -284,6 +305,71 @@ class ExampleStoreParser(StoreParser):
         )
         if og_title_match:
             return og_title_match.group(1).strip()
+        return None
+
+    @staticmethod
+    def _extract_price_from_html(html: str) -> Decimal | None:
+        # JSON-LD / inline JSON: "price": 12345
+        for match in re.findall(r'"price"\s*:\s*"?([0-9][0-9\s.,]*)"?', html, flags=re.IGNORECASE):
+            parsed = ExampleStoreParser._parse_price_safe(match)
+            if parsed is not None and parsed > 0:
+                return parsed
+
+        # Generic data attributes often used in storefront templates.
+        for match in re.findall(r'data-price\s*=\s*"([^"]+)"', html, flags=re.IGNORECASE):
+            parsed = ExampleStoreParser._parse_price_safe(match)
+            if parsed is not None and parsed > 0:
+                return parsed
+
+        # Nuxt bundle pattern: offers may contain lowPrice/highPrice as variable refs (e.g., lowPrice:g).
+        var_names = set(
+            re.findall(
+                r"(?:lowPrice|highPrice)\s*:\s*([A-Za-z_$][A-Za-z0-9_$]*)",
+                html,
+                flags=re.IGNORECASE,
+            )
+        )
+        for name in var_names:
+            assign_pattern = rf"(?:const|let|var)\s+{re.escape(name)}\s*=\s*['\"]?([0-9][0-9\s.,]*)['\"]?"
+            for match in re.findall(assign_pattern, html):
+                parsed = ExampleStoreParser._parse_price_safe(match)
+                if parsed is not None and parsed > 0:
+                    return parsed
+
+        # FAQ fallback occasionally contains explicit amount text.
+        faq_match = re.search(r"составляет\s+([0-9][0-9\s.,]*)\s+сум", html, flags=re.IGNORECASE)
+        if faq_match:
+            parsed = ExampleStoreParser._parse_price_safe(faq_match.group(1))
+            if parsed is not None and parsed > 0:
+                return parsed
+        return None
+
+    @staticmethod
+    def _extract_old_price_from_html(html: str) -> Decimal | None:
+        for match in re.findall(r'"oldPrice"\s*:\s*"?([0-9][0-9\s.,]*)"?', html, flags=re.IGNORECASE):
+            parsed = ExampleStoreParser._parse_price_safe(match)
+            if parsed is not None and parsed > 0:
+                return parsed
+        for match in re.findall(r'"fullPrice"\s*:\s*"?([0-9][0-9\s.,]*)"?', html, flags=re.IGNORECASE):
+            parsed = ExampleStoreParser._parse_price_safe(match)
+            if parsed is not None and parsed > 0:
+                return parsed
+        return None
+
+    @staticmethod
+    def _extract_price_from_network_payloads(payloads: list[str]) -> Decimal | None:
+        patterns = [
+            r'"minSellPrice"\s*:\s*"?([0-9][0-9\s.,]*)"?',
+            r'"sellPrice"\s*:\s*"?([0-9][0-9\s.,]*)"?',
+            r'"fullPrice"\s*:\s*"?([0-9][0-9\s.,]*)"?',
+            r'"price"\s*:\s*"?([0-9][0-9\s.,]*)"?',
+        ]
+        for body in payloads:
+            for pattern in patterns:
+                for match in re.findall(pattern, body, flags=re.IGNORECASE):
+                    parsed = ExampleStoreParser._parse_price_safe(match)
+                    if parsed is not None and parsed > 0:
+                        return parsed
         return None
 
     @staticmethod

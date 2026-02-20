@@ -72,6 +72,12 @@ class ScraperService:
             except UpstreamRateLimitedError as exc:
                 logger.error("upstream_rate_limited_product", product_url=product_url, error=str(exc))
                 return True
+            except ValueError as exc:
+                if str(exc).lower() == "price not found":
+                    logger.warning("product_skipped_no_price", product_url=product_url)
+                    return False
+                logger.error("product_parse_failed", product_url=product_url, error=str(exc))
+                return False
             except Exception as exc:  # noqa: BLE001
                 logger.error("product_parse_failed", product_url=product_url, error=str(exc))
                 return False

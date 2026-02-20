@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False)
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra="ignore")
 
     environment: Literal["local", "staging", "production"] = "local"
     log_level: str = "INFO"
@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     ai_spec_max_attempts: int = 2
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
+    ai_canonical_matching_enabled: bool = False
+    ai_canonical_min_confidence: float = 0.90
+    ai_canonical_candidates_limit: int = 20
+    ai_dedupe_merge_enabled: bool = False
+    ai_dedupe_min_confidence: float = 0.95
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000

@@ -43,22 +43,34 @@ class CatalogRepository:
         return data["d"]
 
     async def get_product(self, product_id: int) -> dict | None:
-        stmt = (
-            select(
-                CatalogCanonicalProduct.id,
-                CatalogCanonicalProduct.normalized_title,
-                CatalogCanonicalProduct.main_image,
-                CatalogCanonicalProduct.specs,
-                CatalogCategory.name_uz.label("category_name"),
-                CatalogBrand.name.label("brand_name"),
+        visited: set[int] = set()
+        row = None
+        while True:
+            if product_id in visited:
+                return None
+            visited.add(product_id)
+            stmt = (
+                select(
+                    CatalogCanonicalProduct.id,
+                    CatalogCanonicalProduct.normalized_title,
+                    CatalogCanonicalProduct.main_image,
+                    CatalogCanonicalProduct.specs,
+                    CatalogCanonicalProduct.is_active,
+                    CatalogCanonicalProduct.merged_into_id,
+                    CatalogCategory.name_uz.label("category_name"),
+                    CatalogBrand.name.label("brand_name"),
+                )
+                .join(CatalogCategory, CatalogCategory.id == CatalogCanonicalProduct.category_id)
+                .outerjoin(CatalogBrand, CatalogBrand.id == CatalogCanonicalProduct.brand_id)
+                .where(CatalogCanonicalProduct.id == product_id)
             )
-            .join(CatalogCategory, CatalogCategory.id == CatalogCanonicalProduct.category_id)
-            .outerjoin(CatalogBrand, CatalogBrand.id == CatalogCanonicalProduct.brand_id)
-            .where(CatalogCanonicalProduct.id == product_id)
-        )
-        row = (await self.session.execute(stmt)).one_or_none()
-        if row is None:
-            return None
+            row = (await self.session.execute(stmt)).one_or_none()
+            if row is None:
+                return None
+            if row.is_active or not row.merged_into_id:
+                break
+            product_id = int(row.merged_into_id)
+
         specs = row.specs if isinstance(row.specs, dict) else {}
         if not specs:
             fallback_specs_stmt = text(
@@ -223,6 +235,7 @@ class CatalogRepository:
             .join(CatalogProductSearch, CatalogProductSearch.product_id == CatalogCanonicalProduct.id)
             .join(CatalogCategory, CatalogCategory.id == CatalogCanonicalProduct.category_id)
             .outerjoin(CatalogBrand, CatalogBrand.id == CatalogCanonicalProduct.brand_id)
+            .where(CatalogCanonicalProduct.is_active.is_(True))
         )
 
         filters = []

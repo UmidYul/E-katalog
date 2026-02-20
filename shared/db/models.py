@@ -85,6 +85,10 @@ class CatalogCanonicalProduct(Base):
     main_image: Mapped[str | None] = mapped_column(Text)
     category_id: Mapped[int] = mapped_column(ForeignKey("catalog_categories.id", ondelete="RESTRICT"), nullable=False)
     brand_id: Mapped[int | None] = mapped_column(ForeignKey("catalog_brands.id", ondelete="SET NULL"))
+    merged_into_id: Mapped[int | None] = mapped_column(
+        ForeignKey("catalog_canonical_products.id", ondelete="SET NULL"), nullable=True
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
     specs: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
     embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -275,6 +279,22 @@ class CatalogDuplicateCandidate(Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class CatalogCanonicalMergeEvent(Base):
+    __tablename__ = "catalog_canonical_merge_events"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    from_product_id: Mapped[int | None] = mapped_column(
+        ForeignKey("catalog_canonical_products.id", ondelete="SET NULL"), nullable=True
+    )
+    to_product_id: Mapped[int | None] = mapped_column(
+        ForeignKey("catalog_canonical_products.id", ondelete="SET NULL"), nullable=True
+    )
+    reason: Mapped[str] = mapped_column(String(128), nullable=False)
+    score: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class CatalogCrawlJob(Base):
     __tablename__ = "catalog_crawl_jobs"
 
@@ -321,6 +341,8 @@ Index("ix_catalog_scrape_sources_store_id", CatalogScrapeSource.store_id)
 Index("ix_catalog_scrape_sources_is_active", CatalogScrapeSource.is_active)
 Index("ix_catalog_scrape_sources_priority", CatalogScrapeSource.priority)
 Index("ix_catalog_canonical_products_category_brand", CatalogCanonicalProduct.category_id, CatalogCanonicalProduct.brand_id)
+Index("ix_catalog_canonical_products_is_active", CatalogCanonicalProduct.is_active)
+Index("ix_catalog_canonical_products_merged_into_id", CatalogCanonicalProduct.merged_into_id)
 Index("ix_catalog_canonical_products_specs", CatalogCanonicalProduct.specs, postgresql_using="gin")
 Index("ix_catalog_products_category_brand", CatalogProduct.category_id, CatalogProduct.brand_id)
 Index("ix_catalog_products_status", CatalogProduct.status)
@@ -344,6 +366,9 @@ Index("ix_catalog_product_search_max_price", CatalogProductSearch.max_price)
 Index("ix_catalog_product_search_store_count", CatalogProductSearch.store_count)
 Index("ix_catalog_product_embeddings_model", CatalogProductEmbedding.model_name, CatalogProductEmbedding.model_version)
 Index("ix_catalog_duplicate_status_score", CatalogDuplicateCandidate.status, CatalogDuplicateCandidate.score.desc())
+Index("ix_catalog_canonical_merge_events_from", CatalogCanonicalMergeEvent.from_product_id)
+Index("ix_catalog_canonical_merge_events_to", CatalogCanonicalMergeEvent.to_product_id)
+Index("ix_catalog_canonical_merge_events_created_at", CatalogCanonicalMergeEvent.created_at.desc())
 Index("ix_catalog_ai_jobs_status_stage", CatalogAIEnrichmentJob.status, CatalogAIEnrichmentJob.stage)
 Index("ix_catalog_ai_jobs_product_id", CatalogAIEnrichmentJob.product_id)
 Index("ix_catalog_crawl_jobs_store_started", CatalogCrawlJob.store_id, CatalogCrawlJob.started_at.desc())

@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
+from app.core.config import settings
 from app.core.logging import logger
 from app.db.session import AsyncSessionLocal
 from app.platform.models import (
@@ -23,6 +24,8 @@ from app.platform.services.normalization import (
     normalize_specs,
     normalize_title,
 )
+from app.platform.services.pipeline_offsets import ensure_offsets_table, get_offset, set_offset
+from app.platform.services.ai_matching import ai_choose_canonical_candidate
 from app.celery_app import celery_app
 
 
@@ -45,6 +48,7 @@ async def _resolve_or_create_canonical(session, *, title: str, category_id: int,
                 CatalogCanonicalProduct.category_id == category_id,
                 CatalogCanonicalProduct.brand_id == brand_id,
                 CatalogCanonicalProduct.normalized_title == title,
+                CatalogCanonicalProduct.is_active.is_(True),
             )
         )
     ).scalar_one_or_none()
@@ -54,6 +58,29 @@ async def _resolve_or_create_canonical(session, *, title: str, category_id: int,
         if specs and (not isinstance(canonical.specs, dict) or not canonical.specs):
             canonical.specs = specs
         return canonical
+
+    ai_candidate_id = await _find_ai_canonical_candidate(
+        session,
+        title=title,
+        category_id=category_id,
+        brand_id=brand_id,
+        specs=specs,
+    )
+    if ai_candidate_id is not None:
+        canonical = (
+            await session.execute(
+                select(CatalogCanonicalProduct).where(
+                    CatalogCanonicalProduct.id == ai_candidate_id,
+                    CatalogCanonicalProduct.is_active.is_(True),
+                )
+            )
+        ).scalar_one_or_none()
+        if canonical:
+            if image and not canonical.main_image:
+                canonical.main_image = image
+            if specs and (not isinstance(canonical.specs, dict) or not canonical.specs):
+                canonical.specs = specs
+            return canonical
 
     canonical = CatalogCanonicalProduct(
         normalized_title=title,
@@ -65,6 +92,72 @@ async def _resolve_or_create_canonical(session, *, title: str, category_id: int,
     session.add(canonical)
     await session.flush()
     return canonical
+
+
+async def _find_ai_canonical_candidate(
+    session,
+    *,
+    title: str,
+    category_id: int,
+    brand_id: int | None,
+    specs: dict,
+) -> int | None:
+    if not settings.ai_canonical_matching_enabled:
+        return None
+    query = text(
+        """
+        select id, normalized_title, specs
+        from catalog_canonical_products
+        where is_active = true
+          and category_id = :category_id
+          and (
+            (:brand_id is null and brand_id is null)
+            or brand_id = :brand_id
+          )
+          and similarity(lower(normalized_title), lower(:title)) >= 0.25
+        order by similarity(lower(normalized_title), lower(:title)) desc, id asc
+        limit :limit
+        """
+    )
+    rows = (
+        await session.execute(
+            query,
+            {
+                "category_id": category_id,
+                "brand_id": brand_id,
+                "title": title,
+                "limit": settings.ai_canonical_candidates_limit,
+            },
+        )
+    ).mappings().all()
+    if not rows:
+        return None
+    candidates = [
+        {
+            "id": int(row["id"]),
+            "title": str(row["normalized_title"]),
+            "specs": row["specs"] if isinstance(row["specs"], dict) else {},
+        }
+        for row in rows
+    ]
+    candidate_id, confidence, reason = await ai_choose_canonical_candidate(
+        input_title=title,
+        input_specs=specs,
+        candidates=candidates,
+    )
+    logger.info(
+        "ai_canonical_resolution",
+        title=title,
+        candidate_id=candidate_id,
+        confidence=confidence,
+        reason=reason,
+        candidates=len(candidates),
+    )
+    if candidate_id is None:
+        return None
+    if confidence < settings.ai_canonical_min_confidence:
+        return None
+    return int(candidate_id)
 
 
 async def _resolve_or_create_seller(session, *, store_id: int, store_name: str, metadata: dict) -> CatalogSeller:
@@ -88,14 +181,29 @@ async def _resolve_or_create_seller(session, *, store_id: int, store_name: str, 
 
 async def _normalize_product_batch(limit: int) -> dict:
     processed = 0
+    watermark_ts = None
+    watermark_id = 0
     async with AsyncSessionLocal() as session:
+        await ensure_offsets_table(session)
+        last_ts, last_id = await get_offset(session, "normalize_store_products")
+
+        filters = []
+        if last_ts is not None:
+            filters.append(
+                (CatalogStoreProduct.updated_at > last_ts)
+                | ((CatalogStoreProduct.updated_at == last_ts) & (CatalogStoreProduct.id > last_id))
+            )
+        stmt = (
+            select(CatalogStoreProduct, CatalogProduct, CatalogStore)
+            .join(CatalogStore, CatalogStore.id == CatalogStoreProduct.store_id)
+            .outerjoin(CatalogProduct, CatalogProduct.id == CatalogStoreProduct.product_id)
+        )
+        if filters:
+            stmt = stmt.where(*filters)
+        stmt = stmt.order_by(CatalogStoreProduct.updated_at.asc(), CatalogStoreProduct.id.asc()).limit(limit)
         rows = (
             await session.execute(
-                select(CatalogStoreProduct, CatalogProduct, CatalogStore)
-                .join(CatalogStore, CatalogStore.id == CatalogStoreProduct.store_id)
-                .outerjoin(CatalogProduct, CatalogProduct.id == CatalogStoreProduct.product_id)
-                .order_by(CatalogStoreProduct.updated_at.asc())
-                .limit(limit)
+                stmt
             )
         ).all()
 
@@ -157,7 +265,16 @@ async def _normalize_product_batch(limit: int) -> dict:
                 )
             )
             processed += 1
+            watermark_ts = store_product.updated_at
+            watermark_id = int(store_product.id)
 
+        if processed:
+            await set_offset(
+                session,
+                "normalize_store_products",
+                last_ts=watermark_ts,
+                last_id=watermark_id,
+            )
         await session.commit()
         logger.info("normalize_batch_completed", processed=processed)
         return {"processed": processed, "at": datetime.now(UTC).isoformat()}

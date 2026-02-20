@@ -16,13 +16,21 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db_session, get_redis
+from app.api.v1.routers.auth import get_current_user
 from app.services.worker_client import enqueue_dedupe_batches
 from app.services.worker_client import enqueue_embedding_batches
 from app.services.worker_client import enqueue_full_crawl
 from app.services.worker_client import enqueue_reindex_batches
 from app.services.worker_client import get_task_status
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+def require_admin(user: dict = Depends(get_current_user)) -> dict:
+    role = str(user.get("role", "")).lower()
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="admin access required")
+    return user
+
+
+router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 
 
 class PaginatedOut(BaseModel):

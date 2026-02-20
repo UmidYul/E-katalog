@@ -90,7 +90,8 @@ async def get_product(product_id: int, request: Request, db: AsyncSession = Depe
     product = await repo.get_product(product_id)
     if not product:
         raise HTTPException(status_code=404, detail="product not found")
-    offers_by_store = await repo.get_offers_by_store(product_id=product_id, limit=150, in_stock=None, sort="price")
+    resolved_product_id = int(product["id"])
+    offers_by_store = await repo.get_offers_by_store(product_id=resolved_product_id, limit=150, in_stock=None, sort="price")
 
     payload = {
         "id": product["id"],
