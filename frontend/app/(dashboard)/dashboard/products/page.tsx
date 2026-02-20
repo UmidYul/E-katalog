@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Download, Upload } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { EmptyState } from "@/components/common/empty-state";
 import { ErrorState } from "@/components/common/error-state";
@@ -12,7 +12,8 @@ import { ConfirmModal } from "@/components/modals/confirm-modal";
 import { AdminTable, type AdminColumn } from "@/components/tables/admin-table";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { useAdminProducts, useDeleteProduct } from "@/features/products/use-admin-products";
+import { Checkbox } from "@/components/ui/checkbox";
+import { useAdminProducts, useBulkDeleteProducts, useDeleteProduct } from "@/features/products/use-admin-products";
 import { adminApi } from "@/lib/api/openapi-client";
 import { formatPrice } from "@/lib/utils/format";
 import { useDashboardFiltersStore } from "@/store/filters.store";
@@ -22,9 +23,35 @@ export default function AdminProductsPage() {
   const { query, setQuery, page, setPage, limit } = useDashboardFiltersStore();
   const products = useAdminProducts({ q: query, page, limit, sort: "newest" });
   const deleteProduct = useDeleteProduct();
+  const bulkDeleteProducts = useBulkDeleteProducts();
   const [targetId, setTargetId] = useState<number | null>(null);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+
+  const rowIds = useMemo(() => (products.data?.items ?? []).map((item) => item.id), [products.data?.items]);
+  const allChecked = rowIds.length > 0 && rowIds.every((id) => selectedIds.includes(id));
+  const selectedCount = selectedIds.length;
+
+  const toggleRow = (id: number, checked: boolean) => {
+    setSelectedIds((prev) => (checked ? Array.from(new Set([...prev, id])) : prev.filter((item) => item !== id)));
+  };
+
+  const toggleAll = (checked: boolean) => {
+    setSelectedIds((prev) => {
+      if (!checked) return prev.filter((id) => !rowIds.includes(id));
+      return Array.from(new Set([...prev, ...rowIds]));
+    });
+  };
 
   const columns: AdminColumn<AdminProduct>[] = [
+    {
+      key: "select",
+      title: <Checkbox checked={allChecked} onCheckedChange={toggleAll} disabled={!rowIds.length} />,
+      className: "w-10",
+      render: (x) => (
+        <Checkbox checked={selectedIds.includes(x.id)} onCheckedChange={(checked) => toggleRow(x.id, checked)} />
+      ),
+    },
     { key: "id", title: "ID", sortable: true, render: (x) => x.id },
     {
       key: "title",
@@ -69,6 +96,13 @@ export default function AdminProductsPage() {
             <Button variant="secondary" className="gap-2" onClick={() => adminApi.bulkImportProducts({ source: "json", content: "[]" })}>
               <Upload className="h-4 w-4" /> Import JSON
             </Button>
+            <Button
+              variant="secondary"
+              disabled={selectedCount === 0}
+              onClick={() => setBulkDeleteOpen(true)}
+            >
+              Delete selected ({selectedCount})
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -92,7 +126,29 @@ export default function AdminProductsPage() {
         loading={deleteProduct.isPending}
         onConfirm={() => {
           if (!targetId) return;
-          deleteProduct.mutate(targetId, { onSuccess: () => setTargetId(null) });
+          deleteProduct.mutate(targetId, {
+            onSuccess: () => {
+              setTargetId(null);
+              setSelectedIds((prev) => prev.filter((id) => id !== targetId));
+            },
+          });
+        }}
+      />
+
+      <ConfirmModal
+        open={bulkDeleteOpen}
+        onOpenChange={setBulkDeleteOpen}
+        title="Delete selected products"
+        description={`This will delete ${selectedCount} products.`}
+        loading={bulkDeleteProducts.isPending}
+        onConfirm={() => {
+          if (!selectedIds.length) return;
+          bulkDeleteProducts.mutate(selectedIds, {
+            onSuccess: () => {
+              setBulkDeleteOpen(false);
+              setSelectedIds([]);
+            },
+          });
         }}
       />
     </div>

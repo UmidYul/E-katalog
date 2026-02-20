@@ -12,10 +12,27 @@ class ProductService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    @staticmethod
+    def _shop_name_candidates(name: str) -> set[str]:
+        clean = " ".join(name.split()).strip()
+        if not clean:
+            return {name}
+        lowered = clean.lower()
+        candidates = {clean}
+        if lowered.endswith(" uz"):
+            candidates.add(clean[:-3].strip())
+        else:
+            candidates.add(f"{clean} UZ")
+        return {item for item in candidates if item}
+
     async def get_or_create_shop(self, name: str, url: str) -> Shop:
-        result = await self.session.execute(select(Shop).where(Shop.name == name))
+        candidates = self._shop_name_candidates(name)
+        result = await self.session.execute(select(Shop).where(Shop.name.in_(candidates)))
         shop = result.scalar_one_or_none()
         if shop:
+            if shop.name != name:
+                shop.name = name
+                shop.url = url
             return shop
         shop = Shop(name=name, url=url)
         self.session.add(shop)
@@ -24,10 +41,13 @@ class ProductService:
             return shop
         except IntegrityError:
             await self.session.rollback()
-            result = await self.session.execute(select(Shop).where(Shop.name == name))
+            result = await self.session.execute(select(Shop).where(Shop.name.in_(candidates)))
             existing = result.scalar_one_or_none()
             if existing is None:
                 raise
+            if existing.name != name:
+                existing.name = name
+                existing.url = url
             return existing
 
     async def upsert_offer(self, parsed: ParsedProduct, shop: Shop, category_id: int | None = None) -> Offer:

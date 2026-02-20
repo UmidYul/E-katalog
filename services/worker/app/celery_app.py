@@ -62,6 +62,7 @@ celery_app.conf.update(
         "app.tasks.export_tasks.export_json": {"queue": "export", "routing_key": "export"},
         "app.tasks.export_tasks.export_csv": {"queue": "export", "routing_key": "export"},
         "app.tasks.maintenance_tasks.cleanup_stale_offers": {"queue": "maintenance", "routing_key": "maintenance"},
+        "app.tasks.maintenance_tasks.cleanup_empty_canonicals": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.maintenance_tasks.rotate_price_history_partitions": {"queue": "maintenance", "routing_key": "maintenance"},
     },
     beat_schedule={
@@ -98,6 +99,11 @@ celery_app.conf.update(
         "cleanup-daily-0230": {
             "task": "app.tasks.maintenance_tasks.cleanup_stale_offers",
             "schedule": crontab(minute=30, hour=2),
+            "options": {"queue": "maintenance", "routing_key": "maintenance"},
+        },
+        "cleanup-empty-canonicals-daily-0245": {
+            "task": "app.tasks.maintenance_tasks.cleanup_empty_canonicals",
+            "schedule": crontab(minute=45, hour=2),
             "options": {"queue": "maintenance", "routing_key": "maintenance"},
         },
     },

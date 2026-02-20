@@ -110,10 +110,7 @@ async def _find_ai_canonical_candidate(
         from catalog_canonical_products
         where is_active = true
           and category_id = :category_id
-          and (
-            (:brand_id is null and brand_id is null)
-            or brand_id = :brand_id
-          )
+          and brand_id is not distinct from cast(:brand_id as bigint)
           and similarity(lower(normalized_title), lower(:title)) >= 0.25
         order by similarity(lower(normalized_title), lower(:title)) desc, id asc
         limit :limit
@@ -208,6 +205,7 @@ async def _normalize_product_batch(limit: int) -> dict:
         ).all()
 
         for store_product, product, store in rows:
+            store_product_updated_at = store_product.updated_at
             title_source = store_product.title_clean or store_product.title_raw
             normalized = normalize_title(title_source)
             canonical_title = build_canonical_title(title_source)
@@ -265,7 +263,7 @@ async def _normalize_product_batch(limit: int) -> dict:
                 )
             )
             processed += 1
-            watermark_ts = store_product.updated_at
+            watermark_ts = store_product_updated_at
             watermark_id = int(store_product.id)
 
         if processed:

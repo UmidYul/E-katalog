@@ -41,7 +41,8 @@ async def ai_choose_canonical_candidate(
     prompt = (
         "You are a strict product matching system.\n"
         "Task: pick one canonical candidate that is the same exact product variant as input.\n"
-        "Important: color and storage are variant-defining attributes for smartphones.\n"
+        "Important: model and storage are variant-defining attributes for smartphones.\n"
+        "Color differences alone should not create a separate canonical.\n"
         "Return ONLY JSON: {\"candidate_id\": <int|null>, \"confidence\": <0..1>, \"reason\": \"...\"}.\n"
         f"Input title: {input_title}\n"
         f"Input specs: {json.dumps(input_specs, ensure_ascii=False)}\n"
@@ -54,7 +55,6 @@ async def ai_choose_canonical_candidate(
     }
     body = {
         "model": settings.openai_model,
-        "temperature": 0,
         "input": prompt,
     }
 
@@ -120,7 +120,6 @@ async def ai_should_merge_duplicates(
     }
     body = {
         "model": settings.openai_model,
-        "temperature": 0,
         "input": prompt,
     }
 

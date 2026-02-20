@@ -1,5 +1,40 @@
 import re
 
+from app.platform.services.canonical_matching import extract_attributes
+
+
+_NOISE_PATTERNS: tuple[str, ...] = (
+    r"\bsmartfon\b",
+    r"\bsmartphone\b",
+    r"\b\u0441\u043c\u0430\u0440\u0442\u0444\u043e\u043d\w*\b",
+    r"\b\u0432\s+\u0442\u0430\u0448\u043a\u0435\u043d\u0442\u0435\b",
+    r"\btsena\b",
+    r"\bcena\b",
+    r"\b\u0446\u0435\u043d\u0430\b",
+)
+
+_COLOR_PATTERNS: tuple[str, ...] = (
+    r"\bdeep blue\b",
+    r"\bcosmic orange\b",
+    r"\bmist blue\b",
+    r"\blavender\b",
+    r"\bsilver\b",
+    r"\bblack\b",
+    r"\bwhite\b",
+    r"\bblue\b",
+    r"\bgreen\b",
+    r"\bpink\b",
+    r"\byellow\b",
+    r"\bsage\b",
+    r"\bmidnight\b",
+    r"\bgraphite\b",
+)
+
+_SMARTPHONE_PATTERN = re.compile(
+    r"\b(iphone|galaxy|samsung|xiaomi|redmi|honor|oneplus|pixel|nothing)\b",
+    flags=re.IGNORECASE,
+)
+
 
 def normalize_title(raw_title: str) -> str:
     text = raw_title.lower().strip()
@@ -41,37 +76,30 @@ def _normalize_memory_notation(text: str) -> str:
     return text
 
 
-def build_canonical_title(raw_title: str) -> str:
+def _fallback_canonical_title(raw_title: str) -> str:
     text = normalize_title(raw_title)
-
-    # Remove storefront noise that should not split canonical products.
-    noise_patterns = [
-        r"\bsmartfon\b",
-        r"\bsmartphone\b",
-        r"\bсмартф\w*\b",
-        r"\bв\s+ташкенте\b",
-        r"\btsena\b",
-        r"\bcena\b",
-        r"\bцена\b",
-    ]
-    for pattern in noise_patterns:
+    for pattern in _NOISE_PATTERNS:
         text = re.sub(pattern, " ", text, flags=re.IGNORECASE)
 
-    # Keep color as part of canonical identity, but normalize memory notation.
     text = _normalize_memory_notation(text)
-
-    # Normalize tightly packed model tokens.
     text = re.sub(r"\biphone\s*(\d{1,2})\b", r"iphone \1", text, flags=re.IGNORECASE)
     text = re.sub(r"\bs(\d{2})\+\b", r"s\1 plus", text, flags=re.IGNORECASE)
     text = re.sub(r"\bs(\d{2})\s*(ultra|plus|fe)\b", r"s\1 \2", text, flags=re.IGNORECASE)
 
-    # Smartphone titles are often inconsistent between stores: "12/256gb" vs "256gb".
-    # For canonical grouping we keep model + storage + color and ignore leading RAM.
-    if re.search(r"\b(iphone|galaxy|samsung|xiaomi|redmi|honor|oneplus|pixel|nothing)\b", text, flags=re.IGNORECASE):
+    if _SMARTPHONE_PATTERN.search(text):
         text = re.sub(r"\b\d{1,2}/(\d{2,4}gb)\b", r"\1", text, flags=re.IGNORECASE)
 
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+    for pattern in _COLOR_PATTERNS:
+        text = re.sub(pattern, " ", text, flags=re.IGNORECASE)
+
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def build_canonical_title(raw_title: str) -> str:
+    attrs = extract_attributes(_normalize_memory_notation(raw_title))
+    if attrs.brand != "unknown" and attrs.model != "unknown" and attrs.storage != "unknown":
+        return f"{attrs.brand} {attrs.model} {attrs.storage}gb"
+    return _fallback_canonical_title(raw_title)
 
 
 def normalize_specs(raw_specs: dict | None) -> dict:

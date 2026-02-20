@@ -1,29 +1,37 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
+STORE_SLUG_EXPR = "regexp_replace(regexp_replace(lower(s.name), '[^a-z0-9]+', '-', 'g'), '-uz$', '')"
+
+
 SYNC_SQL_STATEMENTS = [
     """
     insert into catalog_categories (id, parent_id, slug, name_uz, name_ru, name_en, lft, rgt, is_active)
-    values (1, null, 'phones', 'Smartfonlar', 'Смартфоны', 'Smartphones', 1, 2, true)
+    values (1, null, 'phones', 'Smartfonlar', 'РЎРјР°СЂС‚С„РѕРЅС‹', 'Smartphones', 1, 2, true)
     on conflict (id) do update set is_active = true
     """,
     """
-    insert into catalog_stores (id, slug, name, country_code, is_active, trust_score, crawl_priority)
+    insert into catalog_stores (slug, name, provider, country_code, is_active, trust_score, crawl_priority)
     select
-      s.id,
-      regexp_replace(lower(s.name), '[^a-z0-9]+', '-', 'g'),
+      __STORE_SLUG_EXPR__,
       s.name,
+      case
+        when __STORE_SLUG_EXPR__ = 'mediapark' then 'mediapark'
+        when __STORE_SLUG_EXPR__ = 'texnomart' then 'texnomart'
+        when __STORE_SLUG_EXPR__ = 'alifshop' then 'alifshop'
+        else 'generic'
+      end,
       'UZ',
       true,
       0.80,
       100
     from shops s
-    on conflict (id) do update
+    on conflict (slug) do update
     set name = excluded.name,
-        slug = excluded.slug,
+        provider = excluded.provider,
         is_active = true
     """,
     """
@@ -90,10 +98,15 @@ SYNC_SQL_STATEMENTS = [
       '{}'::jsonb,
       'active'
     from products p
-    join catalog_canonical_products cp
-      on cp.category_id = 1
-     and cp.brand_id is null
-     and lower(cp.normalized_title) = lower(p.title)
+    join lateral (
+      select cp.id
+      from catalog_canonical_products cp
+      where cp.category_id = 1
+        and cp.brand_id is null
+        and lower(cp.normalized_title) = lower(p.title)
+      order by cp.id asc
+      limit 1
+    ) cp on true
     on conflict (id) do update
     set canonical_product_id = excluded.canonical_product_id,
         normalized_title = excluded.normalized_title,
@@ -106,7 +119,7 @@ SYNC_SQL_STATEMENTS = [
     )
     select
       o.id,
-      o.shop_id,
+      cs.id,
       cp.id,
       o.product_id,
       o.id::text,
@@ -122,10 +135,17 @@ SYNC_SQL_STATEMENTS = [
       now()
     from offers o
     join products p on p.id = o.product_id
-    join catalog_canonical_products cp
-      on cp.category_id = 1
-     and cp.brand_id is null
-     and lower(cp.normalized_title) = lower(p.title)
+    join shops s on s.id = o.shop_id
+    join catalog_stores cs on cs.slug = __STORE_SLUG_EXPR__
+    join lateral (
+      select cp.id
+      from catalog_canonical_products cp
+      where cp.category_id = 1
+        and cp.brand_id is null
+        and lower(cp.normalized_title) = lower(p.title)
+      order by cp.id asc
+      limit 1
+    ) cp on true
     on conflict (id) do update
     set store_id = excluded.store_id,
         canonical_product_id = excluded.canonical_product_id,
@@ -141,12 +161,13 @@ SYNC_SQL_STATEMENTS = [
     """
     insert into catalog_sellers (store_id, name, normalized_name, metadata)
     select distinct
-      o.shop_id,
+      cs.id,
       s.name,
-      lower(regexp_replace(s.name, '[^a-zA-Z0-9а-яА-Я]+', ' ', 'g')),
+      lower(regexp_replace(s.name, '[^a-zA-Z0-9]+', ' ', 'g')),
       jsonb_build_object('source', 'legacy-sync')
     from offers o
     join shops s on s.id = o.shop_id
+    join catalog_stores cs on cs.slug = __STORE_SLUG_EXPR__
     on conflict (store_id, normalized_name) do update
     set name = excluded.name
     """,
@@ -158,7 +179,7 @@ SYNC_SQL_STATEMENTS = [
     select
       o.id,
       cp.id,
-      o.shop_id,
+      cs_store.id,
       cs.id,
       o.id,
       null,
@@ -166,21 +187,27 @@ SYNC_SQL_STATEMENTS = [
       'UZS',
       o.price,
       o.old_price,
-      (coalesce(o.availability, '') not in ('out_of_stock', 'нет', 'no')),
+      (coalesce(o.availability, '') not in ('out_of_stock', 'РЅРµС‚', 'no')),
       null,
       0,
       now(),
       true
     from offers o
     join products p on p.id = o.product_id
-    join catalog_canonical_products cp
-      on cp.category_id = 1
-     and cp.brand_id is null
-     and lower(cp.normalized_title) = lower(p.title)
+    join lateral (
+      select cp.id
+      from catalog_canonical_products cp
+      where cp.category_id = 1
+        and cp.brand_id is null
+        and lower(cp.normalized_title) = lower(p.title)
+      order by cp.id asc
+      limit 1
+    ) cp on true
     join shops s on s.id = o.shop_id
+    join catalog_stores cs_store on cs_store.slug = __STORE_SLUG_EXPR__
     left join catalog_sellers cs
-      on cs.store_id = o.shop_id
-     and cs.normalized_name = lower(regexp_replace(s.name, '[^a-zA-Z0-9а-яА-Я]+', ' ', 'g'))
+      on cs.store_id = cs_store.id
+     and cs.normalized_name = lower(regexp_replace(s.name, '[^a-zA-Z0-9]+', ' ', 'g'))
     on conflict (id) do update
     set canonical_product_id = excluded.canonical_product_id,
         store_id = excluded.store_id,
@@ -216,5 +243,5 @@ SYNC_SQL_STATEMENTS = [
 
 async def sync_legacy_to_catalog(session: AsyncSession) -> None:
     for statement in SYNC_SQL_STATEMENTS:
-        await session.execute(text(statement))
+        await session.execute(text(statement.replace("__STORE_SLUG_EXPR__", STORE_SLUG_EXPR)))
     await session.commit()

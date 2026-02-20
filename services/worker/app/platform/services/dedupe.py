@@ -34,7 +34,7 @@ def _pair_score(a: CatalogCanonicalProduct, b: CatalogCanonicalProduct) -> tuple
     title_score = 1.0 if normalize_title(a.normalized_title) == normalize_title(b.normalized_title) else 0.0
     specs_score = _spec_overlap_score(a.specs if isinstance(a.specs, dict) else {}, b.specs if isinstance(b.specs, dict) else {})
     emb_score = 0.0
-    if a.embedding and b.embedding:
+    if a.embedding is not None and b.embedding is not None:
         emb_score = cosine_similarity(a.embedding, b.embedding)
     score = 0.55 * title_score + 0.25 * specs_score + 0.20 * emb_score
     reason = "title_specs_embedding"

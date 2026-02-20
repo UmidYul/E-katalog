@@ -12,6 +12,8 @@ import { formatPrice } from "@/lib/utils/format";
 import type { ProductListItem } from "@/types/domain";
 
 export function ProductCard({ product, favorite, onFavorite }: { product: ProductListItem; favorite?: boolean; onFavorite?: (id: number) => void }) {
+  const storesLabel = product.store_count === 1 ? "store" : "stores";
+
   return (
     <motion.div layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
       <Card className="group overflow-hidden">
@@ -36,7 +38,7 @@ export function ProductCard({ product, favorite, onFavorite }: { product: Produc
         <CardContent className="space-y-3 p-4">
           <div className="flex flex-wrap items-center gap-2">
             {product.brand?.name ? <Badge>{product.brand.name}</Badge> : null}
-            <Badge className="bg-secondary/70">{product.store_count} stores</Badge>
+            <Badge className="bg-secondary/70">{product.store_count} {storesLabel}</Badge>
           </div>
           <Link href={`/product/${product.id}-${slugify(product.normalized_title)}`} className="line-clamp-2 text-sm font-medium hover:text-primary">
             {product.normalized_title}

@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 
 export type AdminColumn<T> = {
   key: string;
-  title: string;
+  title: ReactNode;
   sortable?: boolean;
   render: (item: T) => ReactNode;
   className?: string;

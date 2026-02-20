@@ -102,6 +102,8 @@ export const adminApi = {
   productById: (id: number) => apiClient.get<ProductDetail>(`/products/${id}`),
   updateProduct: (id: number, payload: Record<string, unknown>) => apiClient.patch(`/admin/products/${id}`, payload),
   deleteProduct: (id: number) => apiClient.delete<{ ok: boolean }>(`/admin/products/${id}`),
+  bulkDeleteProducts: (productIds: number[]) =>
+    apiClient.post<{ ok: boolean; requested: number; deleted: number }>("/admin/products/bulk-delete", { product_ids: productIds }),
   bulkImportProducts: (payload: { source: "csv" | "json"; content: string }) => apiClient.post("/admin/products/import", payload),
   bulkExportProducts: (format: "csv" | "json") => apiClient.get<{ url: string }>("/admin/products/export", { params: { format } }),
 

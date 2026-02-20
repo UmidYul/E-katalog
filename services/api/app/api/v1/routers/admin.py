@@ -92,6 +92,10 @@ class ScrapeSourcePatch(BaseModel):
     is_active: bool | None = None
 
 
+class ProductsBulkDeleteIn(BaseModel):
+    product_ids: list[int]
+
+
 def _hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -99,6 +103,13 @@ def _hash(value: str) -> str:
 def _slugify(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return slug or "store"
+
+
+async def _invalidate_product_caches(redis: Redis) -> None:
+    keys = [key async for key in redis.scan_iter(match="plp:*")]
+    keys.extend([key async for key in redis.scan_iter(match="pdp:*")])
+    if keys:
+        await redis.delete(*keys)
 
 
 async def _normalize_source_payload(
@@ -579,12 +590,29 @@ async def delete_product(
 ) -> dict[str, bool]:
     await db.execute(text("delete from catalog_canonical_products where id = :id"), {"id": product_id})
     await db.commit()
-    # Invalidate cached catalog/PDP responses so deleted item disappears immediately from /products.
-    keys = [key async for key in redis.scan_iter(match="plp:*")]
-    keys.extend([key async for key in redis.scan_iter(match="pdp:*")])
-    if keys:
-        await redis.delete(*keys)
+    await _invalidate_product_caches(redis)
     return {"ok": True}
+
+
+@router.post("/products/bulk-delete")
+async def bulk_delete_products(
+    payload: ProductsBulkDeleteIn,
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),
+) -> dict[str, Any]:
+    product_ids = sorted({int(item) for item in payload.product_ids if int(item) > 0})
+    if not product_ids:
+        raise HTTPException(status_code=422, detail="product_ids must contain at least one positive id")
+
+    deleted_count = (
+        await db.execute(
+            text("delete from catalog_canonical_products where id = any(cast(:product_ids as bigint[]))"),
+            {"product_ids": product_ids},
+        )
+    ).rowcount or 0
+    await db.commit()
+    await _invalidate_product_caches(redis)
+    return {"ok": True, "requested": len(product_ids), "deleted": int(deleted_count)}
 
 
 @router.post("/products/import")

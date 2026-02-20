@@ -13,11 +13,19 @@ from app.pipelines.product_service import ProductService
 
 
 class ScraperService:
-    def __init__(self, session: AsyncSession, parser: StoreParser, *, max_concurrency: int = 10) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        parser: StoreParser,
+        *,
+        max_concurrency: int = 10,
+        inter_request_delay_seconds: float = 0.0,
+    ) -> None:
         self._session = session
         self._parser = parser
         self._product_service = ProductService(session)
         self._semaphore = asyncio.Semaphore(max_concurrency)
+        self._inter_request_delay_seconds = max(0.0, inter_request_delay_seconds)
 
     async def scrape_categories(self, category_urls: list[str]) -> None:
         shop = await self._product_service.get_or_create_shop(name=self._parser.shop_name, url=self._parser.shop_url)
@@ -57,6 +65,8 @@ class ScraperService:
                     await self._session.commit()
                     return
                 processed += 1
+                if self._inter_request_delay_seconds > 0:
+                    await asyncio.sleep(self._inter_request_delay_seconds)
                 if product_limit and processed >= product_limit:
                     break
 

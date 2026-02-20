@@ -11,13 +11,13 @@ def test_pipeline_groups_same_device_across_store_titles() -> None:
     assert len(canonical_titles) == 1
 
 
-def test_pipeline_does_not_merge_different_color_variants() -> None:
+def test_pipeline_merges_different_color_variants() -> None:
     raw_titles = [
         "Apple iPhone 17 Pro Max 12/256GB Cosmic Orange",
         "Apple iPhone 17 Pro Max 12/256GB Deep Blue",
     ]
     canonical_titles = {build_canonical_title(t) for t in raw_titles}
-    assert len(canonical_titles) == 2
+    assert len(canonical_titles) == 1
 
 
 def test_offer_upsert_identity_is_stable_by_store_and_url() -> None:

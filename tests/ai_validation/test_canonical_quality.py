@@ -62,13 +62,13 @@ def _generate_samsung_variants() -> list[tuple[str, str]]:
 
 def _generate_edge_cases() -> list[tuple[str, str]]:
     cases = [
-        ("Apple iPhone 17 Pro 256GB Deep Blue", "iphone17pro_256_deep_blue"),
-        ("Apple iPhone 17 Pro 256GB Cosmic Orange", "iphone17pro_256_cosmic_orange"),
-        ("Apple iPhone 17 Pro Max 256GB Deep Blue", "iphone17promax_256_deep_blue"),
-        ("Apple iPhone 17 128GB White", "iphone17_128_white"),
-        ("Apple iPhone 13 128GB Midnight", "iphone13_128_midnight"),
-        ("Apple iPhone 13 128 GB Black", "iphone13_128_black"),
-        ("Iphone13 128gb", "iphone13_128_unknown"),
+        ("Apple iPhone 17 Pro 256GB Deep Blue", "iphone17pro_256"),
+        ("Apple iPhone 17 Pro 256GB Cosmic Orange", "iphone17pro_256"),
+        ("Apple iPhone 17 Pro Max 256GB Deep Blue", "iphone17promax_256"),
+        ("Apple iPhone 17 128GB White", "iphone17_128"),
+        ("Apple iPhone 13 128GB Midnight", "iphone13_128"),
+        ("Apple iPhone 13 128 GB Black", "iphone13_128"),
+        ("Iphone13 128gb", "iphone13_128"),
         ("Samsung Galaxy S24 256GB Gray", "s24_256_gray"),
         ("Samsung Galaxy S24+ 256GB Gray", "s24plus_256_gray"),
         ("Samsung Galaxy S24 Ultra 256GB Gray", "s24ultra_256_gray"),

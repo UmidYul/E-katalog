@@ -16,10 +16,10 @@ def test_build_canonical_title_merges_memory_notation_for_iphone() -> None:
     assert build_canonical_title(a) == build_canonical_title(b) == build_canonical_title(c)
 
 
-def test_build_canonical_title_keeps_color_distinct() -> None:
+def test_build_canonical_title_ignores_color() -> None:
     blue = build_canonical_title("Apple iPhone 17 Pro 12/256GB Deep Blue")
     orange = build_canonical_title("Apple iPhone 17 Pro 12/256GB Cosmic Orange")
-    assert blue != orange
+    assert blue == orange == "apple iphone17pro 256gb"
 
 
 def test_enrich_specs_from_title_extracts_model_storage_color() -> None:

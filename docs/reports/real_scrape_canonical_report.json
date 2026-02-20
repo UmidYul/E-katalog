@@ -1,0 +1,28 @@
+{
+  "generated_at_utc": "2026-02-20T10:09:07.524005+00:00",
+  "counts": {
+    "canonical_count": 45,
+    "offers_count": 101,
+    "legacy_products_count": 101,
+    "legacy_offers_count": 101
+  },
+  "invariants": {
+    "memory_mixed_canonical_count": 0,
+    "model_mixed_canonical_count": 0,
+    "orphan_offers_count": 0,
+    "min_price_mismatch_count": 0
+  },
+  "issues": {
+    "ambiguous_storage_cases": 1,
+    "cross_brand_cases": 0,
+    "low_confidence_cases": 0,
+    "duplicate_model_storage_signatures": {},
+    "total_problem_cases": 1
+  },
+  "quality": {
+    "avg_offers_per_canonical": 2.2444444444444445,
+    "max_offers_in_single_canonical": 7,
+    "canonical_with_offers_count": 45,
+    "empty_active_canonical_count": 0
+  }
+}

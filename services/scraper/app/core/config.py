@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     http_verify_ssl: bool = True
     http_ca_bundle: str | None = None
     request_concurrency: int = 20
+    scrape_inter_request_delay_seconds: float = 0.7
     scrape_product_limit: int = 0
     max_retries: int = 5
     task_retry_backoff_max_seconds: int = 600
@@ -51,15 +52,31 @@ class Settings(BaseSettings):
     )
     proxies: list[str] = Field(default_factory=list)
 
-    scraper_provider: Literal["mediapark", "texnomart", "example"] = "texnomart"
+    scraper_provider: Literal["mediapark", "texnomart", "alifshop", "example"] = "texnomart"
 
     mediapark_base_url: HttpUrl = "https://mediapark.uz"
     mediapark_category_paths: list[str] = Field(
-        default_factory=lambda: ["/products/category/smartfony-po-brendu-660/smartfony-apple-iphone-211"]
+        default_factory=lambda: [
+            "/products/category/smartfony-po-brendu-660/smartfony-samsung-210",
+            "/products/category/smartfony-po-brendu-660/smartfony-apple-iphone-211",
+        ]
     )
 
     texnomart_base_url: HttpUrl = "https://texnomart.uz"
-    texnomart_category_paths: list[str] = Field(default_factory=lambda: ["/ru/katalog/smartfony"])
+    texnomart_category_paths: list[str] = Field(
+        default_factory=lambda: [
+            "/katalog/smartfony-apple/",
+            "/katalog/smartfon-samsung/",
+        ]
+    )
+
+    alifshop_base_url: HttpUrl = "https://alifshop.uz"
+    alifshop_category_paths: list[str] = Field(
+        default_factory=lambda: [
+            "/ru/categories/smartfoni-apple",
+            "/ru/categories/smartfoni-samsung",
+        ]
+    )
 
     example_store_base_url: HttpUrl = "https://example.com"
     example_store_category_paths: list[str] = Field(default_factory=lambda: ["/phones", "/laptops"])

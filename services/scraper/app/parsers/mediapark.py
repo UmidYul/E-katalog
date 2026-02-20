@@ -18,7 +18,7 @@ from app.utils.specs import missing_required_fields, needs_ai_enrichment, normal
 
 
 class MediaParkParser(StoreParser):
-    shop_name = "Mediapark UZ"
+    shop_name = "Mediapark"
     shop_url = str(settings.mediapark_base_url)
 
     def __init__(self) -> None:
