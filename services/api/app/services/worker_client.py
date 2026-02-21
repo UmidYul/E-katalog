@@ -39,3 +39,19 @@ def enqueue_dedupe_batches() -> str:
 
 def enqueue_full_crawl() -> str:
     return _send("app.tasks.scrape_tasks.enqueue_full_crawl", queue="scrape.high", routing_key="scrape.high")
+
+
+def enqueue_ingested_products_pipeline() -> str:
+    return _send(
+        "app.tasks.scrape_tasks.enqueue_ingested_products_pipeline",
+        queue="normalize",
+        routing_key="normalize",
+    )
+
+
+def enqueue_full_catalog_rebuild() -> str:
+    return _send(
+        "app.tasks.maintenance_tasks.enqueue_full_catalog_rebuild",
+        queue="maintenance",
+        routing_key="maintenance",
+    )

@@ -50,6 +50,7 @@ celery_app.conf.update(
         "app.tasks.scrape_tasks.scrape_priority_category": {"queue": "scrape.high", "routing_key": "scrape.high"},
         "app.tasks.scrape_tasks.scrape_store_category": {"queue": "scrape.default", "routing_key": "scrape.default"},
         "app.tasks.scrape_tasks.enqueue_full_crawl": {"queue": "scrape.high", "routing_key": "scrape.high"},
+        "app.tasks.scrape_tasks.enqueue_ingested_products_pipeline": {"queue": "normalize", "routing_key": "normalize"},
         "app.tasks.scrape_tasks.retry_failed_items": {"queue": "scrape.default", "routing_key": "scrape.default"},
         "app.tasks.normalize_tasks.normalize_product_batch": {"queue": "normalize", "routing_key": "normalize"},
         "app.tasks.normalize_tasks.enqueue_dirty_products": {"queue": "normalize", "routing_key": "normalize"},
@@ -64,6 +65,7 @@ celery_app.conf.update(
         "app.tasks.maintenance_tasks.cleanup_stale_offers": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.maintenance_tasks.cleanup_empty_canonicals": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.maintenance_tasks.rotate_price_history_partitions": {"queue": "maintenance", "routing_key": "maintenance"},
+        "app.tasks.maintenance_tasks.enqueue_full_catalog_rebuild": {"queue": "maintenance", "routing_key": "maintenance"},
     },
     beat_schedule={
         "scrape-every-6h": {
@@ -104,6 +106,11 @@ celery_app.conf.update(
         "cleanup-empty-canonicals-daily-0245": {
             "task": "app.tasks.maintenance_tasks.cleanup_empty_canonicals",
             "schedule": crontab(minute=45, hour=2),
+            "options": {"queue": "maintenance", "routing_key": "maintenance"},
+        },
+        "full-catalog-rebuild-daily-0315": {
+            "task": "app.tasks.maintenance_tasks.enqueue_full_catalog_rebuild",
+            "schedule": crontab(minute=15, hour=3),
             "options": {"queue": "maintenance", "routing_key": "maintenance"},
         },
     },

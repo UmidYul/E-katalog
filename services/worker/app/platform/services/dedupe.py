@@ -38,6 +38,10 @@ def _pair_score(a: CatalogCanonicalProduct, b: CatalogCanonicalProduct) -> tuple
         emb_score = cosine_similarity(a.embedding, b.embedding)
     score = 0.55 * title_score + 0.25 * specs_score + 0.20 * emb_score
     reason = "title_specs_embedding"
+    if title_score == 1.0:
+        # Exact normalized-title matches should be merged without relying on embeddings/AI.
+        score = max(score, 0.97)
+        reason = "same_normalized_title"
     if title_score == 1.0 and specs_score >= 0.6:
         reason = "same_normalized_title_and_specs"
     return score, reason

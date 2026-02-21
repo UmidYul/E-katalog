@@ -20,6 +20,16 @@ def test_pipeline_merges_different_color_variants() -> None:
     assert len(canonical_titles) == 1
 
 
+def test_pipeline_groups_samsung_s25_ultra_with_store_noise() -> None:
+    raw_titles = [
+        "grand store - купить samsung galaxy s25 ultra 12/256 гб titanium jetblack",
+        "смартфон samsung galaxy s25 ultra (12/256) titanium jetblack",
+        "Samsung Galaxy S25 Ultra 12/256GB Titanium JetBlack",
+    ]
+    canonical_titles = {build_canonical_title(t) for t in raw_titles}
+    assert canonical_titles == {"samsung s25ultra 256gb"}
+
+
 def test_offer_upsert_identity_is_stable_by_store_and_url() -> None:
     # Emulates idempotent upsert key in legacy scraper layer: (shop_id, link).
     offers: dict[tuple[int, str], dict] = {}

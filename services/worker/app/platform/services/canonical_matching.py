@@ -183,11 +183,57 @@ def _parse_model(text: str, brand: str) -> tuple[str, str]:
             model = f"iphone{num}" if variant == "base" else f"iphone{num}{variant}"
             return model, variant
     if brand == "samsung":
-        if "a54" in text or re.search(r"\ba\s*54\b", text):
-            return "a54", "base"
-        match = re.search(r"\b(?:galaxy|samsung)?\s*a\s*(\d{2})\b", text)
-        if match:
-            return f"a{match.group(1)}", "base"
+        def samsung_variant(raw_variant: str | None) -> str:
+            if not raw_variant:
+                return "base"
+            value = raw_variant.strip().lower()
+            if value in {"ultra", "plus", "fe", "lite"}:
+                return value
+            return "base"
+
+        def line_model(line: str, digits: str, variant: str = "base") -> tuple[str, str]:
+            if variant == "base":
+                return f"{line}{digits}", "base"
+            return f"{line}{digits}{variant}", variant
+
+        tab_match = re.search(r"\btab\s*s\s*(\d{1,2})(?:\s*(ultra|plus|fe))?\b", text)
+        if tab_match:
+            variant = samsung_variant(tab_match.group(2))
+            if variant == "base":
+                return f"tabs{tab_match.group(1)}", "base"
+            return f"tabs{tab_match.group(1)}{variant}", variant
+
+        s_match = re.search(r"\b(?:galaxy\s*)?s\s*(\d{1,2})(?:\s*(ultra|plus|fe))?\b", text)
+        if s_match:
+            variant = samsung_variant(s_match.group(2))
+            return line_model("s", s_match.group(1), variant)
+
+        note_match = re.search(r"\bnote\s*(\d{1,2})(?:\s*(ultra|plus|lite|fe))?\b", text)
+        if note_match:
+            variant = samsung_variant(note_match.group(2))
+            return line_model("note", note_match.group(1), variant)
+
+        for line in ("a", "m", "f"):
+            line_match = re.search(rf"\b(?:galaxy\s*)?{line}\s*(\d{{2,3}})(?:\s*(fe))?\b", text)
+            if line_match:
+                variant = samsung_variant(line_match.group(2))
+                return line_model(line, line_match.group(1), variant)
+
+        z_match = re.search(r"\bz\s*(fold|flip)\s*(\d{1,2})(?:\s*(fe))?\b", text)
+        if z_match:
+            z_variant = z_match.group(1).lower()
+            generation = z_match.group(2)
+            fe_suffix = samsung_variant(z_match.group(3))
+            model = f"z{z_variant}{generation}"
+            if fe_suffix != "base":
+                model = f"{model}{fe_suffix}"
+            return model, z_variant
+
+        legacy_fold_flip = re.search(r"\b(fold|flip)\s*(\d{1,2})\b", text)
+        if legacy_fold_flip:
+            z_variant = legacy_fold_flip.group(1).lower()
+            return f"z{z_variant}{legacy_fold_flip.group(2)}", z_variant
+
     return "unknown", "unknown"
 
 

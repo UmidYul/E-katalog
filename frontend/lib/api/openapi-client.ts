@@ -85,6 +85,16 @@ export type AdminListQuery = {
   sort?: string;
 };
 
+export type AdminImportProductsResponse = {
+  ok: boolean;
+  source: "csv" | "json";
+  received_rows: number;
+  imported_rows: number;
+  skipped_rows: number;
+  task_id: string;
+  errors?: string[];
+};
+
 export const adminApi = {
   users: (query: AdminListQuery) => apiClient.get<Paginated<AdminUser>>("/admin/users", { params: query }),
   userById: (id: number) => apiClient.get<AdminUser>(`/admin/users/${id}`),
@@ -104,8 +114,10 @@ export const adminApi = {
   deleteProduct: (id: number) => apiClient.delete<{ ok: boolean }>(`/admin/products/${id}`),
   bulkDeleteProducts: (productIds: number[]) =>
     apiClient.post<{ ok: boolean; requested: number; deleted: number }>("/admin/products/bulk-delete", { product_ids: productIds }),
-  bulkImportProducts: (payload: { source: "csv" | "json"; content: string }) => apiClient.post("/admin/products/import", payload),
-  bulkExportProducts: (format: "csv" | "json") => apiClient.get<{ url: string }>("/admin/products/export", { params: { format } }),
+  bulkImportProducts: (payload: { source: "csv" | "json"; content: string; store_id?: number | null }) =>
+    apiClient.post<AdminImportProductsResponse>("/admin/products/import", payload),
+  bulkExportProducts: (format: "csv" | "json") =>
+    apiClient.get<Blob>("/admin/products/export", { params: { format }, responseType: "blob" }),
 
   categories: () => apiClient.get<AdminCategory[]>("/categories"),
   createCategory: (payload: { name: string; slug: string; parent_id?: number | null }) => apiClient.post<AdminCategory>("/admin/categories", payload),
@@ -148,6 +160,7 @@ export const adminApi = {
   runEmbeddingRebuild: () => apiClient.post<{ task_id: string; queued: string }>("/admin/embeddings/rebuild"),
   runDedupe: () => apiClient.post<{ task_id: string; queued: string }>("/admin/dedupe/run"),
   runScrape: () => apiClient.post<{ task_id: string; queued: string }>("/admin/scrape/run"),
+  runCatalogRebuild: () => apiClient.post<{ task_id: string; queued: string }>("/admin/catalog/rebuild"),
   taskStatus: (taskId: string) =>
     apiClient.get<{ task_id: string; state: string; ready: boolean; successful: boolean; progress: number; info?: Record<string, unknown> }>(
       `/admin/tasks/${taskId}`,

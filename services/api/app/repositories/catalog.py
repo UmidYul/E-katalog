@@ -251,6 +251,8 @@ class CatalogRepository:
             filters.append(CatalogProductSearch.min_price <= max_price)
         if in_stock is True:
             filters.append(CatalogProductSearch.store_count > 0)
+        elif in_stock is None:
+            filters.append(CatalogProductSearch.store_count > 0)
         if store_ids:
             filters.append(
                 CatalogCanonicalProduct.id.in_(

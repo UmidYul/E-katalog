@@ -37,6 +37,33 @@ def test_no_color_affects_canonical() -> None:
     assert key_black == key_midnight == "apple|iphone13|128"
 
 
-def test_canonical_key_from_alifshop_style_title() -> None:
-    key = canonical_key(extract_attributes("Смартфон Apple iPhone 13 128 ГБ (nanoSim+eSim), Midnight"))
+def test_canonical_key_from_marketplace_style_title() -> None:
+    key = canonical_key(extract_attributes("Smartfon Apple iPhone 13 128GB (nanoSim+eSim), Midnight"))
     assert key == "apple|iphone13|128"
+
+
+def test_canonical_key_samsung_s_series_ultra() -> None:
+    key_a = canonical_key(extract_attributes("grand store buy samsung galaxy s25 ultra 12/256 gb titanium jetblack"))
+    key_b = canonical_key(extract_attributes("smartphone samsung galaxy s25 ultra (12/256) titanium jetblack"))
+    assert key_a == key_b == "samsung|s25ultra|256"
+
+
+def test_canonical_key_samsung_note_series() -> None:
+    key = canonical_key(extract_attributes("Samsung Galaxy Note 20 Ultra 12/256GB"))
+    assert key == "samsung|note20ultra|256"
+
+
+def test_canonical_key_samsung_fold_flip_series() -> None:
+    fold_key = canonical_key(extract_attributes("Samsung Galaxy Z Fold6 12/512GB"))
+    flip_key = canonical_key(extract_attributes("Samsung Galaxy Z Flip5 8/256GB"))
+    assert fold_key == "samsung|zfold6|512"
+    assert flip_key == "samsung|zflip5|256"
+
+
+def test_canonical_key_samsung_a_m_tab_series() -> None:
+    a_key = canonical_key(extract_attributes("Samsung Galaxy A55 8/256GB"))
+    m_key = canonical_key(extract_attributes("Samsung Galaxy M35 8/256GB"))
+    tab_key = canonical_key(extract_attributes("Samsung Galaxy Tab S9 Ultra 12/256GB"))
+    assert a_key == "samsung|a55|256"
+    assert m_key == "samsung|m35|256"
+    assert tab_key == "samsung|tabs9ultra|256"

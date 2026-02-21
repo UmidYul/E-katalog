@@ -13,6 +13,8 @@ import type { ProductListItem } from "@/types/domain";
 
 export function ProductCard({ product, favorite, onFavorite }: { product: ProductListItem; favorite?: boolean; onFavorite?: (id: number) => void }) {
   const storesLabel = product.store_count === 1 ? "store" : "stores";
+  const hasPriceComparison = product.store_count >= 2;
+  const hasPriceRange = product.min_price != null && product.max_price != null && product.max_price > product.min_price;
 
   return (
     <motion.div layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
@@ -39,10 +41,18 @@ export function ProductCard({ product, favorite, onFavorite }: { product: Produc
           <div className="flex flex-wrap items-center gap-2">
             {product.brand?.name ? <Badge>{product.brand.name}</Badge> : null}
             <Badge className="bg-secondary/70">{product.store_count} {storesLabel}</Badge>
+            {hasPriceComparison ? (
+              <Badge className="bg-emerald-100 text-emerald-700">Price comparison</Badge>
+            ) : null}
           </div>
           <Link href={`/product/${product.id}-${slugify(product.normalized_title)}`} className="line-clamp-2 text-sm font-medium hover:text-primary">
             {product.normalized_title}
           </Link>
+          {hasPriceRange ? (
+            <p className="text-xs text-muted-foreground">
+              {formatPrice(product.min_price ?? 0)} - {formatPrice(product.max_price ?? 0)}
+            </p>
+          ) : null}
           <p className="text-lg font-semibold text-primary">{formatPrice(product.min_price ?? 0)}</p>
         </CardContent>
       </Card>

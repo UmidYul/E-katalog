@@ -3,22 +3,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { adminApi } from "@/lib/api/openapi-client";
-import type { AdminProduct } from "@/types/admin";
-import type { Paginated } from "@/types/domain";
-
-const fallbackProducts: Paginated<AdminProduct> = { items: [], next_cursor: null, request_id: "admin-fallback" };
 
 export function useAdminProducts(query: { q?: string; page?: number; limit?: number; sort?: string }) {
   return useQuery({
     queryKey: ["admin", "products", query],
-    queryFn: async () => {
-      try {
-        const { data } = await adminApi.products(query);
-        return data;
-      } catch {
-        return fallbackProducts;
-      }
-    },
+    queryFn: async () => (await adminApi.products(query)).data,
   });
 }
 
@@ -41,10 +30,11 @@ export function useBulkDeleteProducts() {
 export function useRunAdminTask() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (task: "reindex" | "embedding" | "dedupe" | "scrape") => {
+    mutationFn: (task: "reindex" | "embedding" | "dedupe" | "scrape" | "catalog") => {
       if (task === "reindex") return adminApi.runReindex();
       if (task === "embedding") return adminApi.runEmbeddingRebuild();
       if (task === "dedupe") return adminApi.runDedupe();
+      if (task === "catalog") return adminApi.runCatalogRebuild();
       return adminApi.runScrape();
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }),
