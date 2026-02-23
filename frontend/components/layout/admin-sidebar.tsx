@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { BarChart3, Boxes, LayoutDashboard, Package, Settings, ShoppingCart, Users } from "lucide-react";
+import { BarChart3, Boxes, LayoutDashboard, MessageSquare, Package, Settings, ShoppingCart, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -14,6 +14,7 @@ const nav = [
   { href: "/dashboard/products", label: "Products", icon: Package },
   { href: "/dashboard/categories", label: "Categories", icon: Boxes },
   { href: "/dashboard/orders", label: "Orders", icon: ShoppingCart },
+  { href: "/dashboard/feedback", label: "Feedback", icon: MessageSquare },
   { href: "/dashboard/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ];

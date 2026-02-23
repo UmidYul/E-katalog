@@ -10,16 +10,19 @@ from decimal import Decimal, InvalidOperation
 from datetime import UTC, datetime
 from typing import Any, Literal
 from urllib.parse import urljoin
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from pydantic import BaseModel
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Response
+from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db_session, get_redis
-from app.api.v1.routers.auth import get_current_user
+from app.api.v1.routers.auth import _ensure_user_uuid, get_current_user
+from app.core.config import settings
+from app.repositories.catalog import CatalogRepository
 from app.services.worker_client import enqueue_dedupe_batches
 from app.services.worker_client import enqueue_embedding_batches
 from app.services.worker_client import enqueue_full_crawl
@@ -37,6 +40,10 @@ def require_admin(user: dict = Depends(get_current_user)) -> dict:
 
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
+
+
+VALID_USER_ROLES = {"user", "moderator", "seller_support", "admin"}
+UUID_REF_PATTERN = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
 
 
 class PaginatedOut(BaseModel):
@@ -59,7 +66,13 @@ class SettingsPatch(BaseModel):
 class CategoryCreate(BaseModel):
     name: str
     slug: str
-    parent_id: int | None = None
+    parent_id: str | None = Field(default=None, pattern=UUID_REF_PATTERN)
+
+
+class CategoryPatch(BaseModel):
+    name: str | None = None
+    slug: str | None = None
+    parent_id: str | None = Field(default=None, pattern=UUID_REF_PATTERN)
 
 
 class StoreCreate(BaseModel):
@@ -99,13 +112,13 @@ class ScrapeSourcePatch(BaseModel):
 
 
 class ProductsBulkDeleteIn(BaseModel):
-    product_ids: list[int]
+    product_ids: list[str]
 
 
 class ProductsImportIn(BaseModel):
     source: Literal["csv", "json"]
     content: str
-    store_id: int | None = None
+    store_id: str | None = Field(default=None, pattern=UUID_REF_PATTERN)
 
 
 def _hash(value: str) -> str:
@@ -117,11 +130,65 @@ def _slugify(value: str) -> str:
     return slug or "store"
 
 
+def _normalize_uuid_ref(value: str, *, field_name: str) -> str:
+    normalized = str(value or "").strip().lower()
+    if not re.match(UUID_REF_PATTERN, normalized):
+        raise HTTPException(status_code=422, detail=f"{field_name} must be a UUID")
+    return normalized
+
+
 async def _invalidate_product_caches(redis: Redis) -> None:
     keys = [key async for key in redis.scan_iter(match="plp:*")]
     keys.extend([key async for key in redis.scan_iter(match="pdp:*")])
     if keys:
         await redis.delete(*keys)
+
+
+async def _resolve_product_id_or_404(db: AsyncSession, product_ref: str | int) -> int:
+    repo = CatalogRepository(db, cursor_secret=settings.cursor_secret)
+    resolved = await repo.resolve_entity_ref("product", product_ref)
+    if resolved is None:
+        raise HTTPException(status_code=404, detail="product not found")
+    return resolved
+
+
+async def _resolve_store_id_or_404(db: AsyncSession, store_ref: str) -> int:
+    store_uuid = _normalize_uuid_ref(store_ref, field_name="store_id")
+    resolved = (
+        await db.execute(
+            text("select id from catalog_stores where uuid = cast(:uuid as uuid)"),
+            {"uuid": store_uuid},
+        )
+    ).scalar_one_or_none()
+    if resolved is None:
+        raise HTTPException(status_code=404, detail="store not found")
+    return int(resolved)
+
+
+async def _resolve_category_id_or_404(db: AsyncSession, category_ref: str) -> int:
+    category_uuid = _normalize_uuid_ref(category_ref, field_name="category_id")
+    resolved = (
+        await db.execute(
+            text("select id from catalog_categories where uuid = cast(:uuid as uuid)"),
+            {"uuid": category_uuid},
+        )
+    ).scalar_one_or_none()
+    if resolved is None:
+        raise HTTPException(status_code=404, detail="category not found")
+    return int(resolved)
+
+
+async def _resolve_source_id_or_404(db: AsyncSession, *, store_id: int, source_ref: str) -> int:
+    source_uuid = _normalize_uuid_ref(source_ref, field_name="source_id")
+    resolved = (
+        await db.execute(
+            text("select id from catalog_scrape_sources where store_id = :store_id and uuid = cast(:uuid as uuid)"),
+            {"store_id": store_id, "uuid": source_uuid},
+        )
+    ).scalar_one_or_none()
+    if resolved is None:
+        raise HTTPException(status_code=404, detail="source not found")
+    return int(resolved)
 
 
 async def _normalize_source_payload(
@@ -395,14 +462,9 @@ async def _create_store_for_import(db: AsyncSession, *, name: str, slug_hint: st
     return int(inserted)
 
 
-async def _resolve_default_store_id(db: AsyncSession, explicit_store_id: int | None) -> int:
+async def _resolve_default_store_id(db: AsyncSession, explicit_store_id: str | None) -> int:
     if explicit_store_id is not None:
-        exists = (
-            await db.execute(text("select id from catalog_stores where id = :id"), {"id": explicit_store_id})
-        ).scalar_one_or_none()
-        if exists is None:
-            raise HTTPException(status_code=422, detail=f"store_id {explicit_store_id} not found")
-        return int(exists)
+        return await _resolve_store_id_or_404(db, explicit_store_id)
 
     existing = (
         await db.execute(
@@ -882,11 +944,12 @@ async def list_users(
         payload = await redis.hgetall(key)
         if not payload:
             continue
+        user_uuid = await _ensure_user_uuid(redis, user_key=key, payload=payload)
         row = {
-            "id": int(payload["id"]),
+            "id": user_uuid,
             "email": payload.get("email"),
             "full_name": payload.get("full_name", ""),
-            "role": payload.get("role", "moderator"),
+            "role": payload.get("role", "user"),
             "is_active": payload.get("is_active", "true") == "true",
             "created_at": payload.get("created_at", datetime.now(UTC).isoformat()),
             "last_seen_at": payload.get("last_seen_at"),
@@ -900,16 +963,31 @@ async def list_users(
     return {"items": items, "next_cursor": None, "request_id": "admin-users"}
 
 
+async def _get_user_by_uuid_or_404(redis: Redis, user_uuid: str) -> tuple[int, dict[str, str]]:
+    normalized_uuid = _normalize_uuid_ref(user_uuid, field_name="user_id")
+    async for key in redis.scan_iter(match="auth:user:*"):
+        if key.count(":") != 2:
+            continue
+        if await redis.type(key) != "hash":
+            continue
+        payload = await redis.hgetall(key)
+        if not payload:
+            continue
+        ensured_uuid = await _ensure_user_uuid(redis, user_key=key, payload=payload)
+        if ensured_uuid.lower() == normalized_uuid:
+            return int(payload["id"]), payload
+    raise HTTPException(status_code=404, detail="user not found")
+
+
 @router.get("/users/{user_id}")
-async def get_user(user_id: int, redis: Redis = Depends(get_redis)) -> dict[str, Any]:
-    payload = await redis.hgetall(f"auth:user:{user_id}")
-    if not payload:
-        raise HTTPException(status_code=404, detail="user not found")
+async def get_user(user_id: str = Path(..., pattern=UUID_REF_PATTERN), redis: Redis = Depends(get_redis)) -> dict[str, Any]:
+    _, payload = await _get_user_by_uuid_or_404(redis, user_id)
+    user_uuid = await _ensure_user_uuid(redis, user_key=f"auth:user:{payload['id']}", payload=payload)
     return {
-        "id": int(payload["id"]),
+        "id": user_uuid,
         "email": payload.get("email"),
         "full_name": payload.get("full_name", ""),
-        "role": payload.get("role", "moderator"),
+        "role": payload.get("role", "user"),
         "is_active": payload.get("is_active", "true") == "true",
         "created_at": payload.get("created_at", datetime.now(UTC).isoformat()),
         "last_seen_at": payload.get("last_seen_at"),
@@ -917,32 +995,37 @@ async def get_user(user_id: int, redis: Redis = Depends(get_redis)) -> dict[str,
 
 
 @router.patch("/users/{user_id}")
-async def patch_user(user_id: int, payload: dict[str, Any], redis: Redis = Depends(get_redis)) -> dict[str, Any]:
-    key = f"auth:user:{user_id}"
-    current = await redis.hgetall(key)
-    if not current:
-        raise HTTPException(status_code=404, detail="user not found")
+async def patch_user(
+    user_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    payload: dict[str, Any] | None = None,
+    redis: Redis = Depends(get_redis),
+) -> dict[str, Any]:
+    internal_user_id, _ = await _get_user_by_uuid_or_404(redis, user_id)
+    key = f"auth:user:{internal_user_id}"
     updates: dict[str, str] = {}
-    if "full_name" in payload:
-        updates["full_name"] = str(payload["full_name"])
-    if "role" in payload:
-        updates["role"] = str(payload["role"])
-    if "is_active" in payload:
-        updates["is_active"] = "true" if bool(payload["is_active"]) else "false"
+    normalized_payload = payload or {}
+    if "full_name" in normalized_payload:
+        updates["full_name"] = str(normalized_payload["full_name"])
+    if "role" in normalized_payload:
+        next_role = str(normalized_payload["role"]).strip().lower().replace("-", "_")
+        if next_role not in VALID_USER_ROLES:
+            raise HTTPException(status_code=422, detail="invalid role")
+        updates["role"] = next_role
+    if "is_active" in normalized_payload:
+        updates["is_active"] = "true" if bool(normalized_payload["is_active"]) else "false"
     if updates:
         await redis.hset(key, mapping=updates)
     return await get_user(user_id, redis)
 
 
 @router.delete("/users/{user_id}")
-async def delete_user(user_id: int, redis: Redis = Depends(get_redis)) -> dict[str, bool]:
-    key = f"auth:user:{user_id}"
-    payload = await redis.hgetall(key)
-    if payload:
-        email = payload.get("email")
-        if email:
-            await redis.delete(f"auth:user:email:{email}")
-        await redis.delete(key)
+async def delete_user(user_id: str = Path(..., pattern=UUID_REF_PATTERN), redis: Redis = Depends(get_redis)) -> dict[str, bool]:
+    internal_user_id, payload = await _get_user_by_uuid_or_404(redis, user_id)
+    key = f"auth:user:{internal_user_id}"
+    email = payload.get("email")
+    if email:
+        await redis.delete(f"auth:user:email:{email}")
+    await redis.delete(key)
     return {"ok": True}
 
 
@@ -956,7 +1039,7 @@ async def list_stores(
 ) -> dict[str, Any]:
     stmt = """
         select
-            s.id,
+            s.uuid as id,
             s.slug,
             s.name,
             s.provider,
@@ -1007,7 +1090,7 @@ async def create_store(payload: StoreCreate, db: AsyncSession = Depends(get_db_s
                     values
                         (:slug, :name, :provider, :base_url, :country_code, :is_active, :trust_score, :crawl_priority)
                     returning
-                        id, slug, name, provider, base_url, country_code, is_active, trust_score, crawl_priority
+                        uuid as id, slug, name, provider, base_url, country_code, is_active, trust_score, crawl_priority
                     """
                 ),
                 {
@@ -1032,7 +1115,8 @@ async def create_store(payload: StoreCreate, db: AsyncSession = Depends(get_db_s
 
 
 @router.patch("/stores/{store_id}")
-async def patch_store(store_id: int, payload: StorePatch, db: AsyncSession = Depends(get_db_session)) -> dict[str, Any]:
+async def patch_store(store_id: str = Path(..., pattern=UUID_REF_PATTERN), payload: StorePatch = None, db: AsyncSession = Depends(get_db_session)) -> dict[str, Any]:
+    internal_store_id = await _resolve_store_id_or_404(db, store_id)
     await db.execute(
         text(
             """
@@ -1051,15 +1135,15 @@ async def patch_store(store_id: int, payload: StorePatch, db: AsyncSession = Dep
             """
         ),
         {
-            "id": store_id,
-            "name": payload.name,
-            "slug": payload.slug,
-            "provider": payload.provider.lower() if payload.provider else None,
-            "base_url": payload.base_url,
-            "country_code": payload.country_code.upper() if payload.country_code else None,
-            "trust_score": payload.trust_score,
-            "crawl_priority": payload.crawl_priority,
-            "is_active": payload.is_active,
+            "id": internal_store_id,
+            "name": payload.name if payload else None,
+            "slug": payload.slug if payload else None,
+            "provider": payload.provider.lower() if payload and payload.provider else None,
+            "base_url": payload.base_url if payload else None,
+            "country_code": payload.country_code.upper() if payload and payload.country_code else None,
+            "trust_score": payload.trust_score if payload else None,
+            "crawl_priority": payload.crawl_priority if payload else None,
+            "is_active": payload.is_active if payload else None,
         },
     )
     await db.commit()
@@ -1068,7 +1152,7 @@ async def patch_store(store_id: int, payload: StorePatch, db: AsyncSession = Dep
             text(
                 """
                 select
-                    s.id, s.slug, s.name, s.provider, s.base_url, s.country_code, s.is_active, s.trust_score, s.crawl_priority,
+                    s.uuid as id, s.slug, s.name, s.provider, s.base_url, s.country_code, s.is_active, s.trust_score, s.crawl_priority,
                     coalesce(ss.sources_count, 0) as sources_count
                 from catalog_stores s
                 left join (
@@ -1079,7 +1163,7 @@ async def patch_store(store_id: int, payload: StorePatch, db: AsyncSession = Dep
                 where s.id = :id
                 """
             ),
-            {"id": store_id},
+            {"id": internal_store_id},
         )
     ).mappings().first()
     if not row:
@@ -1088,50 +1172,52 @@ async def patch_store(store_id: int, payload: StorePatch, db: AsyncSession = Dep
 
 
 @router.delete("/stores/{store_id}")
-async def delete_store(store_id: int, db: AsyncSession = Depends(get_db_session)) -> dict[str, bool]:
-    await db.execute(text("delete from catalog_stores where id = :id"), {"id": store_id})
+async def delete_store(store_id: str = Path(..., pattern=UUID_REF_PATTERN), db: AsyncSession = Depends(get_db_session)) -> dict[str, bool]:
+    internal_store_id = await _resolve_store_id_or_404(db, store_id)
+    await db.execute(text("delete from catalog_stores where id = :id"), {"id": internal_store_id})
     await db.commit()
     return {"ok": True}
 
 
 @router.get("/stores/{store_id}/sources", response_model=PaginatedOut)
 async def list_store_sources(
-    store_id: int,
+    store_id: str = Path(..., pattern=UUID_REF_PATTERN),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    exists = (await db.execute(text("select 1 from catalog_stores where id = :id"), {"id": store_id})).scalar_one_or_none()
-    if not exists:
-        raise HTTPException(status_code=404, detail="store not found")
+    internal_store_id = await _resolve_store_id_or_404(db, store_id)
     rows = (
         await db.execute(
             text(
                 """
-                select id, store_id, url, source_type, is_active, priority, created_at, updated_at
-                from catalog_scrape_sources
-                where store_id = :store_id
-                order by priority asc, id asc
+                select ss.uuid as id, s.uuid as store_id, ss.url, ss.source_type, ss.is_active, ss.priority, ss.created_at, ss.updated_at
+                from catalog_scrape_sources ss
+                join catalog_stores s on s.id = ss.store_id
+                where ss.store_id = :store_id
+                order by ss.priority asc, ss.id asc
                 offset :offset
                 limit :limit
                 """
             ),
-            {"store_id": store_id, "offset": (page - 1) * limit, "limit": limit},
+            {"store_id": internal_store_id, "offset": (page - 1) * limit, "limit": limit},
         )
     ).mappings().all()
     return {"items": [dict(row) for row in rows], "next_cursor": None, "request_id": "admin-store-sources"}
 
 
 @router.post("/stores/{store_id}/sources")
-async def create_store_source(store_id: int, payload: ScrapeSourceCreate, db: AsyncSession = Depends(get_db_session)) -> dict[str, Any]:
-    exists = (await db.execute(text("select 1 from catalog_stores where id = :id"), {"id": store_id})).scalar_one_or_none()
-    if not exists:
-        raise HTTPException(status_code=404, detail="store not found")
+async def create_store_source(
+    store_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    payload: ScrapeSourceCreate = None,
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    internal_store_id = await _resolve_store_id_or_404(db, store_id)
     normalized_url, normalized_type = await _normalize_source_payload(
         db,
-        store_id=store_id,
-        url_value=payload.url,
-        source_type=payload.source_type,
+        store_id=internal_store_id,
+        url_value=payload.url if payload else "",
+        source_type=payload.source_type if payload else None,
     )
     row = (
         await db.execute(
@@ -1139,15 +1225,18 @@ async def create_store_source(store_id: int, payload: ScrapeSourceCreate, db: As
                 """
                 insert into catalog_scrape_sources (store_id, url, source_type, is_active, priority)
                 values (:store_id, :url, :source_type, :is_active, :priority)
-                returning id, store_id, url, source_type, is_active, priority, created_at, updated_at
+                returning
+                    uuid as id,
+                    (select uuid from catalog_stores where id = store_id) as store_id,
+                    url, source_type, is_active, priority, created_at, updated_at
                 """
             ),
             {
-                "store_id": store_id,
+                "store_id": internal_store_id,
                 "url": normalized_url,
                 "source_type": normalized_type,
-                "is_active": payload.is_active,
-                "priority": payload.priority,
+                "is_active": payload.is_active if payload else True,
+                "priority": payload.priority if payload else 100,
             },
         )
     ).mappings().first()
@@ -1159,24 +1248,26 @@ async def create_store_source(store_id: int, payload: ScrapeSourceCreate, db: As
 
 @router.patch("/stores/{store_id}/sources/{source_id}")
 async def patch_store_source(
-    store_id: int,
-    source_id: int,
-    payload: ScrapeSourcePatch,
+    store_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    source_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    payload: ScrapeSourcePatch = None,
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
+    internal_store_id = await _resolve_store_id_or_404(db, store_id)
+    internal_source_id = await _resolve_source_id_or_404(db, store_id=internal_store_id, source_ref=source_id)
     current = (
         await db.execute(
             text("select url, source_type from catalog_scrape_sources where id = :source_id and store_id = :store_id"),
-            {"source_id": source_id, "store_id": store_id},
+            {"source_id": internal_source_id, "store_id": internal_store_id},
         )
     ).mappings().first()
     if not current:
         raise HTTPException(status_code=404, detail="source not found")
     normalized_url, normalized_type = await _normalize_source_payload(
         db,
-        store_id=store_id,
-        url_value=payload.url if payload.url is not None else current["url"],
-        source_type=payload.source_type if payload.source_type is not None else current["source_type"],
+        store_id=internal_store_id,
+        url_value=payload.url if payload and payload.url is not None else current["url"],
+        source_type=payload.source_type if payload and payload.source_type is not None else current["source_type"],
     )
 
     await db.execute(
@@ -1193,12 +1284,12 @@ async def patch_store_source(
             """
         ),
         {
-            "source_id": source_id,
-            "store_id": store_id,
+            "source_id": internal_source_id,
+            "store_id": internal_store_id,
             "url": normalized_url,
             "source_type": normalized_type,
-            "is_active": payload.is_active,
-            "priority": payload.priority,
+            "is_active": payload.is_active if payload else None,
+            "priority": payload.priority if payload else None,
         },
     )
     await db.commit()
@@ -1206,12 +1297,13 @@ async def patch_store_source(
         await db.execute(
             text(
                 """
-                select id, store_id, url, source_type, is_active, priority, created_at, updated_at
-                from catalog_scrape_sources
-                where id = :source_id and store_id = :store_id
+                select ss.uuid as id, s.uuid as store_id, ss.url, ss.source_type, ss.is_active, ss.priority, ss.created_at, ss.updated_at
+                from catalog_scrape_sources ss
+                join catalog_stores s on s.id = ss.store_id
+                where ss.id = :source_id and ss.store_id = :store_id
                 """
             ),
-            {"source_id": source_id, "store_id": store_id},
+            {"source_id": internal_source_id, "store_id": internal_store_id},
         )
     ).mappings().first()
     if not row:
@@ -1220,10 +1312,16 @@ async def patch_store_source(
 
 
 @router.delete("/stores/{store_id}/sources/{source_id}")
-async def delete_store_source(store_id: int, source_id: int, db: AsyncSession = Depends(get_db_session)) -> dict[str, bool]:
+async def delete_store_source(
+    store_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    source_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, bool]:
+    internal_store_id = await _resolve_store_id_or_404(db, store_id)
+    internal_source_id = await _resolve_source_id_or_404(db, store_id=internal_store_id, source_ref=source_id)
     await db.execute(
         text("delete from catalog_scrape_sources where id = :source_id and store_id = :store_id"),
-        {"source_id": source_id, "store_id": store_id},
+        {"source_id": internal_source_id, "store_id": internal_store_id},
     )
     await db.commit()
     return {"ok": True}
@@ -1231,16 +1329,25 @@ async def delete_store_source(store_id: int, source_id: int, db: AsyncSession = 
 
 @router.post("/categories")
 async def create_category(payload: CategoryCreate, db: AsyncSession = Depends(get_db_session)) -> dict[str, Any]:
+    resolved_parent_id: int | None = None
+    if payload.parent_id is not None:
+        resolved_parent_id = await _resolve_category_id_or_404(db, payload.parent_id)
+
     inserted = (
         await db.execute(
             text(
                 """
                 insert into catalog_categories (slug, name_uz, parent_id, lft, rgt, is_active)
                 values (:slug, :name, :parent_id, 0, 0, true)
-                returning id, slug, name_uz, parent_id, is_active
+                returning
+                    uuid as id,
+                    slug,
+                    name_uz,
+                    (select uuid from catalog_categories where id = parent_id) as parent_id,
+                    is_active
                 """
             ),
-            {"slug": payload.slug, "name": payload.name, "parent_id": payload.parent_id},
+            {"slug": payload.slug, "name": payload.name, "parent_id": resolved_parent_id},
         )
     ).mappings().first()
     await db.commit()
@@ -1256,24 +1363,62 @@ async def create_category(payload: CategoryCreate, db: AsyncSession = Depends(ge
 
 
 @router.patch("/categories/{category_id}")
-async def patch_category(category_id: int, payload: dict[str, Any], db: AsyncSession = Depends(get_db_session)) -> dict[str, Any]:
+async def patch_category(
+    category_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    payload: CategoryPatch = Body(...),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    internal_category_id = await _resolve_category_id_or_404(db, category_id)
+    patch_payload = payload.model_dump(exclude_unset=True)
+
+    parent_ref_marker = object()
+    parent_ref = patch_payload.pop("parent_id", parent_ref_marker)
+    set_parent = parent_ref is not parent_ref_marker
+    resolved_parent_id: int | None
+    if set_parent:
+        if parent_ref is None:
+            resolved_parent_id = None
+        else:
+            resolved_parent_id = await _resolve_category_id_or_404(db, str(parent_ref))
+    else:
+        resolved_parent_id = None
+
     await db.execute(
         text(
             """
             update catalog_categories
             set slug = coalesce(:slug, slug),
                 name_uz = coalesce(:name_uz, name_uz),
-                parent_id = coalesce(:parent_id, parent_id)
+                parent_id = case when :set_parent then :parent_id else parent_id end,
+                updated_at = now()
             where id = :id
             """
         ),
-        {"id": category_id, "slug": payload.get("slug"), "name_uz": payload.get("name"), "parent_id": payload.get("parent_id")},
+        {
+            "id": internal_category_id,
+            "slug": patch_payload.get("slug"),
+            "name_uz": patch_payload.get("name"),
+            "set_parent": set_parent,
+            "parent_id": resolved_parent_id,
+        },
     )
     await db.commit()
     row = (
         await db.execute(
-            text("select id, slug, name_uz, parent_id, is_active from catalog_categories where id = :id"),
-            {"id": category_id},
+            text(
+                """
+                select
+                    c.uuid as id,
+                    c.slug,
+                    c.name_uz,
+                    p.uuid as parent_id,
+                    c.is_active
+                from catalog_categories c
+                left join catalog_categories p on p.id = c.parent_id
+                where c.id = :id
+                """
+            ),
+            {"id": internal_category_id},
         )
     ).mappings().first()
     if not row:
@@ -1282,14 +1427,19 @@ async def patch_category(category_id: int, payload: dict[str, Any], db: AsyncSes
 
 
 @router.delete("/categories/{category_id}")
-async def delete_category(category_id: int, db: AsyncSession = Depends(get_db_session)) -> dict[str, bool]:
-    await db.execute(text("delete from catalog_categories where id = :id"), {"id": category_id})
+async def delete_category(
+    category_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, bool]:
+    internal_category_id = await _resolve_category_id_or_404(db, category_id)
+    await db.execute(text("delete from catalog_categories where id = :id"), {"id": internal_category_id})
     await db.commit()
     return {"ok": True}
 
 
 @router.patch("/products/{product_id}")
-async def patch_product(product_id: int, payload: dict[str, Any], db: AsyncSession = Depends(get_db_session)) -> dict[str, Any]:
+async def patch_product(product_id: str, payload: dict[str, Any], db: AsyncSession = Depends(get_db_session)) -> dict[str, Any]:
+    resolved_product_id = await _resolve_product_id_or_404(db, product_id)
     await db.execute(
         text(
             """
@@ -1301,7 +1451,12 @@ async def patch_product(product_id: int, payload: dict[str, Any], db: AsyncSessi
             where id = :id
             """
         ),
-        {"id": product_id, "title": payload.get("normalized_title"), "main_image": payload.get("main_image"), "specs": payload.get("specs")},
+        {
+            "id": resolved_product_id,
+            "title": payload.get("normalized_title"),
+            "main_image": payload.get("main_image"),
+            "specs": payload.get("specs"),
+        },
     )
     await db.commit()
     return {"ok": True}
@@ -1309,9 +1464,10 @@ async def patch_product(product_id: int, payload: dict[str, Any], db: AsyncSessi
 
 @router.delete("/products/{product_id}")
 async def delete_product(
-    product_id: int, db: AsyncSession = Depends(get_db_session), redis: Redis = Depends(get_redis)
+    product_id: str, db: AsyncSession = Depends(get_db_session), redis: Redis = Depends(get_redis)
 ) -> dict[str, bool]:
-    await db.execute(text("delete from catalog_canonical_products where id = :id"), {"id": product_id})
+    resolved_product_id = await _resolve_product_id_or_404(db, product_id)
+    await db.execute(text("delete from catalog_canonical_products where id = :id"), {"id": resolved_product_id})
     await db.commit()
     await _invalidate_product_caches(redis)
     return {"ok": True}
@@ -1323,9 +1479,14 @@ async def bulk_delete_products(
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),
 ) -> dict[str, Any]:
-    product_ids = sorted({int(item) for item in payload.product_ids if int(item) > 0})
+    resolved_set: set[int] = set()
+    for item in payload.product_ids:
+        resolved = await _resolve_product_id_or_404(db, item)
+        if resolved > 0:
+            resolved_set.add(resolved)
+    product_ids = sorted(resolved_set)
     if not product_ids:
-        raise HTTPException(status_code=422, detail="product_ids must contain at least one positive id")
+        raise HTTPException(status_code=422, detail="product_ids must contain at least one valid product reference")
 
     deleted_count = (
         await db.execute(
@@ -1450,9 +1611,38 @@ async def list_orders(
 ) -> dict[str, Any]:
     key = "admin:orders"
     if await redis.llen(key) == 0:
+        user_ids: list[str] = []
+        async for user_key in redis.scan_iter(match="auth:user:*"):
+            if user_key.count(":") != 2:
+                continue
+            if await redis.type(user_key) != "hash":
+                continue
+            payload = await redis.hgetall(user_key)
+            if not payload:
+                continue
+            user_ids.append(await _ensure_user_uuid(redis, user_key=user_key, payload=payload))
+            if len(user_ids) >= 2:
+                break
+        while len(user_ids) < 2:
+            user_ids.append(str(uuid4()))
+
         seed = [
-            {"id": 1, "user_id": 1, "total_amount": 12500000, "currency": "UZS", "status": "new", "created_at": datetime.now(UTC).isoformat()},
-            {"id": 2, "user_id": 2, "total_amount": 8990000, "currency": "UZS", "status": "processing", "created_at": datetime.now(UTC).isoformat()},
+            {
+                "id": str(uuid4()),
+                "user_id": user_ids[0],
+                "total_amount": 12500000,
+                "currency": "UZS",
+                "status": "new",
+                "created_at": datetime.now(UTC).isoformat(),
+            },
+            {
+                "id": str(uuid4()),
+                "user_id": user_ids[1],
+                "total_amount": 8990000,
+                "currency": "UZS",
+                "status": "processing",
+                "created_at": datetime.now(UTC).isoformat(),
+            },
         ]
         for row in seed:
             await redis.rpush(key, json.dumps(row, ensure_ascii=False))
@@ -1470,23 +1660,29 @@ async def list_orders(
 
 
 @router.get("/orders/{order_id}")
-async def get_order(order_id: int, redis: Redis = Depends(get_redis)) -> dict[str, Any]:
+async def get_order(order_id: str = Path(..., pattern=UUID_REF_PATTERN), redis: Redis = Depends(get_redis)) -> dict[str, Any]:
+    normalized_order_id = _normalize_uuid_ref(order_id, field_name="order_id")
     rows = await list_orders(page=1, limit=500, redis=redis)
     for row in rows["items"]:
-        if int(row["id"]) == order_id:
+        if str(row.get("id", "")).lower() == normalized_order_id:
             return row
     raise HTTPException(status_code=404, detail="order not found")
 
 
 @router.patch("/orders/{order_id}")
-async def patch_order(order_id: int, payload: OrderStatusPatch, redis: Redis = Depends(get_redis)) -> dict[str, Any]:
+async def patch_order(
+    order_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    payload: OrderStatusPatch = Body(...),
+    redis: Redis = Depends(get_redis),
+) -> dict[str, Any]:
+    normalized_order_id = _normalize_uuid_ref(order_id, field_name="order_id")
     key = "admin:orders"
     raw_rows = await redis.lrange(key, 0, -1)
     next_rows: list[str] = []
     target: dict[str, Any] | None = None
     for raw in raw_rows:
         row = json.loads(raw)
-        if int(row["id"]) == order_id:
+        if str(row.get("id", "")).lower() == normalized_order_id:
             row["status"] = payload.status
             target = row
         next_rows.append(json.dumps(row, ensure_ascii=False))

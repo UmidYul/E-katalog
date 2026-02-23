@@ -11,16 +11,17 @@ from app.core.config import settings
 from app.repositories.catalog import CatalogRepository
 
 router = APIRouter(tags=["search"])
+UUID_REF_PATTERN = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
 
 
 @router.get("/search", response_model=SearchResponse)
 async def search(
     request: Request,
     q: str | None = Query(default=None, min_length=1, max_length=200),
-    category_id: int | None = None,
-    brand_id: list[int] | None = Query(default=None),
-    store_id: list[int] | None = Query(default=None),
-    seller_id: list[int] | None = Query(default=None),
+    category_id: str | None = Query(default=None, pattern=UUID_REF_PATTERN),
+    brand_id: list[str] | None = Query(default=None),
+    store_id: list[str] | None = Query(default=None),
+    seller_id: list[str] | None = Query(default=None),
     min_price: float | None = None,
     max_price: float | None = None,
     max_delivery_days: int | None = Query(default=None, ge=0, le=30),
@@ -57,15 +58,28 @@ async def search(
         return cached
 
     repo = CatalogRepository(db, cursor_secret=settings.cursor_secret)
+    resolved_category_id = await repo.resolve_entity_ref("category", category_id)
+    if category_id is not None and resolved_category_id is None:
+        return {"items": [], "next_cursor": None, "request_id": request.state.request_id}
+    resolved_brand_ids = await repo.resolve_entity_refs("brand", brand_id)
+    if brand_id is not None and not resolved_brand_ids:
+        return {"items": [], "next_cursor": None, "request_id": request.state.request_id}
+    resolved_store_ids = await repo.resolve_entity_refs("store", store_id)
+    if store_id is not None and not resolved_store_ids:
+        return {"items": [], "next_cursor": None, "request_id": request.state.request_id}
+    resolved_seller_ids = await repo.resolve_entity_refs("seller", seller_id)
+    if seller_id is not None and not resolved_seller_ids:
+        return {"items": [], "next_cursor": None, "request_id": request.state.request_id}
+
     items, next_cursor = await repo.search_products(
         q=q,
-        category_id=category_id,
-        brand_ids=brand_id,
+        category_id=resolved_category_id,
+        brand_ids=resolved_brand_ids,
         min_price=min_price,
         max_price=max_price,
         in_stock=in_stock,
-        store_ids=store_id,
-        seller_ids=seller_id,
+        store_ids=resolved_store_ids,
+        seller_ids=resolved_seller_ids,
         max_delivery_days=max_delivery_days,
         sort=sort,
         limit=limit,

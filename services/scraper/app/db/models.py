@@ -53,7 +53,7 @@ class Shop(Base):
 
 class Offer(Base):
     __tablename__ = "offers"
-    __table_args__ = (UniqueConstraint("shop_id", "link", name="uq_offer_shop_link"),)
+    __table_args__ = (UniqueConstraint("shop_id", "link", "variant_key", name="uq_offer_shop_link_variant"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
@@ -62,6 +62,8 @@ class Offer(Base):
     old_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     availability: Mapped[str] = mapped_column(String(255), nullable=False, default="unknown")
     link: Mapped[str] = mapped_column(String(1000), nullable=False)
+    variant_key: Mapped[str] = mapped_column(String(190), nullable=False, default="default", server_default="default")
+    variant_attrs: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     images: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
     specifications: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1536), nullable=True)

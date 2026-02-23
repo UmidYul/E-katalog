@@ -3,13 +3,14 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 
 from app.core.config import settings
 from app.core.logging import logger
 from app.db.session import AsyncSessionLocal
 from app.platform.models import (
     CatalogAIEnrichmentJob,
+    CatalogBrand,
     CatalogCanonicalProduct,
     CatalogOffer,
     CatalogProduct,
@@ -19,6 +20,7 @@ from app.platform.models import (
 )
 from app.platform.services.normalization import (
     build_canonical_title,
+    detect_brand,
     enrich_specs_from_title,
     normalize_seller_name,
     normalize_specs,
@@ -37,8 +39,8 @@ from app.celery_app import celery_app
     retry_jitter=True,
     max_retries=7,
 )
-def normalize_product_batch(self, limit: int = 500) -> dict:
-    return asyncio.run(_normalize_product_batch(limit))
+def normalize_product_batch(self, limit: int = 500, reset_offset: bool = False) -> dict:
+    return asyncio.run(_normalize_product_batch(limit, reset_offset=reset_offset))
 
 
 async def _resolve_or_create_canonical(session, *, title: str, category_id: int, brand_id: int | None, specs: dict, image: str | None):
@@ -58,6 +60,26 @@ async def _resolve_or_create_canonical(session, *, title: str, category_id: int,
         if specs and (not isinstance(canonical.specs, dict) or not canonical.specs):
             canonical.specs = specs
         return canonical
+
+    # Upgrade existing neutral canonical records once brand becomes known.
+    if brand_id is not None:
+        neutral = (
+            await session.execute(
+                select(CatalogCanonicalProduct).where(
+                    CatalogCanonicalProduct.category_id == category_id,
+                    CatalogCanonicalProduct.brand_id.is_(None),
+                    CatalogCanonicalProduct.normalized_title == title,
+                    CatalogCanonicalProduct.is_active.is_(True),
+                )
+            )
+        ).scalar_one_or_none()
+        if neutral:
+            neutral.brand_id = brand_id
+            if image and not neutral.main_image:
+                neutral.main_image = image
+            if specs and (not isinstance(neutral.specs, dict) or not neutral.specs):
+                neutral.specs = specs
+            return neutral
 
     ai_candidate_id = await _find_ai_canonical_candidate(
         session,
@@ -176,13 +198,39 @@ async def _resolve_or_create_seller(session, *, store_id: int, store_name: str, 
     return seller
 
 
-async def _normalize_product_batch(limit: int) -> dict:
+async def _resolve_or_create_brand(session, *, brand_name: str) -> int | None:
+    normalized = normalize_title(brand_name)
+    if not normalized:
+        return None
+
+    brand = (
+        await session.execute(
+            select(CatalogBrand).where(
+                (CatalogBrand.normalized_name == normalized) | (func.lower(CatalogBrand.name) == normalized)
+            )
+        )
+    ).scalar_one_or_none()
+    if brand:
+        if brand.name != brand_name:
+            brand.name = brand_name
+        return int(brand.id)
+
+    brand = CatalogBrand(name=brand_name, normalized_name=normalized, aliases=[])
+    session.add(brand)
+    await session.flush()
+    return int(brand.id)
+
+
+async def _normalize_product_batch(limit: int, *, reset_offset: bool = False) -> dict:
     processed = 0
     watermark_ts = None
     watermark_id = 0
     async with AsyncSessionLocal() as session:
         await ensure_offsets_table(session)
-        last_ts, last_id = await get_offset(session, "normalize_store_products")
+        if reset_offset:
+            last_ts, last_id = None, 0
+        else:
+            last_ts, last_id = await get_offset(session, "normalize_store_products")
 
         filters = []
         if last_ts is not None:
@@ -213,7 +261,14 @@ async def _normalize_product_batch(limit: int) -> dict:
             specs = normalize_specs(metadata.get("specifications") or metadata.get("specs"))
             specs = enrich_specs_from_title(title_source, specs)
             category_id = product.category_id if product and product.category_id else 1
-            brand_id = product.brand_id if product else None
+            inferred_brand = detect_brand(title_source, specs)
+            if inferred_brand:
+                brand_id = await _resolve_or_create_brand(
+                    session,
+                    brand_name=inferred_brand.title(),
+                )
+            else:
+                brand_id = product.brand_id if product else None
 
             canonical = await _resolve_or_create_canonical(
                 session,
@@ -228,6 +283,11 @@ async def _normalize_product_batch(limit: int) -> dict:
             if product:
                 product.normalized_title = normalized
                 product.canonical_product_id = canonical.id
+                if brand_id is not None and product.brand_id != brand_id:
+                    product.brand_id = brand_id
+
+            if brand_id is not None and canonical.brand_id != brand_id:
+                canonical.brand_id = brand_id
 
             seller = await _resolve_or_create_seller(
                 session,
@@ -281,3 +341,21 @@ async def _normalize_product_batch(limit: int) -> dict:
 @celery_app.task(bind=True)
 def enqueue_dirty_products(self) -> int:
     return 1 if normalize_product_batch.delay().id else 0
+
+
+@celery_app.task(bind=True)
+def normalize_full_catalog(self, chunk_size: int = 500) -> dict:
+    return asyncio.run(_normalize_full_catalog(chunk_size))
+
+
+async def _normalize_full_catalog(chunk_size: int) -> dict:
+    total = 0
+    reset = True
+    while True:
+        result = await _normalize_product_batch(chunk_size, reset_offset=reset)
+        reset = False
+        processed = int(result.get("processed", 0))
+        total += processed
+        if processed == 0:
+            break
+    return {"processed": total, "at": datetime.now(UTC).isoformat()}

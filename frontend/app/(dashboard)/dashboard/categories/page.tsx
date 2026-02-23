@@ -64,10 +64,10 @@ export default function AdminCategoriesPage() {
             <Input {...form.register("slug")} />
           </div>
           <div>
-            <p className="mb-1 text-xs text-muted-foreground">Parent ID</p>
+            <p className="mb-1 text-xs text-muted-foreground">Parent UUID</p>
             <Input
-              type="number"
-              onChange={(e) => form.setValue("parent_id", e.target.value ? Number(e.target.value) : null)}
+              placeholder="Optional UUID"
+              onChange={(e) => form.setValue("parent_id", e.target.value.trim() ? e.target.value.trim() : null)}
             />
           </div>
         </div>

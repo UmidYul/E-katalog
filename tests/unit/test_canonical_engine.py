@@ -67,3 +67,13 @@ def test_canonical_key_samsung_a_m_tab_series() -> None:
     assert a_key == "samsung|a55|256"
     assert m_key == "samsung|m35|256"
     assert tab_key == "samsung|tabs9ultra|256"
+
+
+def test_canonical_key_samsung_handles_cyrillic_model_letter() -> None:
+    key = canonical_key(extract_attributes("PLATINUM STORE - Купить Samsung Galaxy А56 5G 8/128 ГБ Awesome Lightgray"))
+    assert key == "samsung|a56|128"
+
+
+def test_canonical_key_samsung_handles_sm_internal_model_code() -> None:
+    key = canonical_key(extract_attributes("Смартфон Samsung SM-А075F A07 (4/128) black"))
+    assert key == "samsung|a07|128"

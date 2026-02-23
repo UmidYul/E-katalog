@@ -19,7 +19,7 @@ export default function AdminUsersPage() {
   const { query, setQuery, page, setPage, limit } = useDashboardFiltersStore();
   const users = useUsers({ q: query, page, limit, sort: "created_at" });
   const deleteUser = useDeleteUser();
-  const [targetId, setTargetId] = useState<number | null>(null);
+  const [targetId, setTargetId] = useState<string | null>(null);
 
   const columns: AdminColumn<AdminUser>[] = [
     { key: "id", title: "ID", render: (u) => u.id, sortable: true },

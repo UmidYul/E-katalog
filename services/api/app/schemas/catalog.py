@@ -1,26 +1,30 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+
+UUID_REF_PATTERN = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+UUIDRef = Annotated[str, StringConstraints(pattern=UUID_REF_PATTERN)]
 
 
 class BrandOut(BaseModel):
-    id: int
+    id: str
     name: str
 
 
 class CategoryOut(BaseModel):
-    id: int
+    id: str
     name: str
     slug: str | None = None
-    parent_id: int | None = None
+    parent_id: str | None = None
 
 
 class ProductListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
+    id: str
     normalized_title: str
     image_url: str | None = None
     brand: BrandOut | None = None
@@ -32,8 +36,8 @@ class ProductListItem(BaseModel):
 
 
 class OfferOut(BaseModel):
-    id: int
-    seller_id: int | None = None
+    id: str
+    seller_id: str | None = None
     seller_name: str
     price_amount: float
     old_price_amount: float | None = None
@@ -45,16 +49,17 @@ class OfferOut(BaseModel):
 
 
 class ProductDetailOut(BaseModel):
-    id: int
+    id: str
     title: str
     category: str
     brand: str | None = None
     main_image: str | None = None
+    gallery_images: list[str] = Field(default_factory=list)
     specs: dict
 
 
 class OffersByStoreOut(BaseModel):
-    store_id: int
+    store_id: str
     store: str
     minimal_price: float
     offers_count: int
@@ -78,7 +83,98 @@ class SearchResponse(BaseModel):
 
 
 class CompareRequest(BaseModel):
-    product_ids: list[int] = Field(min_length=2, max_length=4)
+    product_ids: list[UUIDRef] = Field(min_length=2, max_length=4)
+
+
+class ProductReviewCreate(BaseModel):
+    author: str = Field(min_length=2, max_length=120)
+    rating: int = Field(ge=1, le=5)
+    comment: str = Field(min_length=10, max_length=3000)
+    pros: str | None = Field(default=None, max_length=500)
+    cons: str | None = Field(default=None, max_length=500)
+
+
+class ProductReviewOut(BaseModel):
+    id: str
+    product_id: str
+    author: str
+    rating: int
+    comment: str
+    pros: str | None = None
+    cons: str | None = None
+    status: str
+    created_at: str
+    updated_at: str
+    moderated_by: str | None = None
+    moderated_at: str | None = None
+
+
+class ProductQuestionCreate(BaseModel):
+    author: str = Field(min_length=2, max_length=120)
+    question: str = Field(min_length=8, max_length=2000)
+
+
+class ProductAnswerCreate(BaseModel):
+    author: str | None = Field(default=None, min_length=2, max_length=120)
+    text: str = Field(min_length=2, max_length=2000)
+    is_official: bool = False
+
+
+class ProductAnswerOut(BaseModel):
+    id: str
+    question_id: str
+    product_id: str
+    author: str
+    text: str
+    status: str
+    is_official: bool = False
+    created_at: str
+    updated_at: str
+    moderated_by: str | None = None
+    moderated_at: str | None = None
+
+
+class ProductQuestionOut(BaseModel):
+    id: str
+    product_id: str
+    author: str
+    question: str
+    status: str
+    created_at: str
+    updated_at: str
+    moderated_by: str | None = None
+    moderated_at: str | None = None
+    answers: list[ProductAnswerOut] = []
+
+
+class ProductFeedbackModerationIn(BaseModel):
+    status: str = Field(pattern="^(published|rejected|pending)$")
+
+
+class ProductFeedbackModerationOut(BaseModel):
+    ok: bool
+    status: str
+
+
+class ProductFeedbackQueueItem(BaseModel):
+    kind: str
+    id: str
+    product_id: str
+    author: str
+    body: str
+    rating: int | None = None
+    status: str
+    created_at: str
+    updated_at: str
+    moderated_by: str | None = None
+    moderated_at: str | None = None
+
+
+class ProductFeedbackQueueOut(BaseModel):
+    items: list[ProductFeedbackQueueItem]
+    total: int
+    status_counts: dict[str, int]
+    kind_counts: dict[str, int]
 
 
 class ErrorResponse(BaseModel):

@@ -8,10 +8,12 @@ export function useAdminAccess() {
   const me = useAuthMe();
   const logout = useLogout();
 
-  const role = useMemo<"admin" | "moderator">(() => {
-    const raw = (me.data as { role?: string } | undefined)?.role;
+  const role = useMemo<"admin" | "moderator" | "seller_support" | "user">(() => {
+    const raw = String((me.data as { role?: string } | undefined)?.role ?? "").trim().toLowerCase().replace("-", "_");
+    if (raw === "admin") return "admin";
+    if (raw === "seller_support") return "seller_support";
     if (raw === "moderator") return "moderator";
-    return "admin";
+    return "user";
   }, [me.data]);
 
   return {

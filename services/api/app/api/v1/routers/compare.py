@@ -20,14 +20,19 @@ async def compare_products(payload: CompareRequest, request: Request, db: AsyncS
     repo = CatalogRepository(db, cursor_secret=settings.cursor_secret)
     products = []
     for product_id in payload.product_ids:
-        product = await repo.get_product(product_id)
+        resolved_product_id = await repo.resolve_entity_ref("product", product_id)
+        if resolved_product_id is None:
+            raise HTTPException(status_code=404, detail=f"product {product_id} not found")
+
+        product = await repo.get_product(resolved_product_id)
         if product is None:
             raise HTTPException(status_code=404, detail=f"product {product_id} not found")
+        compare_meta = await repo.get_product_compare_meta(resolved_product_id)
         products.append(
             {
                 "id": product["id"],
                 "normalized_title": product["title"],
-                "attributes": {},
+                "attributes": compare_meta,
                 "specs": product["specs"],
             }
         )

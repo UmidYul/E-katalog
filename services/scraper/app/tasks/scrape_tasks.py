@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
+from celery import chain
+
 from app.core.config import settings
 from app.core.logging import configure_logging, logger
 from app.db.init_db import init_db
@@ -24,6 +26,34 @@ configure_logging(settings.log_level)
 )
 def enqueue_example_store_scrape(self) -> str:
     return asyncio.run(_run_marketplace_scrape())
+
+
+def _enqueue_post_scrape_pipeline() -> str:
+    workflow = chain(
+        celery_app.signature(
+            "app.tasks.normalize_tasks.normalize_full_catalog",
+            kwargs={"chunk_size": 1000},
+            immutable=True,
+            queue="normalize",
+            routing_key="normalize",
+        ),
+        celery_app.signature(
+            "app.tasks.dedupe_tasks.find_duplicate_candidates_task",
+            kwargs={"limit": 5000},
+            immutable=True,
+            queue="dedupe",
+            routing_key="dedupe",
+        ),
+        celery_app.signature(
+            "app.tasks.reindex_tasks.reindex_product_search_batch",
+            kwargs={"limit": 20000},
+            immutable=True,
+            queue="reindex",
+            routing_key="reindex",
+        ),
+    )
+    result = workflow.apply_async()
+    return str(result.id)
 
 
 async def _run_marketplace_scrape() -> str:
@@ -64,11 +94,13 @@ async def _run_marketplace_scrape() -> str:
 
         await sync_legacy_to_catalog(session)
 
+    workflow_id = _enqueue_post_scrape_pipeline()
     logger.info(
         "scrape_completed",
         stores_total=stores_total,
         stores_completed=stores_completed,
         stores_failed=stores_failed,
+        post_scrape_workflow_id=workflow_id,
     )
     return "ok"
 

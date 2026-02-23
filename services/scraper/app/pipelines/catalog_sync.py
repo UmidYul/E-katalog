@@ -81,7 +81,6 @@ SYNC_SQL_STATEMENTS = [
       from products p
     ) src
     where cp.category_id = 1
-      and cp.brand_id is null
       and lower(cp.normalized_title) = src.normalized_title
       and coalesce(cp.specs, '{}'::jsonb) = '{}'::jsonb
       and src.specs <> '{}'::jsonb
@@ -102,7 +101,6 @@ SYNC_SQL_STATEMENTS = [
       select cp.id
       from catalog_canonical_products cp
       where cp.category_id = 1
-        and cp.brand_id is null
         and lower(cp.normalized_title) = lower(p.title)
       order by cp.id asc
       limit 1
@@ -111,6 +109,26 @@ SYNC_SQL_STATEMENTS = [
     set canonical_product_id = excluded.canonical_product_id,
         normalized_title = excluded.normalized_title,
         status = 'active'
+    """,
+    """
+    insert into catalog_product_variants (product_id, variant_key, color, storage, ram, other_attrs)
+    select distinct
+      p.id,
+      coalesce(nullif(o.variant_key, ''), 'default'),
+      nullif(coalesce(o.variant_attrs->>'color', o.specifications->>'color'), ''),
+      nullif(coalesce(o.variant_attrs->>'storage', o.specifications->>'storage_gb', o.specifications->>'storage'), ''),
+      nullif(coalesce(o.variant_attrs->>'ram', o.specifications->>'ram_gb', o.specifications->>'ram'), ''),
+      coalesce(o.variant_attrs, '{}'::jsonb)
+    from offers o
+    join products p on p.id = o.product_id
+    on conflict (product_id, variant_key) do update
+    set color = coalesce(excluded.color, catalog_product_variants.color),
+        storage = coalesce(excluded.storage, catalog_product_variants.storage),
+        ram = coalesce(excluded.ram, catalog_product_variants.ram),
+        other_attrs = case
+          when coalesce(excluded.other_attrs, '{}'::jsonb) = '{}'::jsonb then catalog_product_variants.other_attrs
+          else excluded.other_attrs
+        end
     """,
     """
     insert into catalog_store_products (
@@ -130,7 +148,9 @@ SYNC_SQL_STATEMENTS = [
       coalesce(o.availability, 'unknown'),
       jsonb_build_object(
         'images', coalesce(o.images, '[]'::jsonb),
-        'specifications', coalesce(o.specifications, '{}'::jsonb)
+        'specifications', coalesce(o.specifications, '{}'::jsonb),
+        'variant_key', coalesce(nullif(o.variant_key, ''), 'default'),
+        'variant_attrs', coalesce(o.variant_attrs, '{}'::jsonb)
       ),
       now()
     from offers o
@@ -141,7 +161,6 @@ SYNC_SQL_STATEMENTS = [
       select cp.id
       from catalog_canonical_products cp
       where cp.category_id = 1
-        and cp.brand_id is null
         and lower(cp.normalized_title) = lower(p.title)
       order by cp.id asc
       limit 1
@@ -182,7 +201,7 @@ SYNC_SQL_STATEMENTS = [
       cs_store.id,
       cs.id,
       o.id,
-      null,
+      pv.id,
       o.link,
       'UZS',
       o.price,
@@ -198,13 +217,15 @@ SYNC_SQL_STATEMENTS = [
       select cp.id
       from catalog_canonical_products cp
       where cp.category_id = 1
-        and cp.brand_id is null
         and lower(cp.normalized_title) = lower(p.title)
       order by cp.id asc
       limit 1
     ) cp on true
     join shops s on s.id = o.shop_id
     join catalog_stores cs_store on cs_store.slug = __STORE_SLUG_EXPR__
+    left join catalog_product_variants pv
+      on pv.product_id = o.product_id
+     and pv.variant_key = coalesce(nullif(o.variant_key, ''), 'default')
     left join catalog_sellers cs
       on cs.store_id = cs_store.id
      and cs.normalized_name = lower(regexp_replace(s.name, '[^a-zA-Z0-9]+', ' ', 'g'))
@@ -212,12 +233,32 @@ SYNC_SQL_STATEMENTS = [
     set canonical_product_id = excluded.canonical_product_id,
         store_id = excluded.store_id,
         seller_id = excluded.seller_id,
+        product_variant_id = excluded.product_variant_id,
         offer_url = excluded.offer_url,
         price_amount = excluded.price_amount,
         old_price_amount = excluded.old_price_amount,
         in_stock = excluded.in_stock,
         scraped_at = excluded.scraped_at,
         is_valid = true
+    """,
+    """
+    insert into catalog_price_history (offer_id, price_amount, in_stock, captured_at)
+    select
+      ph.offer_id,
+      ph.price,
+      (coalesce(o.availability, '') not in ('out_of_stock', 'РЅРµС‚', 'no')),
+      ph.created_at
+    from price_history ph
+    join offers o on o.id = ph.offer_id
+    join catalog_offers co on co.id = ph.offer_id
+    where not exists (
+      select 1
+      from catalog_price_history cph
+      where cph.offer_id = ph.offer_id
+        and cph.captured_at = ph.created_at
+        and cph.price_amount = ph.price
+        and cph.in_stock = (coalesce(o.availability, '') not in ('out_of_stock', 'РЅРµС‚', 'no'))
+    )
     """,
     """
     insert into catalog_product_search (product_id, tsv, min_price, max_price, store_count, updated_at)
@@ -237,6 +278,65 @@ SYNC_SQL_STATEMENTS = [
         max_price = excluded.max_price,
         store_count = excluded.store_count,
         updated_at = excluded.updated_at
+    """,
+    """
+    with brand_candidates as (
+      select
+        cp.id as canonical_id,
+        case
+          when src ~ '(^|[^a-z0-9])(apple|iphone)([^a-z0-9]|$)' then 'Apple'
+          when src ~ '(^|[^a-z0-9])(samsung|galaxy)([^a-z0-9]|$)' then 'Samsung'
+          when src ~ '(^|[^a-z0-9])(xiaomi|redmi|poco)([^a-z0-9]|$)' then 'Xiaomi'
+          when src ~ '(^|[^a-z0-9])(huawei)([^a-z0-9]|$)' then 'Huawei'
+          when src ~ '(^|[^a-z0-9])(honor)([^a-z0-9]|$)' then 'Honor'
+          when src ~ '(^|[^a-z0-9])(google|pixel)([^a-z0-9]|$)' then 'Google'
+          when src ~ '(^|[^a-z0-9])(oneplus|one\\s*plus)([^a-z0-9]|$)' then 'OnePlus'
+          when src ~ '(^|[^a-z0-9])(nothing)([^a-z0-9]|$)' then 'Nothing'
+          else null
+        end as brand_name
+      from (
+        select
+          cp.id,
+          lower(
+            coalesce(cp.normalized_title, '')
+            || ' '
+            || coalesce(cp.specs->>'brand', '')
+            || ' '
+            || coalesce(cp.specs->>'manufacturer', '')
+            || ' '
+            || coalesce(cp.specs->>'vendor', '')
+          ) as src
+        from catalog_canonical_products cp
+      ) cp
+    ),
+    ensured_brands as (
+      insert into catalog_brands (name, normalized_name, aliases)
+      select distinct
+        brand_name,
+        lower(brand_name),
+        '[]'::jsonb
+      from brand_candidates
+      where brand_name is not null
+      on conflict (name) do update
+      set normalized_name = excluded.normalized_name
+      returning id, name
+    )
+    update catalog_canonical_products cp
+    set brand_id = b.id
+    from brand_candidates bc
+    left join ensured_brands eb on eb.name = bc.brand_name
+    join catalog_brands b on b.name = bc.brand_name
+    where cp.id = bc.canonical_id
+      and bc.brand_name is not null
+      and cp.brand_id is null
+    """,
+    """
+    update catalog_products p
+    set brand_id = cp.brand_id
+    from catalog_canonical_products cp
+    where p.canonical_product_id = cp.id
+      and cp.brand_id is not null
+      and p.brand_id is distinct from cp.brand_id
     """,
 ]
 

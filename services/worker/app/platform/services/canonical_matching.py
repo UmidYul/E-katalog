@@ -75,6 +75,22 @@ class ValidationMetrics:
 
 
 _ALIAS_RULES: tuple[tuple[str, str], ...] = DEFAULT_ALIAS_RULES
+_CYRILLIC_CONFUSABLE_TRANSLATION = str.maketrans(
+    {
+        "а": "a",
+        "в": "b",
+        "с": "c",
+        "е": "e",
+        "н": "h",
+        "к": "k",
+        "м": "m",
+        "о": "o",
+        "р": "p",
+        "т": "t",
+        "у": "y",
+        "х": "x",
+    }
+)
 
 
 def _apply_aliases(value: str) -> str:
@@ -84,9 +100,20 @@ def _apply_aliases(value: str) -> str:
     return text
 
 
+def _normalize_confusable_model_tokens(value: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        token = match.group(0)
+        if not any(ch.isdigit() for ch in token):
+            return token
+        return token.translate(_CYRILLIC_CONFUSABLE_TRANSLATION)
+
+    return re.sub(r"[a-zа-яё0-9]+", replace, value, flags=re.IGNORECASE)
+
+
 def _normalize_text(value: str) -> str:
     normalized = value.lower().strip()
     normalized = _apply_aliases(normalized)
+    normalized = _normalize_confusable_model_tokens(normalized)
     normalized = normalized.replace("+", " plus ")
     normalized = normalized.replace("/", " ")
     normalized = normalized.replace("-", " ")
@@ -192,9 +219,17 @@ def _parse_model(text: str, brand: str) -> tuple[str, str]:
             return "base"
 
         def line_model(line: str, digits: str, variant: str = "base") -> tuple[str, str]:
+            normalized_digits = digits.strip()
+            if line in {"a", "m", "f"} and len(normalized_digits) == 3:
+                # Samsung internal SKU-style codes like A075F/A566E should map to public line A07/A56.
+                normalized_digits = normalized_digits[:2]
             if variant == "base":
-                return f"{line}{digits}", "base"
-            return f"{line}{digits}{variant}", variant
+                return f"{line}{normalized_digits}", "base"
+            return f"{line}{normalized_digits}{variant}", variant
+
+        sm_line_match = re.search(r"\bsm\s*[- ]?([amf])\s*(\d{3})[a-z]?\b", text)
+        if sm_line_match:
+            return line_model(sm_line_match.group(1), sm_line_match.group(2), "base")
 
         tab_match = re.search(r"\btab\s*s\s*(\d{1,2})(?:\s*(ultra|plus|fe))?\b", text)
         if tab_match:

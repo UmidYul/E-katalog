@@ -9,8 +9,8 @@ import { useProduct } from "@/features/catalog/use-catalog-queries";
 
 export default function AdminProductDetailsPage() {
   const params = useParams<{ id: string }>();
-  const id = Number(params.id);
-  const product = useProduct(id);
+  const productRef = params.id;
+  const product = useProduct(productRef);
 
   if (product.isLoading || !product.data) {
     return <p className="text-sm text-muted-foreground">Loading product...</p>;

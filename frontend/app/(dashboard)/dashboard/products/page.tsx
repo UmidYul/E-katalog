@@ -26,8 +26,8 @@ export default function AdminProductsPage() {
   const bulkDeleteProducts = useBulkDeleteProducts();
   const runTask = useRunAdminTask();
   const importInputRef = useRef<HTMLInputElement | null>(null);
-  const [targetId, setTargetId] = useState<number | null>(null);
-  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [targetId, setTargetId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [importPending, setImportPending] = useState(false);
   const [exportPending, setExportPending] = useState(false);
@@ -37,7 +37,7 @@ export default function AdminProductsPage() {
   const allChecked = rowIds.length > 0 && rowIds.every((id) => selectedIds.includes(id));
   const selectedCount = selectedIds.length;
 
-  const toggleRow = (id: number, checked: boolean) => {
+  const toggleRow = (id: string, checked: boolean) => {
     setSelectedIds((prev) => (checked ? Array.from(new Set([...prev, id])) : prev.filter((item) => item !== id)));
   };
 

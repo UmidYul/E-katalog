@@ -1,7 +1,20 @@
 import { apiClient } from "@/lib/api/client";
-import type { FilterBucket, Paginated, ProductDetail, ProductListItem, ProductOffer, SortOption } from "@/types/domain";
+import type {
+  CompareMatrixResponse,
+  FilterBucket,
+  Paginated,
+  PriceHistoryPoint,
+  ProductAnswer,
+  ProductDetail,
+  ProductListItem,
+  ProductOffer,
+  ProductQuestion,
+  ProductReview,
+  SortOption
+} from "@/types/domain";
 import type {
   AdminCategory,
+  AdminFeedbackQueueResponse,
   AdminMetrics,
   AdminOrder,
   AdminProduct,
@@ -13,10 +26,10 @@ import type {
 
 export type CatalogQuery = {
   q?: string;
-  category_id?: number;
-  brand_id?: number[];
-  store_id?: number[];
-  seller_id?: number[];
+  category_id?: string;
+  brand_id?: string[];
+  store_id?: string[];
+  seller_id?: string[];
   min_price?: number;
   max_price?: number;
   max_delivery_days?: number;
@@ -42,25 +55,37 @@ export const catalogApi = {
     const { data } = await apiClient.get<Paginated<ProductListItem>>("/products", { params });
     return data;
   },
-  async getProduct(productId: number): Promise<ProductDetail> {
+  async getProduct(productId: string): Promise<ProductDetail> {
     const { data } = await apiClient.get<ProductDetail>(`/products/${productId}`);
     return data;
   },
-  async getOffers(productId: number): Promise<ProductOffer[]> {
+  async getOffers(productId: string): Promise<ProductOffer[]> {
     const { data } = await apiClient.get<ProductOffer[]>(`/products/${productId}/offers`);
     return data;
   },
-  async getCategories(): Promise<Array<{ id: number; slug: string; name: string }>> {
-    const { data } = await apiClient.get<Array<{ id: number; slug: string; name: string }>>("/categories");
+  async getProductPriceHistory(productId: string, days: number = 30): Promise<PriceHistoryPoint[]> {
+    const { data } = await apiClient.get<PriceHistoryPoint[]>(`/products/${productId}/price-history`, {
+      params: { days }
+    });
     return data;
   },
-  async getBrands(): Promise<Array<{ id: number; name: string }>> {
-    const { data } = await apiClient.get<Array<{ id: number; name: string }>>("/brands");
+  async getCategories(): Promise<Array<{ id: string; slug: string; name: string }>> {
+    const { data } = await apiClient.get<Array<{ id: string; slug: string; name: string }>>("/categories");
     return data;
   },
-  async getFilters(categoryId?: number): Promise<{ attributes?: FilterBucket[]; stores?: Array<{ id: number; name: string }>; sellers?: Array<{ id: number; name: string }> }> {
-    const { data } = await apiClient.get<{ attributes?: FilterBucket[]; stores?: Array<{ id: number; name: string }>; sellers?: Array<{ id: number; name: string }> }>("/filters", {
+  async getBrands(): Promise<Array<{ id: string; name: string }>> {
+    const { data } = await apiClient.get<Array<{ id: string; name: string }>>("/brands");
+    return data;
+  },
+  async getFilters(categoryId?: string): Promise<{ attributes?: FilterBucket[]; stores?: Array<{ id: string; name: string }>; sellers?: Array<{ id: string; name: string }> }> {
+    const { data } = await apiClient.get<{ attributes?: FilterBucket[]; stores?: Array<{ id: string; name: string }>; sellers?: Array<{ id: string; name: string }> }>("/filters", {
       params: { category_id: categoryId }
+    });
+    return data;
+  },
+  async compareProducts(productIds: string[]): Promise<CompareMatrixResponse> {
+    const { data } = await apiClient.post<CompareMatrixResponse>("/compare", {
+      product_ids: productIds
     });
     return data;
   }
@@ -70,12 +95,74 @@ export const authApi = {
   login: (payload: { email: string; password: string }) => apiClient.post("/auth/login", payload),
   register: (payload: { email: string; password: string; full_name: string }) => apiClient.post("/auth/register", payload),
   logout: () => apiClient.post("/auth/logout"),
-  me: () => apiClient.get<{ id: number; email: string; full_name: string }>("/auth/me")
+  me: () => apiClient.get<{ id: string; email: string; full_name: string; role: string }>("/auth/me")
+};
+
+export type UserProfile = {
+  id: string;
+  email: string;
+  full_name: string;
+  display_name: string;
+  phone: string;
+  city: string;
+  telegram: string;
+  about: string;
+  updated_at?: string | null;
+};
+
+export type UserProfilePatch = {
+  display_name?: string;
+  phone?: string;
+  city?: string;
+  telegram?: string;
+  about?: string;
 };
 
 export const userApi = {
-  favorites: () => apiClient.get<Array<{ product_id: number }>>("/users/favorites"),
-  toggleFavorite: (productId: number) => apiClient.post(`/users/favorites/${productId}`)
+  favorites: () => apiClient.get<Array<{ product_id: string }>>("/users/favorites"),
+  toggleFavorite: (productId: string) => apiClient.post(`/users/favorites/${productId}`),
+  profile: () => apiClient.get<UserProfile>("/users/me/profile"),
+  updateProfile: (payload: UserProfilePatch) => apiClient.patch<UserProfile>("/users/me/profile", payload)
+};
+
+export const productFeedbackApi = {
+  listReviews: async (productId: string): Promise<ProductReview[]> => {
+    const { data } = await apiClient.get<ProductReview[]>(`/products/${productId}/reviews`);
+    return data;
+  },
+  createReview: async (
+    productId: string,
+    payload: { author: string; rating: number; comment: string; pros?: string; cons?: string }
+  ): Promise<ProductReview> => {
+    const { data } = await apiClient.post<ProductReview>(`/products/${productId}/reviews`, payload);
+    return data;
+  },
+  listQuestions: async (productId: string): Promise<ProductQuestion[]> => {
+    const { data } = await apiClient.get<ProductQuestion[]>(`/products/${productId}/questions`);
+    return data;
+  },
+  createQuestion: async (
+    productId: string,
+    payload: { author: string; question: string }
+  ): Promise<ProductQuestion> => {
+    const { data } = await apiClient.post<ProductQuestion>(`/products/${productId}/questions`, payload);
+    return data;
+  },
+  createAnswer: async (
+    questionId: string,
+    payload: { author?: string; text: string; is_official?: boolean }
+  ): Promise<ProductAnswer> => {
+    const { data } = await apiClient.post<ProductAnswer>(`/products/questions/${questionId}/answers`, payload);
+    return data;
+  },
+  moderateReview: async (reviewId: string, payload: { status: "published" | "pending" | "rejected" }) => {
+    const { data } = await apiClient.post<{ ok: boolean; status: string }>(`/products/reviews/${reviewId}/moderation`, payload);
+    return data;
+  },
+  moderateQuestion: async (questionId: string, payload: { status: "published" | "pending" | "rejected" }) => {
+    const { data } = await apiClient.post<{ ok: boolean; status: string }>(`/products/questions/${questionId}/moderation`, payload);
+    return data;
+  }
 };
 
 export type AdminListQuery = {
@@ -97,9 +184,9 @@ export type AdminImportProductsResponse = {
 
 export const adminApi = {
   users: (query: AdminListQuery) => apiClient.get<Paginated<AdminUser>>("/admin/users", { params: query }),
-  userById: (id: number) => apiClient.get<AdminUser>(`/admin/users/${id}`),
-  updateUser: (id: number, payload: Partial<AdminUser>) => apiClient.patch<AdminUser>(`/admin/users/${id}`, payload),
-  deleteUser: (id: number) => apiClient.delete<{ ok: boolean }>(`/admin/users/${id}`),
+  userById: (id: string) => apiClient.get<AdminUser>(`/admin/users/${id}`),
+  updateUser: (id: string, payload: Partial<AdminUser>) => apiClient.patch<AdminUser>(`/admin/users/${id}`, payload),
+  deleteUser: (id: string) => apiClient.delete<{ ok: boolean }>(`/admin/users/${id}`),
 
   products: (query: AdminListQuery) =>
     apiClient.get<Paginated<AdminProduct>>("/products", {
@@ -109,26 +196,32 @@ export const adminApi = {
         sort: query.sort && ["relevance", "price_asc", "price_desc", "popular", "newest"].includes(query.sort) ? query.sort : "popular",
       },
     }),
-  productById: (id: number) => apiClient.get<ProductDetail>(`/products/${id}`),
-  updateProduct: (id: number, payload: Record<string, unknown>) => apiClient.patch(`/admin/products/${id}`, payload),
-  deleteProduct: (id: number) => apiClient.delete<{ ok: boolean }>(`/admin/products/${id}`),
-  bulkDeleteProducts: (productIds: number[]) =>
+  productById: (id: string) => apiClient.get<ProductDetail>(`/products/${id}`),
+  updateProduct: (id: string, payload: Record<string, unknown>) => apiClient.patch(`/admin/products/${id}`, payload),
+  deleteProduct: (id: string) => apiClient.delete<{ ok: boolean }>(`/admin/products/${id}`),
+  bulkDeleteProducts: (productIds: string[]) =>
     apiClient.post<{ ok: boolean; requested: number; deleted: number }>("/admin/products/bulk-delete", { product_ids: productIds }),
-  bulkImportProducts: (payload: { source: "csv" | "json"; content: string; store_id?: number | null }) =>
+  bulkImportProducts: (payload: { source: "csv" | "json"; content: string; store_id?: string | null }) =>
     apiClient.post<AdminImportProductsResponse>("/admin/products/import", payload),
   bulkExportProducts: (format: "csv" | "json") =>
     apiClient.get<Blob>("/admin/products/export", { params: { format }, responseType: "blob" }),
 
   categories: () => apiClient.get<AdminCategory[]>("/categories"),
-  createCategory: (payload: { name: string; slug: string; parent_id?: number | null }) => apiClient.post<AdminCategory>("/admin/categories", payload),
-  updateCategory: (id: number, payload: Partial<AdminCategory>) => apiClient.patch<AdminCategory>(`/admin/categories/${id}`, payload),
-  deleteCategory: (id: number) => apiClient.delete<{ ok: boolean }>(`/admin/categories/${id}`),
+  createCategory: (payload: { name: string; slug: string; parent_id?: string | null }) => apiClient.post<AdminCategory>("/admin/categories", payload),
+  updateCategory: (id: string, payload: Partial<AdminCategory>) => apiClient.patch<AdminCategory>(`/admin/categories/${id}`, payload),
+  deleteCategory: (id: string) => apiClient.delete<{ ok: boolean }>(`/admin/categories/${id}`),
 
   orders: (query: AdminListQuery & { status?: string }) => apiClient.get<Paginated<AdminOrder>>("/admin/orders", { params: query }),
-  orderById: (id: number) => apiClient.get<AdminOrder>(`/admin/orders/${id}`),
-  updateOrderStatus: (id: number, status: AdminOrder["status"]) => apiClient.patch<AdminOrder>(`/admin/orders/${id}`, { status }),
+  orderById: (id: string) => apiClient.get<AdminOrder>(`/admin/orders/${id}`),
+  updateOrderStatus: (id: string, status: AdminOrder["status"]) => apiClient.patch<AdminOrder>(`/admin/orders/${id}`, { status }),
 
   analytics: (period: "7d" | "30d" | "90d" | "365d" = "30d") => apiClient.get<AdminMetrics>("/admin/analytics", { params: { period } }),
+  feedbackQueue: (query: { status?: "all" | "published" | "pending" | "rejected"; kind?: "all" | "review" | "question"; limit?: number; offset?: number }) =>
+    apiClient.get<AdminFeedbackQueueResponse>("/products/moderation/queue", { params: query }),
+  moderateReview: (reviewId: string, payload: { status: "published" | "pending" | "rejected" }) =>
+    apiClient.post<{ ok: boolean; status: string }>(`/products/reviews/${reviewId}/moderation`, payload),
+  moderateQuestion: (questionId: string, payload: { status: "published" | "pending" | "rejected" }) =>
+    apiClient.post<{ ok: boolean; status: string }>(`/products/questions/${questionId}/moderation`, payload),
   settings: () => apiClient.get<AdminSettings>("/admin/settings"),
   updateSettings: (payload: Partial<AdminSettings>) => apiClient.patch<AdminSettings>("/admin/settings", payload),
 
@@ -143,17 +236,17 @@ export const adminApi = {
     crawl_priority?: number;
     is_active?: boolean;
   }) => apiClient.post<AdminStore>("/admin/stores", payload),
-  updateStore: (id: number, payload: Partial<AdminStore>) => apiClient.patch<AdminStore>(`/admin/stores/${id}`, payload),
-  deleteStore: (id: number) => apiClient.delete<{ ok: boolean }>(`/admin/stores/${id}`),
-  storeSources: (storeId: number, query: AdminListQuery = {}) =>
+  updateStore: (id: string, payload: Partial<AdminStore>) => apiClient.patch<AdminStore>(`/admin/stores/${id}`, payload),
+  deleteStore: (id: string) => apiClient.delete<{ ok: boolean }>(`/admin/stores/${id}`),
+  storeSources: (storeId: string, query: AdminListQuery = {}) =>
     apiClient.get<Paginated<AdminScrapeSource>>(`/admin/stores/${storeId}/sources`, { params: query }),
   createStoreSource: (
-    storeId: number,
+    storeId: string,
     payload: { url: string; source_type?: string; priority?: number; is_active?: boolean },
   ) => apiClient.post<AdminScrapeSource>(`/admin/stores/${storeId}/sources`, payload),
-  updateStoreSource: (storeId: number, sourceId: number, payload: Partial<AdminScrapeSource>) =>
+  updateStoreSource: (storeId: string, sourceId: string, payload: Partial<AdminScrapeSource>) =>
     apiClient.patch<AdminScrapeSource>(`/admin/stores/${storeId}/sources/${sourceId}`, payload),
-  deleteStoreSource: (storeId: number, sourceId: number) =>
+  deleteStoreSource: (storeId: string, sourceId: string) =>
     apiClient.delete<{ ok: boolean }>(`/admin/stores/${storeId}/sources/${sourceId}`),
 
   runReindex: () => apiClient.post<{ task_id: string; queued: string }>("/admin/reindex/products"),

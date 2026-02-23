@@ -5,21 +5,25 @@ import { env } from "@/config/env";
 import { ProductClientPage } from "@/features/product/product-client-page";
 import { serverGet } from "@/lib/api/server";
 
-const parseProductId = (slug: string) => {
-  const match = slug.match(/^(\d+)/);
-  if (!match) return null;
-  const id = Number(match[1]);
-  return Number.isFinite(id) ? id : null;
+const UUID_PREFIX_PATTERN =
+  /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})(?:-|$)/;
+
+const parseProductRef = (slug: string) => {
+  const uuidMatch = slug.match(UUID_PREFIX_PATTERN);
+  if (uuidMatch?.[1]) {
+    return uuidMatch[1].toLowerCase();
+  }
+  return null;
 };
 
 export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
-  const id = parseProductId(params.slug);
-  if (!id) {
+  const productRef = parseProductRef(params.slug);
+  if (!productRef) {
     return { title: "Product" };
   }
 
   try {
-    const product = await serverGet<{ title: string }>(`/products/${id}`);
+    const product = await serverGet<{ title: string }>(`/products/${productRef}`);
     return {
       title: product.title,
       openGraph: {
@@ -34,10 +38,10 @@ export async function generateMetadata({ params }: { params: { slug: string } })
 }
 
 export default function ProductPage({ params }: { params: { slug: string } }) {
-  const id = parseProductId(params.slug);
-  if (!id) {
+  const productRef = parseProductRef(params.slug);
+  if (!productRef) {
     notFound();
   }
-  return <ProductClientPage productId={id} slug={params.slug} />;
+  return <ProductClientPage productId={productRef} slug={params.slug} />;
 }
 

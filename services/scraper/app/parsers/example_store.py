@@ -16,6 +16,7 @@ from app.ai.spec_extractor import ai_extract_specs
 from app.parsers.base import ParseResult, ParsedProduct, StoreParser
 from app.utils.http_client import ScraperHTTPClient
 from app.utils.specs import missing_required_fields, needs_ai_enrichment, normalize_product_specs
+from app.utils.variants import extract_variants_from_network_payloads, infer_variants
 
 
 class ExampleStoreParser(StoreParser):
@@ -42,19 +43,33 @@ class ExampleStoreParser(StoreParser):
             context = await browser.new_context()
             page = await context.new_page()
             graphql_responses = []
-            page.on(
-                "response",
-                lambda resp: graphql_responses.append(resp)
-                if "graphql.uzum.uz" in resp.url and resp.request.method == "POST"
-                else None,
-            )
+
+            def _on_graphql_response(resp) -> None:
+                try:
+                    url = str(resp.url).lower()
+                    method = str(resp.request.method).upper()
+                except Exception:  # noqa: BLE001
+                    return
+                if "graphql.uzum.uz" not in url:
+                    return
+                if method != "POST":
+                    return
+                graphql_responses.append(resp)
+
+            page.on("response", _on_graphql_response)
 
             await page.goto(category_url, wait_until="domcontentloaded")
             for _ in range(8):
                 await page.mouse.wheel(0, 4000)
                 await asyncio.sleep(0.45)
             await asyncio.sleep(2.0)
+            page.remove_listener("response", _on_graphql_response)
             for graphql_response in graphql_responses:
+                try:
+                    if graphql_response.status >= 400:
+                        continue
+                except Exception:  # noqa: BLE001
+                    continue
                 try:
                     body = await graphql_response.text()
                 except Exception:  # noqa: BLE001
@@ -125,20 +140,39 @@ class ExampleStoreParser(StoreParser):
             context = await browser.new_context()
             page = await context.new_page()
             api_responses = []
-            page.on(
-                "response",
-                lambda resp: api_responses.append(resp)
-                if ("graphql" in resp.url or "/api/" in resp.url or "catalog" in resp.url)
-                else None,
-            )
+
+            def _on_response(resp) -> None:
+                try:
+                    url = str(resp.url).lower()
+                    method = str(resp.request.method).upper()
+                    resource_type = str(resp.request.resource_type)
+                except Exception:  # noqa: BLE001
+                    return
+                if method != "GET":
+                    return
+                if resource_type not in {"xhr", "fetch"}:
+                    return
+                if "graphql" not in url and "/api/" not in url and "catalog" not in url:
+                    return
+                if any(marker in url for marker in ("metrics", "analytics", "pixel", "sentry", "collect", "counter")):
+                    return
+                api_responses.append(resp)
+
+            page.on("response", _on_response)
             response = await page.goto(product_url, wait_until="domcontentloaded", timeout=60000)
             await page.wait_for_timeout(1800)
             html = await page.content()
             if response is not None and response.status in {403, 429, 503}:
                 self._raise_if_rate_limited_page(html, product_url)
             self._raise_if_rate_limited_page(html, product_url)
+            page.remove_listener("response", _on_response)
             network_payloads: list[str] = []
             for api_resp in api_responses:
+                try:
+                    if api_resp.status >= 400:
+                        continue
+                except Exception:  # noqa: BLE001
+                    continue
                 try:
                     body = await api_resp.text()
                 except Exception:  # noqa: BLE001
@@ -186,6 +220,37 @@ class ExampleStoreParser(StoreParser):
         }
         description_node = tree.css_first("div.product-description")
         description = description_node.text(strip=True) if description_node else None
+        variants = self._extract_store_specific_variants(
+            network_payloads=network_payloads,
+            price=price,
+            old_price=old_price,
+            availability=availability,
+            images=images,
+            specs=specs,
+            product_url=product_url,
+        )
+        if not variants:
+            variants = extract_variants_from_network_payloads(
+                network_payloads,
+                default_price=price,
+                default_old_price=old_price,
+                default_availability=availability,
+                default_images=images,
+                default_specs=specs,
+                product_url=product_url,
+                store_hint="generic",
+            )
+        if not variants:
+            variants = infer_variants(
+                title=title,
+                specs=specs,
+                source_text=f"{html}\n" + "\n".join(network_payloads),
+                price=price,
+                old_price=old_price,
+                availability=availability,
+                images=images,
+                product_url=product_url,
+            )
 
         return ParsedProduct(
             title=title,
@@ -196,6 +261,7 @@ class ExampleStoreParser(StoreParser):
             specifications=specs,
             product_url=product_url,
             description=description,
+            variants=variants,
         )
 
     @staticmethod
@@ -254,6 +320,20 @@ class ExampleStoreParser(StoreParser):
 
     async def aclose(self) -> None:
         await self._http.aclose()
+
+    def _extract_store_specific_variants(
+        self,
+        *,
+        network_payloads: list[str],
+        price: Decimal,
+        old_price: Decimal | None,
+        availability: str,
+        images: list[str],
+        specs: dict[str, str],
+        product_url: str,
+    ) -> list:
+        del network_payloads, price, old_price, availability, images, specs, product_url
+        return []
 
     @staticmethod
     def _parse_price(raw: str) -> Decimal:

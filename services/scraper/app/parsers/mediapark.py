@@ -15,6 +15,27 @@ from app.core.logging import logger
 from app.parsers.base import ParseResult, ParsedProduct, StoreParser
 from app.utils.http_client import ScraperHTTPClient
 from app.utils.specs import missing_required_fields, needs_ai_enrichment, normalize_product_specs
+from app.utils.variants import extract_variants_from_network_payloads, infer_variants
+
+_SPEC_SECTION_TITLES: tuple[str, ...] = (
+    "\u0425\u0430\u0440\u0430\u043a\u0442\u0435\u0440\u0438\u0441\u0442\u0438\u043a\u0438",
+    "\u0422\u0435\u0445\u043d\u0438\u0447\u0435\u0441\u043a\u0438\u0435 \u0445\u0430\u0440\u0430\u043a\u0442\u0435\u0440\u0438\u0441\u0442\u0438\u043a\u0438",
+    "Characteristics",
+    "Specifications",
+    "Specs",
+)
+
+_SPEC_STOP_MARKERS: frozenset[str] = frozenset(
+    {
+        "\u041d\u0430\u043b\u0438\u0447\u0438\u0435 \u0432 \u043c\u0430\u0433\u0430\u0437\u0438\u043d\u0430\u0445",
+        "\u041e\u0442\u0437\u044b\u0432\u044b",
+        "\u041e\u043f\u0438\u0441\u0430\u043d\u0438\u0435",
+        "\u041f\u043e\u0445\u043e\u0436\u0438\u0435 \u0442\u043e\u0432\u0430\u0440\u044b",
+        "\u0412\u0441\u0435 \u0442\u043e\u0432\u0430\u0440\u044b",
+        "Reviews",
+        "Description",
+    }
+)
 
 
 class MediaParkParser(StoreParser):
@@ -87,18 +108,43 @@ class MediaParkParser(StoreParser):
         if price is None:
             raise ValueError("price not found")
         description = self._extract_description(product_schema)
-        raw_specs = await self._extract_specs_with_playwright(product_url)
+        images = self._extract_images(product_schema, html, product_url)
+        availability = self._extract_availability(product_schema)
+        raw_specs, network_payloads = await self._extract_specs_and_payloads_with_playwright(product_url)
         specs = await self._build_specs(title=title, description=description, raw_specs=raw_specs)
+        variants = extract_variants_from_network_payloads(
+            network_payloads,
+            default_price=price,
+            default_old_price=None,
+            default_availability=availability,
+            default_images=images,
+            default_specs=specs,
+            product_url=product_url,
+            store_hint="mediapark",
+            max_variants=30,
+        )
+        if not variants:
+            variants = infer_variants(
+                title=title,
+                specs=specs,
+                source_text=html,
+                price=price,
+                old_price=None,
+                availability=availability,
+                images=images,
+                product_url=product_url,
+            )
 
         parsed = ParsedProduct(
             title=title,
             price=price,
             old_price=None,
-            availability=self._extract_availability(product_schema),
-            images=self._extract_images(product_schema, html, product_url),
+            availability=availability,
+            images=images,
             specifications=specs,
             product_url=product_url,
             description=description,
+            variants=variants,
         )
         self._product_cache[product_url] = parsed
         return parsed
@@ -330,53 +376,89 @@ class MediaParkParser(StoreParser):
             return self._browser_context
 
     async def _extract_specs_with_playwright(self, product_url: str) -> dict[str, str]:
+        specs, _ = await self._extract_specs_and_payloads_with_playwright(product_url)
+        return specs
+
+    async def _extract_specs_and_payloads_with_playwright(self, product_url: str) -> tuple[dict[str, str], list[str]]:
         async with self._playwright_semaphore:
             try:
                 context = await self._ensure_playwright_context()
                 page = await context.new_page()
+                network_responses = []
+
+                def _on_response(response) -> None:
+                    try:
+                        url = str(response.url).lower()
+                        method = str(response.request.method).upper()
+                        resource_type = str(response.request.resource_type)
+                    except Exception:  # noqa: BLE001
+                        return
+                    if method != "GET":
+                        return
+                    if resource_type not in {"xhr", "fetch"}:
+                        return
+                    if "graphql" not in url and "/api/" not in url:
+                        return
+                    if any(marker in url for marker in ("metrics", "analytics", "pixel", "sentry", "collect", "counter")):
+                        return
+                    network_responses.append(response)
+
+                page.on("response", _on_response)
                 await page.goto(product_url, wait_until="domcontentloaded", timeout=60000)
                 await page.wait_for_timeout(1200)
                 # Some pages keep full specs behind this tab.
                 try:
-                    tab = page.get_by_text("Характеристики", exact=True).first
-                    if await tab.count() > 0:
+                    for title in _SPEC_SECTION_TITLES:
+                        tab = page.get_by_text(title, exact=True).first
+                        if await tab.count() == 0:
+                            continue
                         await tab.click(timeout=2000)
                         await page.wait_for_timeout(700)
+                        break
                 except Exception:  # noqa: BLE001
                     pass
 
                 body_text = await page.inner_text("body")
+                page.remove_listener("response", _on_response)
+                payloads: list[str] = []
+                for response in network_responses[:80]:
+                    try:
+                        if response.status >= 400:
+                            continue
+                    except Exception:  # noqa: BLE001
+                        continue
+                    try:
+                        text = (await response.text()).strip()
+                    except Exception:  # noqa: BLE001
+                        continue
+                    if not text:
+                        continue
+                    if text.startswith("{") or text.startswith("["):
+                        payloads.append(text)
                 await page.close()
-                return self._parse_specs_from_page_text(body_text)
+                return self._parse_specs_from_page_text(body_text), payloads
             except Exception as exc:  # noqa: BLE001
                 logger.warning("mediapark_specs_playwright_failed", product_url=product_url, error=str(exc))
-                return {}
+                return {}, []
 
     @staticmethod
     def _parse_specs_from_page_text(text: str) -> dict[str, str]:
-        lines = [line.strip() for line in text.splitlines() if line and line.strip()]
+        lines = [re.sub(r"\s+", " ", line.replace("\u00a0", " ")).strip() for line in text.splitlines() if line and line.strip()]
         if not lines:
             return {}
 
-        indices = [idx for idx, line in enumerate(lines) if line == "Характеристики"]
-        if not indices:
-            return {}
+        section_titles = {title.lower() for title in _SPEC_SECTION_TITLES}
+        stop_markers = {marker.lower() for marker in _SPEC_STOP_MARKERS}
+        indices = [idx for idx, line in enumerate(lines) if line.rstrip(":").strip().lower() in section_titles]
+        start = indices[-1] if indices else 0
 
-        best_start = indices[-1]
-        best_score = -1
-        for idx in indices:
-            chunk = lines[idx + 1 : idx + 60]
-            score = sum(1 for line in chunk if line.endswith(":"))
-            if score > best_score:
-                best_score = score
-                best_start = idx
-
-        stop_markers = {"Наличие в магазинах", "Отзывы", "Описание", "Похожие товары", "Все товары"}
         specs: dict[str, str] = {}
-        i = best_start + 1
+
+        i = start + 1 if indices else start
         while i < len(lines):
             line = lines[i]
-            if line in stop_markers and specs:
+            normalized_line = line.rstrip(":").strip().lower()
+            if normalized_line in stop_markers and specs:
                 break
 
             if line.endswith(":"):
@@ -384,18 +466,42 @@ class MediaParkParser(StoreParser):
                 value = ""
                 if i + 1 < len(lines):
                     nxt = lines[i + 1].strip()
-                    if nxt and not nxt.endswith(":") and nxt not in stop_markers:
+                    if nxt and not nxt.endswith(":") and nxt.rstrip(":").strip().lower() not in stop_markers:
                         value = nxt
                         i += 1
-                if key and value:
+                if key and value and len(key) <= 90 and len(value) <= 220:
                     specs[key] = value
-            elif ":" in line and len(line) < 160:
-                # Single-line fallback: "Ключ: значение"
+            elif ":" in line and len(line) < 220:
                 key, value = line.split(":", 1)
                 key = key.strip()
                 value = value.strip()
-                if key and value:
+                if key and value and len(key) <= 90 and len(value) <= 220:
                     specs[key] = value
+            else:
+                dotted_match = re.match(r"^(.{2,90}?)(?:\s*[.\u00b7\u2022]{2,}\s*|\s{2,})(.{1,220})$", line)
+                if dotted_match:
+                    key = dotted_match.group(1).strip().rstrip(":")
+                    value = dotted_match.group(2).strip()
+                    if key and value and key.lower() not in stop_markers:
+                        specs[key] = value
             i += 1
 
-        return specs
+        if specs:
+            return specs
+
+        # Fallback: extract any compact "key: value" lines across the page.
+        fallback_specs: dict[str, str] = {}
+        for line in lines:
+            if ":" not in line or len(line) > 220:
+                continue
+            key, value = line.split(":", 1)
+            key = key.strip()
+            value = value.strip()
+            if not key or not value:
+                continue
+            if len(key) > 90 or len(value) > 220:
+                continue
+            if key.lower() in stop_markers or value.lower() in stop_markers:
+                continue
+            fallback_specs[key] = value
+        return fallback_specs

@@ -38,3 +38,12 @@ def test_offer_upsert_identity_is_stable_by_store_and_url() -> None:
     offers[key] = {"price": 20500000}
     assert len(offers) == 1
     assert offers[key]["price"] == 20500000
+
+
+def test_pipeline_groups_samsung_a_series_with_cyrillic_model_letter() -> None:
+    raw_titles = [
+        "PLATINUM STORE - Купить Samsung Galaxy А56 5G 8/128 ГБ Awesome Lightgray",
+        "Samsung Galaxy A56 8/128GB Awesome Lightgray",
+    ]
+    canonical_titles = {build_canonical_title(t) for t in raw_titles}
+    assert canonical_titles == {"samsung a56 128gb"}

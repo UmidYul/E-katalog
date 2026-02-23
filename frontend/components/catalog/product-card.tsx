@@ -11,7 +11,23 @@ import { Card, CardContent } from "@/components/ui/card";
 import { formatPrice } from "@/lib/utils/format";
 import type { ProductListItem } from "@/types/domain";
 
-export function ProductCard({ product, favorite, onFavorite }: { product: ProductListItem; favorite?: boolean; onFavorite?: (id: number) => void }) {
+export function ProductCard({
+  product,
+  favorite,
+  onFavorite,
+  compared,
+  onCompare,
+  compareDisabled,
+  compareDisabledReason
+}: {
+  product: ProductListItem;
+  favorite?: boolean;
+  onFavorite?: (id: string) => void;
+  compared?: boolean;
+  onCompare?: (id: string) => void;
+  compareDisabled?: boolean;
+  compareDisabledReason?: string;
+}) {
   const storesLabel = product.store_count === 1 ? "store" : "stores";
   const hasPriceComparison = product.store_count >= 2;
   const hasPriceRange = product.min_price != null && product.max_price != null && product.max_price > product.min_price;
@@ -53,7 +69,18 @@ export function ProductCard({ product, favorite, onFavorite }: { product: Produc
               {formatPrice(product.min_price ?? 0)} - {formatPrice(product.max_price ?? 0)}
             </p>
           ) : null}
-          <p className="text-lg font-semibold text-primary">{formatPrice(product.min_price ?? 0)}</p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-lg font-semibold text-primary">{formatPrice(product.min_price ?? 0)}</p>
+            <Button
+              size="sm"
+              variant={compared ? "default" : "outline"}
+              onClick={() => onCompare?.(product.id)}
+              disabled={compareDisabled}
+              title={compareDisabled ? compareDisabledReason : undefined}
+            >
+              {compared ? "Compared" : "Compare"}
+            </Button>
+          </div>
         </CardContent>
       </Card>
     </motion.div>

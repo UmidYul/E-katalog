@@ -7,11 +7,12 @@ import { catalogApi, type CatalogQuery } from "@/lib/api/openapi-client";
 export const catalogKeys = {
   products: (query: CatalogQuery) => ["catalog", "products", query] as const,
   search: (query: CatalogQuery) => ["catalog", "search", query] as const,
-  product: (id: number) => ["catalog", "product", id] as const,
-  offers: (id: number) => ["catalog", "offers", id] as const,
+  product: (id: string) => ["catalog", "product", id] as const,
+  offers: (id: string) => ["catalog", "offers", id] as const,
+  priceHistory: (id: string, days: number) => ["catalog", "price-history", id, days] as const,
   categories: ["catalog", "categories"] as const,
   brands: ["catalog", "brands"] as const,
-  filters: (categoryId?: number) => ["catalog", "filters", categoryId] as const
+  filters: (categoryId?: string) => ["catalog", "filters", categoryId] as const
 };
 
 export const useCatalogProducts = (query: CatalogQuery) =>
@@ -27,18 +28,25 @@ export const useCatalogSearch = (query: CatalogQuery) =>
     enabled: Boolean(query.q)
   });
 
-export const useProduct = (id: number) =>
+export const useProduct = (id: string) =>
   useQuery({
     queryKey: catalogKeys.product(id),
     queryFn: () => catalogApi.getProduct(id),
-    enabled: Number.isFinite(id)
+    enabled: Boolean(id)
   });
 
-export const useProductOffers = (id: number) =>
+export const useProductOffers = (id: string) =>
   useQuery({
     queryKey: catalogKeys.offers(id),
     queryFn: () => catalogApi.getOffers(id),
-    enabled: Number.isFinite(id)
+    enabled: Boolean(id)
+  });
+
+export const useProductPriceHistory = (id: string, days: number) =>
+  useQuery({
+    queryKey: catalogKeys.priceHistory(id, days),
+    queryFn: () => catalogApi.getProductPriceHistory(id, days),
+    enabled: Boolean(id)
   });
 
 export const useCategories = () =>
@@ -53,7 +61,7 @@ export const useBrands = () =>
     queryFn: () => catalogApi.getBrands()
   });
 
-export const useDynamicFilters = (categoryId?: number) =>
+export const useDynamicFilters = (categoryId?: string) =>
   useQuery({
     queryKey: catalogKeys.filters(categoryId),
     queryFn: () => catalogApi.getFilters(categoryId)

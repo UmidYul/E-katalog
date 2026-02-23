@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 type RecentlyViewedItem = {
-  id: number;
+  id: string;
   slug: string;
   title: string;
   minPrice?: number | null;
@@ -20,12 +20,19 @@ export const useRecentlyViewedStore = create<RecentlyViewedState>()(
     (set, get) => ({
       items: [],
       push: (item) => {
-        const next = [{ ...item, viewedAt: new Date().toISOString() }, ...get().items.filter((existing) => existing.id !== item.id)].slice(0, 30);
+        const normalizedId = String(item.id);
+        const next = [
+          { ...item, id: normalizedId, viewedAt: new Date().toISOString() },
+          ...get().items.filter((existing) => String(existing.id) !== normalizedId),
+        ].slice(0, 30);
         set({ items: next });
       },
       clear: () => set({ items: [] })
     }),
-    { name: "recently-viewed-store" }
+    {
+      name: "recently-viewed-store",
+      skipHydration: true
+    }
   )
 );
 

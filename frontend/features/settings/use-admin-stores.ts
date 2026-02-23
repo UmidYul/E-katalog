@@ -25,7 +25,7 @@ export function useCreateAdminStore() {
 export function useUpdateAdminStore() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, payload }: { id: number; payload: Record<string, unknown> }) => adminApi.updateStore(id, payload),
+    mutationFn: ({ id, payload }: { id: string; payload: Record<string, unknown> }) => adminApi.updateStore(id, payload),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin", "stores"] }),
   });
 }
@@ -38,7 +38,7 @@ export function useDeleteAdminStore() {
   });
 }
 
-export function useStoreSources(storeId: number | null) {
+export function useStoreSources(storeId: string | null) {
   return useQuery({
     queryKey: ["admin", "stores", storeId, "sources"],
     enabled: storeId !== null,
@@ -50,7 +50,7 @@ export function useStoreSources(storeId: number | null) {
   });
 }
 
-export function useCreateStoreSource(storeId: number | null) {
+export function useCreateStoreSource(storeId: string | null) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (payload: { url: string; source_type?: string; priority?: number; is_active?: boolean }) => {
@@ -61,10 +61,10 @@ export function useCreateStoreSource(storeId: number | null) {
   });
 }
 
-export function useUpdateStoreSource(storeId: number | null) {
+export function useUpdateStoreSource(storeId: string | null) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ sourceId, payload }: { sourceId: number; payload: Record<string, unknown> }) => {
+    mutationFn: ({ sourceId, payload }: { sourceId: string; payload: Record<string, unknown> }) => {
       if (!storeId) throw new Error("Store is required");
       return adminApi.updateStoreSource(storeId, sourceId, payload);
     },
@@ -72,10 +72,10 @@ export function useUpdateStoreSource(storeId: number | null) {
   });
 }
 
-export function useDeleteStoreSource(storeId: number | null) {
+export function useDeleteStoreSource(storeId: string | null) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (sourceId: number) => {
+    mutationFn: (sourceId: string) => {
       if (!storeId) throw new Error("Store is required");
       return adminApi.deleteStoreSource(storeId, sourceId);
     },

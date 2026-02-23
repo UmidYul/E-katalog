@@ -6,6 +6,20 @@ from decimal import Decimal
 
 
 @dataclass(slots=True)
+class ParsedVariant:
+    variant_key: str
+    price: Decimal
+    availability: str
+    old_price: Decimal | None = None
+    color: str | None = None
+    storage: str | None = None
+    ram: str | None = None
+    images: list[str] = field(default_factory=list)
+    specifications: dict[str, str] = field(default_factory=dict)
+    product_url: str | None = None
+
+
+@dataclass(slots=True)
 class ParsedProduct:
     title: str
     price: Decimal
@@ -15,6 +29,7 @@ class ParsedProduct:
     specifications: dict[str, str]
     product_url: str
     description: str | None = None
+    variants: list[ParsedVariant] = field(default_factory=list)
 
 
 @dataclass(slots=True)

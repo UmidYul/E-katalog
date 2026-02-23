@@ -11,18 +11,33 @@ const parseOptionalNumber = (raw: string | null): number | undefined => {
   return Number.isFinite(parsed) ? parsed : undefined;
 };
 
+const parseOptionalPositiveInt = (raw: string | null): number | undefined => {
+  const parsed = parseOptionalNumber(raw);
+  if (parsed === undefined || !Number.isInteger(parsed) || parsed < 1) {
+    return undefined;
+  }
+  return parsed;
+};
+
+const ENTITY_REF_PATTERN =
+  /^(\d+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$/;
+
+const parseEntityRefs = (values: string[]): string[] =>
+  values.map((value) => value.trim()).filter((value) => ENTITY_REF_PATTERN.test(value));
+
 export function useCatalogFiltersFromUrl() {
   const searchParams = useSearchParams();
 
   const q = searchParams.get("q") ?? undefined;
   const sort = (searchParams.get("sort") ?? "popular") as "relevance" | "price_asc" | "price_desc" | "popular" | "newest";
-  const brandId = searchParams.getAll("brand").map(Number).filter((v) => Number.isFinite(v));
-  const storeId = searchParams.getAll("store").map(Number).filter((v) => Number.isFinite(v));
-  const sellerId = searchParams.getAll("seller").map(Number).filter((v) => Number.isFinite(v));
+  const brandId = parseEntityRefs(searchParams.getAll("brand"));
+  const storeId = parseEntityRefs(searchParams.getAll("store"));
+  const sellerId = parseEntityRefs(searchParams.getAll("seller"));
   const minPrice = parseOptionalNumber(searchParams.get("min_price"));
   const maxPrice = parseOptionalNumber(searchParams.get("max_price"));
   const maxDeliveryDays = parseOptionalNumber(searchParams.get("max_delivery_days"));
   const pageCursor = searchParams.get("cursor") ?? undefined;
+  const page = parseOptionalPositiveInt(searchParams.get("page")) ?? 1;
   const attrs = searchParams
     .getAll("attr")
     .map((entry) => {
@@ -46,6 +61,7 @@ export function useCatalogFiltersFromUrl() {
     max_price: maxPrice !== undefined && maxPrice > 0 ? maxPrice : undefined,
     max_delivery_days: maxDeliveryDays !== undefined && maxDeliveryDays >= 0 ? maxDeliveryDays : undefined,
     cursor: pageCursor,
+    page,
     attrs: Object.keys(attrs).length ? attrs : undefined
   };
 }

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from datetime import UTC, datetime
+import re
 
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,9 +16,58 @@ from app.platform.models import (
     CatalogProduct,
     CatalogStoreProduct,
 )
+from app.platform.services.canonical_matching import extract_attributes
 from app.platform.services.ai_matching import ai_should_merge_duplicates
 from app.platform.services.embeddings import cosine_similarity
 from app.platform.services.normalization import normalize_title
+
+
+_SIM_TOKENS_PATTERN = re.compile(
+    r"\b(?:nanosim|nano\s*sim|micro\s*sim|dual\s*sim|esim|sim)\b",
+    flags=re.IGNORECASE,
+)
+_STORAGE_VALUE_PATTERN = re.compile(r"\b(64|128|256|512|1024)\b")
+
+
+def _title_without_sim_tokens(value: str) -> str:
+    text = normalize_title(value).replace("+", " ")
+    text = _SIM_TOKENS_PATTERN.sub(" ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _storage_from_specs(specs: dict | None) -> str | None:
+    if not isinstance(specs, dict):
+        return None
+    for key in ("storage_gb", "storage", "built_in_memory", "built in memory", "встроенная память"):
+        raw_value = specs.get(key)
+        if raw_value is None:
+            continue
+        match = _STORAGE_VALUE_PATTERN.search(str(raw_value))
+        if match:
+            return match.group(1)
+    return None
+
+
+def _structural_key(product: CatalogCanonicalProduct) -> str | None:
+    attrs = extract_attributes(product.normalized_title or "")
+    model = attrs.model
+    if model == "unknown":
+        return None
+
+    storage = attrs.storage
+    if storage == "unknown":
+        from_specs = _storage_from_specs(product.specs if isinstance(product.specs, dict) else None)
+        if from_specs:
+            storage = from_specs
+    if storage == "unknown":
+        return None
+
+    brand = attrs.brand
+    if brand == "unknown" and product.brand_id is not None:
+        brand = f"brand#{product.brand_id}"
+    if brand == "unknown":
+        return None
+    return f"{brand}|{model}|{storage}"
 
 
 def _spec_overlap_score(specs_a: dict, specs_b: dict) -> float:
@@ -32,16 +82,31 @@ def _spec_overlap_score(specs_a: dict, specs_b: dict) -> float:
 
 def _pair_score(a: CatalogCanonicalProduct, b: CatalogCanonicalProduct) -> tuple[float, str]:
     title_score = 1.0 if normalize_title(a.normalized_title) == normalize_title(b.normalized_title) else 0.0
+    title_wo_sim_score = (
+        1.0 if _title_without_sim_tokens(a.normalized_title) == _title_without_sim_tokens(b.normalized_title) else 0.0
+    )
     specs_score = _spec_overlap_score(a.specs if isinstance(a.specs, dict) else {}, b.specs if isinstance(b.specs, dict) else {})
     emb_score = 0.0
     if a.embedding is not None and b.embedding is not None:
         emb_score = cosine_similarity(a.embedding, b.embedding)
-    score = 0.55 * title_score + 0.25 * specs_score + 0.20 * emb_score
+    score = 0.50 * title_score + 0.15 * title_wo_sim_score + 0.20 * specs_score + 0.15 * emb_score
     reason = "title_specs_embedding"
     if title_score == 1.0:
         # Exact normalized-title matches should be merged without relying on embeddings/AI.
         score = max(score, 0.97)
         reason = "same_normalized_title"
+    elif title_wo_sim_score == 1.0:
+        # Same model title except SIM-marketing tokens: treat as duplicate canonical.
+        score = max(score, 0.96)
+        reason = "same_title_without_sim_tokens"
+
+    left_key = _structural_key(a)
+    right_key = _structural_key(b)
+    if left_key and right_key and left_key == right_key:
+        # Strong duplicate signal for canonical products: same brand/model/storage key.
+        score = max(score, 0.97)
+        reason = "same_structural_key"
+
     if title_score == 1.0 and specs_score >= 0.6:
         reason = "same_normalized_title_and_specs"
     return score, reason

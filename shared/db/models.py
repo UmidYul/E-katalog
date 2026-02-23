@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
+from uuid import uuid4
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
@@ -19,13 +20,23 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from shared.db.base import Base
 
 
-class CatalogCategory(Base):
+class CatalogUuidMixin:
+    uuid: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        nullable=False,
+        unique=True,
+        default=lambda: str(uuid4()),
+        server_default=text("gen_random_uuid()"),
+    )
+
+
+class CatalogCategory(CatalogUuidMixin, Base):
     __tablename__ = "catalog_categories"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -43,7 +54,7 @@ class CatalogCategory(Base):
     )
 
 
-class CatalogBrand(Base):
+class CatalogBrand(CatalogUuidMixin, Base):
     __tablename__ = "catalog_brands"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -56,7 +67,7 @@ class CatalogBrand(Base):
     )
 
 
-class CatalogStore(Base):
+class CatalogStore(CatalogUuidMixin, Base):
     __tablename__ = "catalog_stores"
     __table_args__ = (
         CheckConstraint("trust_score >= 0 and trust_score <= 1", name="ck_catalog_stores_trust_score"),
@@ -77,7 +88,7 @@ class CatalogStore(Base):
     )
 
 
-class CatalogCanonicalProduct(Base):
+class CatalogCanonicalProduct(CatalogUuidMixin, Base):
     __tablename__ = "catalog_canonical_products"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -97,7 +108,7 @@ class CatalogCanonicalProduct(Base):
     )
 
 
-class CatalogScrapeSource(Base):
+class CatalogScrapeSource(CatalogUuidMixin, Base):
     __tablename__ = "catalog_scrape_sources"
     __table_args__ = (UniqueConstraint("store_id", "url", name="uq_catalog_scrape_sources_store_url"),)
 
@@ -113,7 +124,7 @@ class CatalogScrapeSource(Base):
     )
 
 
-class CatalogProduct(Base):
+class CatalogProduct(CatalogUuidMixin, Base):
     __tablename__ = "catalog_products"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -137,7 +148,7 @@ class CatalogProduct(Base):
     variants: Mapped[list[CatalogProductVariant]] = relationship(back_populates="product", cascade="all, delete-orphan")
 
 
-class CatalogProductVariant(Base):
+class CatalogProductVariant(CatalogUuidMixin, Base):
     __tablename__ = "catalog_product_variants"
     __table_args__ = (UniqueConstraint("product_id", "variant_key", name="uq_catalog_product_variant_key"),)
 
@@ -156,7 +167,7 @@ class CatalogProductVariant(Base):
     product: Mapped[CatalogProduct] = relationship(back_populates="variants")
 
 
-class CatalogStoreProduct(Base):
+class CatalogStoreProduct(CatalogUuidMixin, Base):
     __tablename__ = "catalog_store_products"
     __table_args__ = (UniqueConstraint("store_id", "external_id", name="uq_catalog_store_products_store_external"),)
 
@@ -183,7 +194,7 @@ class CatalogStoreProduct(Base):
     )
 
 
-class CatalogSeller(Base):
+class CatalogSeller(CatalogUuidMixin, Base):
     __tablename__ = "catalog_sellers"
     __table_args__ = (UniqueConstraint("store_id", "normalized_name", name="uq_catalog_sellers_store_normalized_name"),)
 
@@ -199,7 +210,7 @@ class CatalogSeller(Base):
     )
 
 
-class CatalogOffer(Base):
+class CatalogOffer(CatalogUuidMixin, Base):
     __tablename__ = "catalog_offers"
     __table_args__ = (
         CheckConstraint("price_amount >= 0", name="ck_catalog_offers_price_nonnegative"),
@@ -227,7 +238,7 @@ class CatalogOffer(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
-class CatalogPriceHistory(Base):
+class CatalogPriceHistory(CatalogUuidMixin, Base):
     __tablename__ = "catalog_price_history"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -262,7 +273,7 @@ class CatalogProductSearch(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
-class CatalogDuplicateCandidate(Base):
+class CatalogDuplicateCandidate(CatalogUuidMixin, Base):
     __tablename__ = "catalog_duplicate_candidates"
     __table_args__ = (
         UniqueConstraint("product_id_a", "product_id_b", name="uq_catalog_duplicate_pair"),
@@ -279,7 +290,7 @@ class CatalogDuplicateCandidate(Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-class CatalogCanonicalMergeEvent(Base):
+class CatalogCanonicalMergeEvent(CatalogUuidMixin, Base):
     __tablename__ = "catalog_canonical_merge_events"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -295,7 +306,7 @@ class CatalogCanonicalMergeEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
-class CatalogCrawlJob(Base):
+class CatalogCrawlJob(CatalogUuidMixin, Base):
     __tablename__ = "catalog_crawl_jobs"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -307,7 +318,7 @@ class CatalogCrawlJob(Base):
     error_summary: Mapped[str | None] = mapped_column(Text)
 
 
-class CatalogCrawlJobItem(Base):
+class CatalogCrawlJobItem(CatalogUuidMixin, Base):
     __tablename__ = "catalog_crawl_job_items"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -318,7 +329,7 @@ class CatalogCrawlJobItem(Base):
     last_error: Mapped[str | None] = mapped_column(Text)
 
 
-class CatalogAIEnrichmentJob(Base):
+class CatalogAIEnrichmentJob(CatalogUuidMixin, Base):
     __tablename__ = "catalog_ai_enrichment_jobs"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)

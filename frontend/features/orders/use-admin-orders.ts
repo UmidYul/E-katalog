@@ -25,7 +25,7 @@ export function useAdminOrders(query: { q?: string; page?: number; limit?: numbe
 export function useUpdateOrderStatus() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, status }: { id: number; status: AdminOrder["status"] }) => adminApi.updateOrderStatus(id, status),
+    mutationFn: ({ id, status }: { id: string; status: AdminOrder["status"] }) => adminApi.updateOrderStatus(id, status),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin", "orders"] }),
   });
 }

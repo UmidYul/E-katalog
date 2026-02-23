@@ -1,7 +1,7 @@
-export type AdminRole = "admin" | "moderator";
+export type AdminRole = "admin" | "moderator" | "seller_support" | "user";
 
 export type AdminUser = {
-  id: number;
+  id: string;
   email: string;
   full_name: string;
   role: AdminRole;
@@ -11,19 +11,19 @@ export type AdminUser = {
 };
 
 export type AdminCategory = {
-  id: number;
+  id: string;
   name: string;
   slug: string;
-  parent_id?: number | null;
+  parent_id?: string | null;
   is_active: boolean;
 };
 
 export type AdminProduct = {
-  id: number;
+  id: string;
   normalized_title: string;
   status: string;
-  brand?: { id: number; name: string } | null;
-  category?: { id: number; name: string } | null;
+  brand?: { id: string; name: string } | null;
+  category?: { id: string; name: string } | null;
   min_price?: number | null;
   max_price?: number | null;
   store_count: number;
@@ -31,8 +31,8 @@ export type AdminProduct = {
 };
 
 export type AdminOrder = {
-  id: number;
-  user_id: number;
+  id: string;
+  user_id: string;
   total_amount: number;
   currency: string;
   status: "new" | "processing" | "completed" | "cancelled";
@@ -57,7 +57,7 @@ export type AdminSettings = {
 };
 
 export type AdminStore = {
-  id: number;
+  id: string;
   slug: string;
   name: string;
   provider: string;
@@ -70,12 +70,36 @@ export type AdminStore = {
 };
 
 export type AdminScrapeSource = {
-  id: number;
-  store_id: number;
+  id: string;
+  store_id: string;
   url: string;
   source_type: string;
   is_active: boolean;
   priority: number;
   created_at: string;
   updated_at: string;
+};
+
+export type AdminFeedbackKind = "review" | "question";
+export type AdminFeedbackStatus = "published" | "pending" | "rejected" | string;
+
+export type AdminFeedbackQueueItem = {
+  kind: AdminFeedbackKind;
+  id: string;
+  product_id: string;
+  author: string;
+  body: string;
+  rating?: number | null;
+  status: AdminFeedbackStatus;
+  created_at: string;
+  updated_at: string;
+  moderated_by?: string | null;
+  moderated_at?: string | null;
+};
+
+export type AdminFeedbackQueueResponse = {
+  items: AdminFeedbackQueueItem[];
+  total: number;
+  status_counts: Record<string, number>;
+  kind_counts: Record<string, number>;
 };

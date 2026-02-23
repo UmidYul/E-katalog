@@ -10,6 +10,12 @@ import { useAdminAnalytics } from "@/features/analytics/use-admin-analytics";
 import { formatPrice } from "@/lib/utils/format";
 import { BarChart3, Package, ShoppingCart, Users } from "lucide-react";
 
+const formatDateTime = (value: string) => {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Unknown";
+  return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(parsed);
+};
+
 export default function AdminAnalyticsPage() {
   const [period, setPeriod] = useState<"7d" | "30d" | "90d" | "365d">("30d");
   const analytics = useAdminAnalytics(period);
@@ -44,7 +50,7 @@ export default function AdminAnalyticsPage() {
             {(analytics.data?.recent_activity ?? []).map((item) => (
               <div key={item.id} className="rounded-xl border border-border p-3 text-sm">
                 <p>{item.title}</p>
-                <p className="text-xs text-muted-foreground">{new Date(item.timestamp).toLocaleString()}</p>
+                <p className="text-xs text-muted-foreground">{formatDateTime(item.timestamp)}</p>
               </div>
             ))}
           </CardContent>

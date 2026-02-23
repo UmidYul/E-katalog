@@ -10,6 +10,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { formatPrice } from "@/lib/utils/format";
 import type { OffersByStore } from "@/types/domain";
 
+const formatScrapedAt = (value: string) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown time";
+  return `${date.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+};
+
 export function OfferTable({ offersByStore }: { offersByStore: OffersByStore[] }) {
   const [sortBy, setSortBy] = useState<"price" | "seller_rating" | "delivery">("price");
 
@@ -64,7 +70,7 @@ export function OfferTable({ offersByStore }: { offersByStore: OffersByStore[] }
                 <div key={offer.id} className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-3">
                   <div>
                     <p className="font-medium">{offer.seller_name}</p>
-                    <p className="text-xs text-muted-foreground">Updated {new Date(offer.scraped_at).toLocaleString()}</p>
+                    <p className="text-xs text-muted-foreground">Updated {formatScrapedAt(offer.scraped_at)}</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge className={offer.in_stock ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}>
@@ -74,8 +80,13 @@ export function OfferTable({ offersByStore }: { offersByStore: OffersByStore[] }
                       <Badge>{offer.delivery_days}d</Badge>
                     ) : null}
                     <span className="text-base font-semibold text-primary">{formatPrice(offer.price_amount, offer.currency)}</span>
-                    <a href={offer.link} target="_blank" rel="noreferrer" className="rounded-lg p-2 hover:bg-secondary">
-                      <ExternalLink className="h-4 w-4" />
+                    <a
+                      href={offer.link}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-xs font-medium transition-colors hover:bg-secondary"
+                    >
+                      Buy <ExternalLink className="h-3.5 w-3.5" />
                     </a>
                   </div>
                 </div>

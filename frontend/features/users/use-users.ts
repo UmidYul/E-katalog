@@ -22,10 +22,21 @@ export function useUsers(query: { q?: string; page?: number; limit?: number; sor
   });
 }
 
+export function useUserById(id: string) {
+  return useQuery({
+    queryKey: ["admin", "user", id],
+    enabled: Boolean(id),
+    queryFn: async () => {
+      const { data } = await adminApi.userById(id);
+      return data;
+    },
+  });
+}
+
 export function useDeleteUser() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: number) => adminApi.deleteUser(id),
+    mutationFn: (id: string) => adminApi.deleteUser(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin", "users"] }),
   });
 }
@@ -33,7 +44,7 @@ export function useDeleteUser() {
 export function useUpdateUser() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, payload }: { id: number; payload: Partial<AdminUser> }) => adminApi.updateUser(id, payload),
+    mutationFn: ({ id, payload }: { id: string; payload: Partial<AdminUser> }) => adminApi.updateUser(id, payload),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin", "users"] }),
   });
 }

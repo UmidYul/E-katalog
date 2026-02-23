@@ -1,20 +1,31 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useLogin, useRegister } from "@/features/auth/use-auth";
+import { cn } from "@/lib/utils/cn";
 import { type LoginFormValues, type RegisterFormValues, loginSchema, registerSchema } from "@/lib/validators/auth";
+
+const extractErrorMessage = (error: unknown) => {
+  if (error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string") {
+    return (error as { message: string }).message;
+  }
+  return "Request failed. Please check credentials and try again.";
+};
 
 export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get("next") ?? "/profile";
   const login = useLogin();
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const form = useForm<LoginFormValues>({ resolver: zodResolver(loginSchema), defaultValues: { email: "", password: "" } });
 
@@ -27,8 +38,13 @@ export function LoginForm() {
         <form
           className="space-y-4"
           onSubmit={form.handleSubmit(async (values) => {
-            await login.mutateAsync(values);
-            router.push(next);
+            setSubmitError(null);
+            try {
+              await login.mutateAsync(values);
+              router.push(next);
+            } catch (error) {
+              setSubmitError(extractErrorMessage(error));
+            }
           })}
         >
           <Input placeholder="Email" {...form.register("email")} />
@@ -36,6 +52,10 @@ export function LoginForm() {
           <Button type="submit" className="w-full" disabled={login.isPending}>
             {login.isPending ? "Signing in..." : "Sign in"}
           </Button>
+          {submitError ? <p className="text-sm text-red-500">{submitError}</p> : null}
+          <Link href="/register" className={cn(buttonVariants({ variant: "ghost" }), "w-full")}>
+            Create account
+          </Link>
         </form>
       </CardContent>
     </Card>
@@ -45,6 +65,7 @@ export function LoginForm() {
 export function RegisterForm() {
   const router = useRouter();
   const register = useRegister();
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const form = useForm<RegisterFormValues>({
     resolver: zodResolver(registerSchema),
     defaultValues: { email: "", fullName: "", password: "", confirmPassword: "" }
@@ -59,8 +80,13 @@ export function RegisterForm() {
         <form
           className="space-y-4"
           onSubmit={form.handleSubmit(async (values) => {
-            await register.mutateAsync({ email: values.email, password: values.password, full_name: values.fullName });
-            router.push("/profile");
+            setSubmitError(null);
+            try {
+              await register.mutateAsync({ email: values.email, password: values.password, full_name: values.fullName });
+              router.push("/profile");
+            } catch (error) {
+              setSubmitError(extractErrorMessage(error));
+            }
           })}
         >
           <Input placeholder="Full name" {...form.register("fullName")} />
@@ -70,6 +96,7 @@ export function RegisterForm() {
           <Button type="submit" className="w-full" disabled={register.isPending}>
             {register.isPending ? "Creating account..." : "Create account"}
           </Button>
+          {submitError ? <p className="text-sm text-red-500">{submitError}</p> : null}
         </form>
       </CardContent>
     </Card>

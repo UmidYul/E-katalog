@@ -7,8 +7,8 @@ export interface paths {
       parameters: {
         query?: {
           q?: string;
-          category_id?: number;
-          brand_id?: number[];
+          category_id?: string;
+          brand_id?: string[];
           min_price?: number;
           max_price?: number;
           in_stock?: boolean;
@@ -34,8 +34,8 @@ export interface paths {
     get: {
       parameters: {
         query?: {
-          category_id?: number;
-          brand_id?: number[];
+          category_id?: string;
+          brand_id?: string[];
           min_price?: number;
           max_price?: number;
           in_stock?: boolean;
@@ -49,7 +49,7 @@ export interface paths {
   };
   "/api/v1/products/{product_id}": {
     get: {
-      parameters: { path: { product_id: number } };
+      parameters: { path: { product_id: string } };
       responses: { 200: { content: { "application/json": Record<string, unknown> } } };
     };
   };

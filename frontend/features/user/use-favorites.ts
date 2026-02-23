@@ -28,10 +28,10 @@ export const useToggleFavorite = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (productId: number) => userApi.toggleFavorite(productId),
+    mutationFn: (productId: string) => userApi.toggleFavorite(productId),
     onMutate: async (productId) => {
       await queryClient.cancelQueries({ queryKey: ["user", "favorites"] });
-      const previous = queryClient.getQueryData<Array<{ product_id: number }>>(["user", "favorites"]);
+      const previous = queryClient.getQueryData<Array<{ product_id: string }>>(["user", "favorites"]);
       const has = previous?.some((x) => x.product_id === productId);
       const next = has ? previous?.filter((x) => x.product_id !== productId) : [...(previous ?? []), { product_id: productId }];
       queryClient.setQueryData(["user", "favorites"], next);

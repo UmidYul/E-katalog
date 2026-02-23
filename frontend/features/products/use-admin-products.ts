@@ -14,7 +14,7 @@ export function useAdminProducts(query: { q?: string; page?: number; limit?: num
 export function useDeleteProduct() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: number) => adminApi.deleteProduct(id),
+    mutationFn: (id: string) => adminApi.deleteProduct(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin", "products"] }),
   });
 }
@@ -22,7 +22,7 @@ export function useDeleteProduct() {
 export function useBulkDeleteProducts() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (productIds: number[]) => adminApi.bulkDeleteProducts(productIds),
+    mutationFn: (productIds: string[]) => adminApi.bulkDeleteProducts(productIds),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin", "products"] }),
   });
 }

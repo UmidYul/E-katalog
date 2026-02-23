@@ -39,7 +39,7 @@ export default function AdminSettingsPage() {
   const createStore = useCreateAdminStore();
   const updateStore = useUpdateAdminStore();
   const deleteStore = useDeleteAdminStore();
-  const [selectedStoreId, setSelectedStoreId] = useState<number | null>(null);
+  const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
   const sources = useStoreSources(selectedStoreId);
   const createSource = useCreateStoreSource(selectedStoreId);
   const updateSource = useUpdateStoreSource(selectedStoreId);

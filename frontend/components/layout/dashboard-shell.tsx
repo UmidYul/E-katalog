@@ -13,6 +13,7 @@ const titles: Record<string, { title: string; subtitle: string }> = {
   "/dashboard/products": { title: "Products", subtitle: "Canonical products and store offers" },
   "/dashboard/categories": { title: "Categories", subtitle: "Catalog taxonomy and nesting" },
   "/dashboard/orders": { title: "Orders", subtitle: "Order flow and status management" },
+  "/dashboard/feedback": { title: "Feedback", subtitle: "Moderation queue for reviews and questions" },
   "/dashboard/analytics": { title: "Analytics", subtitle: "KPIs, trends and activity" },
   "/dashboard/settings": { title: "Settings", subtitle: "Platform-wide configuration" },
 };

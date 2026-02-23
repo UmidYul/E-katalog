@@ -2,9 +2,28 @@
 
 import * as SliderPrimitive from "@radix-ui/react-slider";
 
-export function Slider({ value, min = 0, max = 100, onValueChange }: { value: number[]; min?: number; max?: number; onValueChange: (v: number[]) => void }) {
+export function Slider({
+  value,
+  min = 0,
+  max = 100,
+  onValueChange,
+  onValueCommit
+}: {
+  value: number[];
+  min?: number;
+  max?: number;
+  onValueChange: (v: number[]) => void;
+  onValueCommit?: (v: number[]) => void;
+}) {
   return (
-    <SliderPrimitive.Root value={value} min={min} max={max} onValueChange={onValueChange} className="relative flex w-full touch-none select-none items-center">
+    <SliderPrimitive.Root
+      value={value}
+      min={min}
+      max={max}
+      onValueChange={onValueChange}
+      onValueCommit={onValueCommit}
+      className="relative flex w-full touch-none select-none items-center"
+    >
       <SliderPrimitive.Track className="relative h-2 w-full grow overflow-hidden rounded-full bg-secondary">
         <SliderPrimitive.Range className="absolute h-full bg-primary" />
       </SliderPrimitive.Track>
