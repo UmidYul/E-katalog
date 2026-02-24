@@ -46,16 +46,15 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
   const compareItems = mounted ? compareItemsStore : [];
 
   useEffect(() => {
-    if (product.data) {
-      const minPrice = product.data.offers_by_store.reduce((acc, store) => Math.min(acc, store.minimal_price), Number.POSITIVE_INFINITY);
-      pushRecentlyViewed({
-        id: product.data.id,
-        slug,
-        title: product.data.title,
-        minPrice: Number.isFinite(minPrice) ? minPrice : undefined
-      });
-    }
-  }, [product.data?.id, product.data?.title, pushRecentlyViewed, slug]);
+    if (!product.data) return;
+    const minPrice = product.data.offers_by_store.reduce((acc, store) => Math.min(acc, store.minimal_price), Number.POSITIVE_INFINITY);
+    pushRecentlyViewed({
+      id: product.data.id,
+      slug,
+      title: product.data.title,
+      minPrice: Number.isFinite(minPrice) ? minPrice : undefined
+    });
+  }, [product.data, pushRecentlyViewed, slug]);
 
   if (product.error) {
     return <ErrorState title="Product unavailable" message="This product may have been removed." />;
@@ -90,6 +89,24 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
           <p className="text-sm text-muted-foreground">AI-normalized listing with live multi-store price feed.</p>
           <p className="text-sm text-muted-foreground">Category: {product.data.category}</p>
           {product.data.brand ? <p className="text-sm text-muted-foreground">Brand: {product.data.brand}</p> : null}
+          {product.data.short_description ? (
+            <div className="rounded-xl border border-border/70 bg-background/40 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Краткое описание</p>
+              <p className="mt-1 text-sm">{product.data.short_description}</p>
+            </div>
+          ) : null}
+          <div className="rounded-xl border border-border/70 bg-background/40 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Что нового</p>
+            {product.data.whats_new?.length ? (
+              <ul className="mt-2 list-disc space-y-1 pl-4 text-sm">
+                {product.data.whats_new.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-1 text-sm text-muted-foreground">Новые отличия пока не определены.</p>
+            )}
+          </div>
           <div className="flex flex-wrap gap-2">
             <Button className="gap-2" onClick={() => toggleFavorite.mutate(product.data.id)}>
               <Heart className="h-4 w-4" /> Add to favorites

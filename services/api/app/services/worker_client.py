@@ -55,3 +55,19 @@ def enqueue_full_catalog_rebuild() -> str:
         queue="maintenance",
         routing_key="maintenance",
     )
+
+
+def enqueue_catalog_quality_report() -> str:
+    return _send(
+        "app.tasks.maintenance_tasks.enqueue_catalog_quality_reports",
+        queue="maintenance",
+        routing_key="maintenance",
+    )
+
+
+def enqueue_test_quality_alert() -> str:
+    return _send(
+        "app.tasks.maintenance_tasks.send_test_quality_alert",
+        queue="maintenance",
+        routing_key="maintenance",
+    )

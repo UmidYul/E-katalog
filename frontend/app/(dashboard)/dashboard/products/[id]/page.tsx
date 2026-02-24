@@ -24,6 +24,24 @@ export default function AdminProductDetailsPage() {
           <h2 className="text-xl font-semibold">{product.data.title}</h2>
           <p className="text-sm text-muted-foreground">Category: {product.data.category}</p>
           <p className="text-sm text-muted-foreground">Brand: {product.data.brand ?? "No brand"}</p>
+          {product.data.short_description ? (
+            <div className="mt-3 rounded-xl border border-border/70 bg-background/40 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Краткое описание</p>
+              <p className="mt-1 text-sm">{product.data.short_description}</p>
+            </div>
+          ) : null}
+          <div className="mt-3 rounded-xl border border-border/70 bg-background/40 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Что нового</p>
+            {product.data.whats_new?.length ? (
+              <ul className="mt-2 list-disc space-y-1 pl-4 text-sm">
+                {product.data.whats_new.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-1 text-sm text-muted-foreground">Новые отличия пока не определены.</p>
+            )}
+          </div>
         </div>
       </div>
       <OfferTable offersByStore={product.data.offers_by_store} />

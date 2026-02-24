@@ -6,13 +6,10 @@ import { CatalogClientPage } from "@/features/catalog/catalog-client-page";
 import { serverGet } from "@/lib/api/server";
 
 type Category = { id: string; slug: string; name: string };
-type Brand = { id: string; name: string };
+type Brand = { id: string; name: string; products_count?: number };
 
-const BRAND_CATEGORY_PREFIX = "smartphone-";
-const BRAND_QUERY_FALLBACK: Record<string, string> = {
-  apple: "apple iphone",
-  samsung: "samsung galaxy"
-};
+const BRAND_CATEGORY_PREFIX = "brand-";
+const LEGACY_SMARTPHONE_BRAND_PREFIX = "smartphone-";
 
 const slugify = (value: string) =>
   value
@@ -21,30 +18,40 @@ const slugify = (value: string) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
 
-const resolveVirtualCategory = (slug: string, categories: Category[], brands: Brand[]) => {
-  if (!slug.startsWith(BRAND_CATEGORY_PREFIX)) {
-    return null;
-  }
+const formatBrandLabelFromSlug = (slug: string) =>
+  slug
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 
-  const brandSlug = slug.slice(BRAND_CATEGORY_PREFIX.length);
-  if (!brandSlug) {
-    return null;
+const resolveVirtualCategory = (slug: string, categories: Category[], brands: Brand[]) => {
+  const isGenericBrandCategory = slug.startsWith(BRAND_CATEGORY_PREFIX);
+  const isLegacySmartphoneBrandCategory = slug.startsWith(LEGACY_SMARTPHONE_BRAND_PREFIX);
+  if (!isGenericBrandCategory && !isLegacySmartphoneBrandCategory) return null;
+
+  const prefix = isGenericBrandCategory ? BRAND_CATEGORY_PREFIX : LEGACY_SMARTPHONE_BRAND_PREFIX;
+  const brandSlug = slug.slice(prefix.length).trim();
+  if (!brandSlug) return null;
+
+  const brand = brands.find((item) => slugify(item.name) === brandSlug);
+  const fallbackQuery = brandSlug.replace(/-/g, " ").trim() || brandSlug;
+  const brandLabel = brand?.name ?? formatBrandLabelFromSlug(brandSlug);
+
+  if (isGenericBrandCategory) {
+    return {
+      categoryId: undefined,
+      brandId: brand?.id,
+      presetQuery: brand ? undefined : fallbackQuery,
+      title: `Brand - ${brandLabel}`,
+    };
   }
 
   const baseCategory =
     categories.find((item) => item.slug === "phones") ??
     categories.find((item) => ["smartphones", "smartfonlar", "smartfony"].includes(item.slug.toLowerCase())) ??
-    categories.find((item) => {
-      const name = item.name.toLowerCase();
-      return name.includes("smart") || name.includes("смартф");
-    });
-  if (!baseCategory) {
-    return null;
-  }
-
-  const brand = brands.find((item) => slugify(item.name) === brandSlug);
-  const fallbackQuery = BRAND_QUERY_FALLBACK[brandSlug] ?? brandSlug;
-  const brandLabel = brand?.name ?? brandSlug.charAt(0).toUpperCase() + brandSlug.slice(1);
+    categories.find((item) => item.name.toLowerCase().includes("smart"));
+  if (!baseCategory) return null;
 
   return {
     categoryId: baseCategory.id,

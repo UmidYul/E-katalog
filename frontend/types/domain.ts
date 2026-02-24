@@ -1,5 +1,11 @@
 export type SortOption = "relevance" | "price_asc" | "price_desc" | "popular" | "newest" | "price_drop_7d";
 
+export type BrandListItem = {
+  id: string;
+  name: string;
+  products_count?: number;
+};
+
 export type ProductListItem = {
   id: string;
   normalized_title: string;
@@ -20,6 +26,8 @@ export type ProductDetail = {
   brand?: string | null;
   main_image?: string | null;
   gallery_images?: string[];
+  short_description?: string | null;
+  whats_new?: string[];
   specs: Record<string, string | number | boolean>;
   offers_by_store: OffersByStore[];
 };
@@ -66,6 +74,7 @@ export type FilterBucket = {
 export type CompareMatrixItem = {
   id: string;
   normalized_title: string;
+  main_image?: string | null;
   attributes?: Record<string, string | number | boolean | null>;
   specs: Record<string, string | number | boolean | null>;
 };

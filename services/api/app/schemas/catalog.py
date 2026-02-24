@@ -55,6 +55,8 @@ class ProductDetailOut(BaseModel):
     brand: str | None = None
     main_image: str | None = None
     gallery_images: list[str] = Field(default_factory=list)
+    short_description: str | None = None
+    whats_new: list[str] = Field(default_factory=list)
     specs: dict
 
 

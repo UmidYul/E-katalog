@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import UTC, datetime
+from urllib.parse import unquote
 
 from sqlalchemy import func, select, text
 
@@ -30,6 +32,60 @@ from app.platform.services.pipeline_offsets import ensure_offsets_table, get_off
 from app.platform.services.ai_matching import ai_choose_canonical_candidate
 from app.celery_app import celery_app
 
+_LOW_QUALITY_IMAGE_HINTS: tuple[str, ...] = (
+    "banner",
+    "poster",
+    "promo",
+    "advert",
+    "logo",
+    "watermark",
+    "placeholder",
+    "preview",
+    "thumbnail",
+    "thumb",
+)
+_WEAK_QUALITY_IMAGE_HINTS: tuple[str, ...] = ("moderation",)
+_POSTER_IMAGE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"(?<!\w)frame(?!\w)", re.IGNORECASE),
+    re.compile(r"(?<!\w)photo\s+\d{4}(?!\d)", re.IGNORECASE),
+)
+_IMAGE_URL_EXTENSIONS: tuple[str, ...] = (
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".gif",
+    ".avif",
+    ".bmp",
+    ".heic",
+    ".heif",
+)
+
+_COLOR_HINTS: tuple[tuple[str, str], ...] = (
+    ("cosmic orange", "cosmic orange"),
+    ("deep blue", "deep blue"),
+    ("mist blue", "mist blue"),
+    ("ultramarine", "ultramarine"),
+    ("midnight", "midnight"),
+    ("graphite", "graphite"),
+    ("silver", "silver"),
+    ("white", "white"),
+    ("black", "black"),
+    ("blue", "blue"),
+    ("green", "green"),
+    ("pink", "pink"),
+    ("yellow", "yellow"),
+    ("orange", "orange"),
+    ("серебрист", "silver"),
+    ("бел", "white"),
+    ("черн", "black"),
+    ("син", "blue"),
+    ("зелен", "green"),
+    ("розов", "pink"),
+    ("желт", "yellow"),
+    ("оранж", "orange"),
+)
+
 
 @celery_app.task(
     bind=True,
@@ -41,6 +97,110 @@ from app.celery_app import celery_app
 )
 def normalize_product_batch(self, limit: int = 500, reset_offset: bool = False) -> dict:
     return asyncio.run(_normalize_product_batch(limit, reset_offset=reset_offset))
+
+
+def _normalize_image_text(value: str | None) -> str:
+    text = unquote(str(value or "")).lower()
+    text = text.replace("_", " ").replace("-", " ").replace("/", " ")
+    text = re.sub(r"[^\w\s]+", " ", text, flags=re.UNICODE)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _contains_image_hint(normalized_text: str, token: str) -> bool:
+    return re.search(rf"(?<!\w){re.escape(token)}(?!\w)", normalized_text, flags=re.IGNORECASE) is not None
+
+
+def _has_known_image_extension(url: str | None) -> bool:
+    normalized = unquote(str(url or "")).strip().lower()
+    if not normalized:
+        return False
+    base = normalized.split("?", 1)[0].split("#", 1)[0]
+    return any(base.endswith(extension) for extension in _IMAGE_URL_EXTENSIONS)
+
+
+def _looks_like_poster_image(url: str | None) -> bool:
+    normalized = _normalize_image_text(url)
+    if not normalized:
+        return True
+    return any(pattern.search(normalized) is not None for pattern in _POSTER_IMAGE_PATTERNS)
+
+
+def _image_quality_penalty(url: str | None) -> int:
+    normalized = _normalize_image_text(url)
+    if not normalized:
+        return 200
+
+    penalty = 0
+    if any(_contains_image_hint(normalized, token) for token in _LOW_QUALITY_IMAGE_HINTS):
+        penalty += 55
+    if any(_contains_image_hint(normalized, token) for token in _WEAK_QUALITY_IMAGE_HINTS):
+        penalty += 15
+    if _looks_like_poster_image(url):
+        penalty += 50
+    if not _has_known_image_extension(url):
+        penalty += 25
+    return penalty
+
+
+def _is_low_quality_image(url: str | None) -> bool:
+    return _image_quality_penalty(url) >= 50
+
+
+def _extract_color_hint(value: str | None) -> str | None:
+    normalized = _normalize_image_text(value)
+    if not normalized:
+        return None
+    for token, canonical in _COLOR_HINTS:
+        if token in normalized:
+            return canonical
+    return None
+
+
+def _choose_preferred_image(
+    *,
+    primary_image: str | None,
+    metadata_images: object,
+    target_color: str | None,
+) -> str | None:
+    candidates: list[tuple[str, int, int]] = []
+    seen: set[str] = set()
+    order = 0
+
+    if isinstance(metadata_images, list):
+        for item in metadata_images:
+            url = str(item or "").strip()
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            candidates.append((url, 0, order))
+            order += 1
+
+    primary = str(primary_image or "").strip()
+    if primary and primary not in seen:
+        seen.add(primary)
+        candidates.append((primary, 1, order))
+
+    if not candidates:
+        return primary or None
+
+    target = _extract_color_hint(target_color)
+    scored: list[tuple[int, int, int, int, str]] = []
+    for url, source_priority, insertion_order in candidates:
+        quality_penalty = _image_quality_penalty(url)
+        score = 100 - (source_priority * 8) - quality_penalty
+        has_extension = _has_known_image_extension(url)
+        if has_extension:
+            score += 10
+        color_hint = _extract_color_hint(url)
+        if target and color_hint:
+            if color_hint == target:
+                score += 30
+            else:
+                score -= 20
+        scored.append((score, int(has_extension), -source_priority, -insertion_order, url))
+
+    scored.sort(reverse=True)
+    return scored[0][4]
 
 
 async def _resolve_or_create_canonical(session, *, title: str, category_id: int, brand_id: int | None, specs: dict, image: str | None):
@@ -55,7 +215,10 @@ async def _resolve_or_create_canonical(session, *, title: str, category_id: int,
         )
     ).scalar_one_or_none()
     if canonical:
-        if image and not canonical.main_image:
+        if image and (
+            not canonical.main_image
+            or (_is_low_quality_image(canonical.main_image) and not _is_low_quality_image(image))
+        ):
             canonical.main_image = image
         if specs and (not isinstance(canonical.specs, dict) or not canonical.specs):
             canonical.specs = specs
@@ -75,7 +238,10 @@ async def _resolve_or_create_canonical(session, *, title: str, category_id: int,
         ).scalar_one_or_none()
         if neutral:
             neutral.brand_id = brand_id
-            if image and not neutral.main_image:
+            if image and (
+                not neutral.main_image
+                or (_is_low_quality_image(neutral.main_image) and not _is_low_quality_image(image))
+            ):
                 neutral.main_image = image
             if specs and (not isinstance(neutral.specs, dict) or not neutral.specs):
                 neutral.specs = specs
@@ -98,7 +264,10 @@ async def _resolve_or_create_canonical(session, *, title: str, category_id: int,
             )
         ).scalar_one_or_none()
         if canonical:
-            if image and not canonical.main_image:
+            if image and (
+                not canonical.main_image
+                or (_is_low_quality_image(canonical.main_image) and not _is_low_quality_image(image))
+            ):
                 canonical.main_image = image
             if specs and (not isinstance(canonical.specs, dict) or not canonical.specs):
                 canonical.specs = specs
@@ -260,6 +429,11 @@ async def _normalize_product_batch(limit: int, *, reset_offset: bool = False) ->
             metadata = store_product.metadata_json if isinstance(store_product.metadata_json, dict) else {}
             specs = normalize_specs(metadata.get("specifications") or metadata.get("specs"))
             specs = enrich_specs_from_title(title_source, specs)
+            preferred_image = _choose_preferred_image(
+                primary_image=store_product.image_url,
+                metadata_images=metadata.get("images"),
+                target_color=str(specs.get("color") or ""),
+            )
             category_id = product.category_id if product and product.category_id else 1
             inferred_brand = detect_brand(title_source, specs)
             if inferred_brand:
@@ -276,7 +450,7 @@ async def _normalize_product_batch(limit: int, *, reset_offset: bool = False) ->
                 category_id=category_id,
                 brand_id=brand_id,
                 specs=specs,
-                image=store_product.image_url,
+                image=preferred_image,
             )
 
             store_product.canonical_product_id = canonical.id

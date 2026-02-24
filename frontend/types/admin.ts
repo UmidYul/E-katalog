@@ -45,7 +45,29 @@ export type AdminMetrics = {
   total_products: number;
   revenue: number;
   trend: Array<{ label: string; value: number }>;
+  quality_report?: {
+    id: string;
+    status: "ok" | "warning" | "critical" | string;
+    summary: Record<string, unknown>;
+    checks: Record<string, unknown>;
+    created_at?: string | null;
+  } | null;
   recent_activity: Array<{ id: string; title: string; timestamp: string }>;
+};
+
+export type AdminQualityNoOfferItem = {
+  id: string;
+  normalized_title: string;
+  main_image?: string | null;
+  is_active: boolean;
+  valid_store_count: number;
+  store_count: number;
+  total_offers: number;
+  last_offer_seen_at?: string | null;
+  last_valid_offer_seen_at?: string | null;
+  updated_at?: string | null;
+  brand?: { id: string; name: string } | null;
+  category?: { id: string; name: string } | null;
 };
 
 export type AdminSettings = {

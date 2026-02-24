@@ -36,6 +36,26 @@ class Settings(BaseSettings):
     ai_canonical_candidates_limit: int = 20
     ai_dedupe_merge_enabled: bool = False
     ai_dedupe_min_confidence: float = 0.95
+    ai_product_copy_enabled: bool = False
+    ai_product_copy_min_compare_confidence: float = 0.70
+    ai_product_copy_batch_limit: int = 300
+    quality_report_enabled: bool = True
+    quality_report_stale_offer_hours: int = 48
+    quality_report_active_without_offers_warn_ratio: float = 0.20
+    quality_report_active_without_offers_critical_ratio: float = 0.40
+    quality_report_search_mismatch_warn_ratio: float = 0.03
+    quality_report_search_mismatch_critical_ratio: float = 0.10
+    quality_report_stale_offer_warn_ratio: float = 0.15
+    quality_report_stale_offer_critical_ratio: float = 0.30
+    quality_report_low_quality_image_warn_ratio: float = 0.20
+    quality_report_low_quality_image_critical_ratio: float = 0.35
+    quality_report_autoheal_enabled: bool = True
+    quality_report_autoheal_max_products: int = 1000
+    quality_report_auto_deactivate_no_offer_enabled: bool = True
+    quality_report_auto_deactivate_no_offer_hours: int = 72
+    quality_report_auto_deactivate_no_offer_limit: int = 500
+    quality_report_alert_webhook_url: str | None = None
+    quality_report_alert_min_status: Literal["warning", "critical"] = "critical"
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000

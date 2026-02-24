@@ -11,6 +11,7 @@ const fallback: AdminMetrics = {
   total_products: 0,
   revenue: 0,
   trend: [],
+  quality_report: null,
   recent_activity: [],
 };
 

@@ -40,6 +40,18 @@ async def _run(limit: int) -> dict:
                       and o.scraped_at > :last_ts
                       and o.scraped_at <= :run_ts
                     union
+                    select cme.from_product_id as product_id
+                    from catalog_canonical_merge_events cme
+                    where cme.from_product_id is not null
+                      and cme.created_at > :last_ts
+                      and cme.created_at <= :run_ts
+                    union
+                    select cme.to_product_id as product_id
+                    from catalog_canonical_merge_events cme
+                    where cme.to_product_id is not null
+                      and cme.created_at > :last_ts
+                      and cme.created_at <= :run_ts
+                    union
                     select cp.id as product_id
                     from catalog_canonical_products cp
                     where cp.updated_at > :last_ts

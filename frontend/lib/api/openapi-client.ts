@@ -1,5 +1,6 @@
 import { apiClient } from "@/lib/api/client";
 import type {
+  BrandListItem,
   CompareMatrixResponse,
   FilterBucket,
   Paginated,
@@ -18,6 +19,7 @@ import type {
   AdminMetrics,
   AdminOrder,
   AdminProduct,
+  AdminQualityNoOfferItem,
   AdminScrapeSource,
   AdminSettings,
   AdminStore,
@@ -73,8 +75,8 @@ export const catalogApi = {
     const { data } = await apiClient.get<Array<{ id: string; slug: string; name: string }>>("/categories");
     return data;
   },
-  async getBrands(): Promise<Array<{ id: string; name: string }>> {
-    const { data } = await apiClient.get<Array<{ id: string; name: string }>>("/brands");
+  async getBrands(): Promise<BrandListItem[]> {
+    const { data } = await apiClient.get<BrandListItem[]>("/brands");
     return data;
   },
   async getFilters(categoryId?: string): Promise<{ attributes?: FilterBucket[]; stores?: Array<{ id: string; name: string }>; sellers?: Array<{ id: string; name: string }> }> {
@@ -254,6 +256,21 @@ export const adminApi = {
   runDedupe: () => apiClient.post<{ task_id: string; queued: string }>("/admin/dedupe/run"),
   runScrape: () => apiClient.post<{ task_id: string; queued: string }>("/admin/scrape/run"),
   runCatalogRebuild: () => apiClient.post<{ task_id: string; queued: string }>("/admin/catalog/rebuild"),
+  runQualityReport: () => apiClient.post<{ task_id: string; queued: string }>("/admin/quality/reports/run"),
+  runQualityAlertTest: () => apiClient.post<{ task_id: string; queued: string }>("/admin/quality/alerts/test"),
+  qualityProductsWithoutValidOffers: (query: { limit?: number; offset?: number; active_only?: boolean } = {}) =>
+    apiClient.get<{
+      items: AdminQualityNoOfferItem[];
+      total: number;
+      limit: number;
+      offset: number;
+      request_id: string;
+    }>("/admin/quality/products/without-valid-offers", { params: query }),
+  deactivateQualityProductsWithoutValidOffers: (payload: { product_ids: string[] }) =>
+    apiClient.post<{ ok: boolean; requested: number; deactivated: number; skipped: number }>(
+      "/admin/quality/products/without-valid-offers/deactivate",
+      payload,
+    ),
   taskStatus: (taskId: string) =>
     apiClient.get<{ task_id: string; state: string; ready: boolean; successful: boolean; progress: number; info?: Record<string, unknown> }>(
       `/admin/tasks/${taskId}`,

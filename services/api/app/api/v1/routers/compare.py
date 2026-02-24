@@ -32,6 +32,7 @@ async def compare_products(payload: CompareRequest, request: Request, db: AsyncS
             {
                 "id": product["id"],
                 "normalized_title": product["title"],
+                "main_image": product.get("main_image"),
                 "attributes": compare_meta,
                 "specs": product["specs"],
             }

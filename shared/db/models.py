@@ -101,6 +101,10 @@ class CatalogCanonicalProduct(CatalogUuidMixin, Base):
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
     specs: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    ai_short_description: Mapped[str | None] = mapped_column(Text)
+    ai_whats_new: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+    ai_copy_source_hash: Mapped[str | None] = mapped_column(String(64))
+    ai_copy_generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -342,6 +346,16 @@ class CatalogAIEnrichmentJob(CatalogUuidMixin, Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class CatalogDataQualityReport(CatalogUuidMixin, Base):
+    __tablename__ = "catalog_data_quality_reports"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    summary: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    checks: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 Index("ix_catalog_categories_parent_id", CatalogCategory.parent_id)
 Index("ix_catalog_categories_lft_rgt", CatalogCategory.lft, CatalogCategory.rgt)
 Index("ix_catalog_brands_normalized_name", CatalogBrand.normalized_name)
@@ -382,6 +396,8 @@ Index("ix_catalog_canonical_merge_events_to", CatalogCanonicalMergeEvent.to_prod
 Index("ix_catalog_canonical_merge_events_created_at", CatalogCanonicalMergeEvent.created_at.desc())
 Index("ix_catalog_ai_jobs_status_stage", CatalogAIEnrichmentJob.status, CatalogAIEnrichmentJob.stage)
 Index("ix_catalog_ai_jobs_product_id", CatalogAIEnrichmentJob.product_id)
+Index("ix_catalog_quality_reports_created_at", CatalogDataQualityReport.created_at.desc())
+Index("ix_catalog_quality_reports_status_created", CatalogDataQualityReport.status, CatalogDataQualityReport.created_at.desc())
 Index("ix_catalog_crawl_jobs_store_started", CatalogCrawlJob.store_id, CatalogCrawlJob.started_at.desc())
 Index("ix_catalog_crawl_job_items_job_status", CatalogCrawlJobItem.crawl_job_id, CatalogCrawlJobItem.status)
 

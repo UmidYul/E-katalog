@@ -1,6 +1,7 @@
 param(
     [string]$ComposeFile = "infra/docker/docker-compose.prod.yml",
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$RunQualitySmoke
 )
 
 $ErrorActionPreference = "Stop"
@@ -49,6 +50,15 @@ try {
     Write-Host "API health status code: $($health.StatusCode)"
 } catch {
     Write-Warning "Health check failed at http://localhost/api/v1/health"
+}
+
+if ($RunQualitySmoke) {
+    $qualityScript = Join-Path $PSScriptRoot "quality_smoke_check.ps1"
+    if (-not (Test-Path -Path $qualityScript -PathType Leaf)) {
+        throw "Quality smoke script was not found: $qualityScript"
+    }
+    Write-Host "==> Running quality smoke check..."
+    & $qualityScript -BaseUrl "http://localhost"
 }
 
 Write-Host ""

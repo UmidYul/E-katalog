@@ -25,10 +25,12 @@ from app.core.config import settings
 from app.repositories.catalog import CatalogRepository
 from app.services.worker_client import enqueue_dedupe_batches
 from app.services.worker_client import enqueue_embedding_batches
+from app.services.worker_client import enqueue_catalog_quality_report
 from app.services.worker_client import enqueue_full_crawl
 from app.services.worker_client import enqueue_full_catalog_rebuild
 from app.services.worker_client import enqueue_ingested_products_pipeline
 from app.services.worker_client import enqueue_reindex_batches
+from app.services.worker_client import enqueue_test_quality_alert
 from app.services.worker_client import get_task_status
 
 
@@ -121,6 +123,10 @@ class ProductsImportIn(BaseModel):
     store_id: str | None = Field(default=None, pattern=UUID_REF_PATTERN)
 
 
+class QualityProductsBulkDeactivateIn(BaseModel):
+    product_ids: list[str]
+
+
 def _hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -135,6 +141,48 @@ def _normalize_uuid_ref(value: str, *, field_name: str) -> str:
     if not re.match(UUID_REF_PATTERN, normalized):
         raise HTTPException(status_code=422, detail=f"{field_name} must be a UUID")
     return normalized
+
+
+def _serialize_quality_report_row(row: dict[str, Any]) -> dict[str, Any]:
+    summary = row.get("summary") if isinstance(row.get("summary"), dict) else {}
+    checks = row.get("checks") if isinstance(row.get("checks"), dict) else {}
+    created_at_value = _serialize_datetime_value(row.get("created_at"))
+    return {
+        "id": row.get("id"),
+        "status": row.get("status"),
+        "summary": summary,
+        "checks": checks,
+        "created_at": created_at_value,
+    }
+
+
+def _serialize_datetime_value(value: Any) -> str | None:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if value is None:
+        return None
+    return str(value)
+
+
+def _serialize_quality_no_offer_row(row: dict[str, Any]) -> dict[str, Any]:
+    brand_id = row.get("brand_id")
+    category_id = row.get("category_id")
+    return {
+        "id": row.get("id"),
+        "normalized_title": row.get("normalized_title"),
+        "main_image": row.get("main_image"),
+        "is_active": bool(row.get("is_active")),
+        "valid_store_count": int(row.get("valid_store_count") or 0),
+        "store_count": int(row.get("store_count") or 0),
+        "total_offers": int(row.get("total_offers") or 0),
+        "last_offer_seen_at": _serialize_datetime_value(row.get("last_offer_seen_at")),
+        "last_valid_offer_seen_at": _serialize_datetime_value(row.get("last_valid_offer_seen_at")),
+        "updated_at": _serialize_datetime_value(row.get("updated_at")),
+        "brand": {"id": str(brand_id), "name": row.get("brand_name")} if brand_id and row.get("brand_name") else None,
+        "category": {"id": str(category_id), "name": row.get("category_name")}
+        if category_id and row.get("category_name")
+        else None,
+    }
 
 
 async def _invalidate_product_caches(redis: Redis) -> None:
@@ -1704,12 +1752,31 @@ async def analytics(period: str = Query(default="30d"), db: AsyncSession = Depen
     orders = await list_orders(page=1, limit=500, redis=redis)
     orders_count = len(orders["items"])
     revenue = sum(float(row.get("total_amount", 0)) for row in orders["items"])
+    quality_row = (
+        await db.execute(
+            text(
+                """
+                select
+                    uuid as id,
+                    status,
+                    summary,
+                    checks,
+                    created_at
+                from catalog_data_quality_reports
+                order by created_at desc, id desc
+                limit 1
+                """
+            )
+        )
+    ).mappings().first()
+    quality_report = _serialize_quality_report_row(dict(quality_row)) if quality_row else None
     return {
         "total_users": users_count,
         "total_orders": orders_count,
         "total_products": int(products_count),
         "revenue": revenue,
         "trend": [{"label": f"D{i}", "value": int(revenue / max(i, 1) / 100000)} for i in range(1, 8)],
+        "quality_report": quality_report,
         "recent_activity": [
             {"id": secrets.token_hex(4), "title": "Daily sync completed", "timestamp": datetime.now(UTC).isoformat()},
             {"id": secrets.token_hex(4), "title": f"Period: {period}", "timestamp": datetime.now(UTC).isoformat()},
@@ -1783,6 +1850,241 @@ async def run_scrape() -> dict:
 async def run_catalog_rebuild() -> dict:
     task_id = enqueue_full_catalog_rebuild()
     return {"task_id": task_id, "queued": "catalog_rebuild"}
+
+
+@router.get("/quality/reports/latest")
+async def get_latest_quality_report(db: AsyncSession = Depends(get_db_session)) -> dict[str, Any]:
+    row = (
+        await db.execute(
+            text(
+                """
+                select
+                    uuid as id,
+                    status,
+                    summary,
+                    checks,
+                    created_at
+                from catalog_data_quality_reports
+                order by created_at desc, id desc
+                limit 1
+                """
+            )
+        )
+    ).mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="quality report not found")
+    return _serialize_quality_report_row(dict(row))
+
+
+@router.get("/quality/reports")
+async def list_quality_reports(
+    limit: int = Query(default=20, ge=1, le=200),
+    status: str | None = Query(default=None, pattern="^(ok|warning|critical)$"),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    rows = (
+        await db.execute(
+            text(
+                """
+                select
+                    uuid as id,
+                    status,
+                    summary,
+                    checks,
+                    created_at
+                from catalog_data_quality_reports
+                where (cast(:status as text) is null or status = cast(:status as text))
+                order by created_at desc, id desc
+                limit :limit
+                """
+            ),
+            {"status": status, "limit": limit},
+        )
+    ).mappings().all()
+    return {
+        "items": [_serialize_quality_report_row(dict(row)) for row in rows],
+        "next_cursor": None,
+        "request_id": "admin-quality-reports",
+    }
+
+
+@router.get("/quality/products/without-valid-offers")
+async def list_quality_products_without_valid_offers(
+    limit: int = Query(default=20, ge=1, le=200),
+    offset: int = Query(default=0, ge=0, le=20000),
+    active_only: bool = Query(default=True),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    total = int(
+        (
+            await db.execute(
+                text(
+                    """
+                    with offer_stats as (
+                        select
+                            cp.id,
+                            count(distinct case when o.is_valid = true and o.in_stock = true then o.store_id end) as valid_store_count
+                        from catalog_canonical_products cp
+                        left join catalog_offers o on o.canonical_product_id = cp.id
+                        where (not cast(:active_only as boolean) or cp.is_active = true)
+                        group by cp.id
+                    )
+                    select count(*)
+                    from offer_stats
+                    where valid_store_count = 0
+                    """
+                ),
+                {"active_only": active_only},
+            )
+        ).scalar_one()
+        or 0
+    )
+
+    rows = (
+        await db.execute(
+            text(
+                """
+                with offer_stats as (
+                    select
+                        cp.id,
+                        cp.uuid as product_uuid,
+                        cp.normalized_title,
+                        cp.main_image,
+                        cp.is_active,
+                        cp.updated_at,
+                        b.uuid as brand_uuid,
+                        b.name as brand_name,
+                        c.uuid as category_uuid,
+                        coalesce(c.name_ru, c.name_uz, c.name_en, c.slug) as category_name,
+                        count(o.id) as total_offers,
+                        count(distinct o.store_id) as store_count,
+                        count(distinct case when o.is_valid = true and o.in_stock = true then o.store_id end) as valid_store_count,
+                        max(o.scraped_at) as last_offer_seen_at,
+                        max(o.scraped_at) filter (where o.is_valid = true and o.in_stock = true) as last_valid_offer_seen_at
+                    from catalog_canonical_products cp
+                    left join catalog_brands b on b.id = cp.brand_id
+                    left join catalog_categories c on c.id = cp.category_id
+                    left join catalog_offers o on o.canonical_product_id = cp.id
+                    where (not cast(:active_only as boolean) or cp.is_active = true)
+                    group by
+                        cp.id,
+                        cp.uuid,
+                        cp.normalized_title,
+                        cp.main_image,
+                        cp.is_active,
+                        cp.updated_at,
+                        b.uuid,
+                        b.name,
+                        c.uuid,
+                        c.name_ru,
+                        c.name_uz,
+                        c.name_en,
+                        c.slug
+                )
+                select
+                    product_uuid as id,
+                    normalized_title,
+                    main_image,
+                    is_active,
+                    store_count,
+                    valid_store_count,
+                    total_offers,
+                    last_offer_seen_at,
+                    last_valid_offer_seen_at,
+                    updated_at,
+                    brand_uuid as brand_id,
+                    brand_name,
+                    category_uuid as category_id,
+                    category_name
+                from offer_stats
+                where valid_store_count = 0
+                order by total_offers desc, last_offer_seen_at desc nulls last, normalized_title asc
+                limit :limit
+                offset :offset
+                """
+            ),
+            {
+                "active_only": active_only,
+                "limit": limit,
+                "offset": offset,
+            },
+        )
+    ).mappings().all()
+
+    return {
+        "items": [_serialize_quality_no_offer_row(dict(row)) for row in rows],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "request_id": "admin-quality-without-valid-offers",
+    }
+
+
+@router.post("/quality/products/without-valid-offers/deactivate")
+async def deactivate_quality_products_without_valid_offers(
+    payload: QualityProductsBulkDeactivateIn,
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),
+) -> dict[str, Any]:
+    resolved_set: set[int] = set()
+    for item in payload.product_ids:
+        resolved = await _resolve_product_id_or_404(db, item)
+        if resolved > 0:
+            resolved_set.add(resolved)
+
+    product_ids = sorted(resolved_set)
+    if not product_ids:
+        raise HTTPException(status_code=422, detail="product_ids must contain at least one valid product reference")
+
+    deactivated_ids = (
+        await db.execute(
+            text(
+                """
+                with candidates as (
+                    select
+                        cp.id
+                    from catalog_canonical_products cp
+                    left join catalog_offers o
+                      on o.canonical_product_id = cp.id
+                     and o.is_valid = true
+                     and o.in_stock = true
+                    where cp.id = any(cast(:product_ids as bigint[]))
+                    group by cp.id
+                    having count(distinct o.store_id) = 0
+                )
+                update catalog_canonical_products cp
+                set is_active = false,
+                    updated_at = now()
+                from candidates c
+                where cp.id = c.id
+                  and cp.is_active = true
+                returning cp.id
+                """
+            ),
+            {"product_ids": product_ids},
+        )
+    ).scalars().all()
+
+    await db.commit()
+    await _invalidate_product_caches(redis)
+    return {
+        "ok": True,
+        "requested": len(product_ids),
+        "deactivated": len(deactivated_ids),
+        "skipped": max(0, len(product_ids) - len(deactivated_ids)),
+    }
+
+
+@router.post("/quality/reports/run")
+async def run_quality_report() -> dict:
+    task_id = enqueue_catalog_quality_report()
+    return {"task_id": task_id, "queued": "maintenance"}
+
+
+@router.post("/quality/alerts/test")
+async def run_quality_alert_test() -> dict:
+    task_id = enqueue_test_quality_alert()
+    return {"task_id": task_id, "queued": "maintenance"}
 
 
 @router.get("/tasks/{task_id}")

@@ -1,4 +1,4 @@
-const SPEC_KEY_ALIASES: Record<string, string> = {
+﻿const SPEC_KEY_ALIASES: Record<string, string> = {
   storage: "storage_gb",
   "storage gb": "storage_gb",
   built_in_memory: "storage_gb",
@@ -42,7 +42,6 @@ const SPEC_KEY_ALIASES: Record<string, string> = {
 
   wifi: "wifi_standard",
   "wi fi": "wifi_standard",
-
   bluetooth: "bluetooth_standard",
 
   "operating system": "os",
@@ -50,14 +49,48 @@ const SPEC_KEY_ALIASES: Record<string, string> = {
   "версия ос на начало продаж": "os",
   "версия_ос_на_начало_продаж": "os",
 
-  "тип sim карты": "sim_type",
-  "тип_sim_карты": "sim_type",
+  "тип sim карты": "sim_count",
+  "тип_sim_карты": "sim_count",
+  "количество sim карт": "sim_count",
+  "количество_sim_карт": "sim_count",
 
   "тип устройства": "device_type",
   "тип_устройства": "device_type",
 
+  "стандарты связи": "network_standard",
+  "стандарт связи": "network_standard",
+  "сеть": "network_standard",
+
+  "разъем зарядки": "charging_connector",
+  "разъём зарядки": "charging_connector",
+  "разъем_зарядки": "charging_connector",
+  "разъём_зарядки": "charging_connector",
+
+  "выход на наушники": "headphone_connector",
+  "выход_на_наушники": "headphone_connector",
+  "разъем для наушников": "headphone_connector",
+  "разъем_для_наушников": "headphone_connector",
+
+  "беспроводные интерфейсы": "wireless_interfaces",
+  "беспроводные_интерфейсы": "wireless_interfaces",
+  "геопозиционирование": "gps",
+
   "процессор": "cpu",
-  "цвет": "color"
+  "цвет": "color",
+
+  code: "code",
+  "код": "code",
+  article: "code",
+  sku: "code"
+};
+
+const SPEC_KEY_ALIASES_RUNTIME: Record<string, string> = {
+  sim_type_card: "sim_count",
+  sim_type: "sim_count",
+  sim: "sim_count",
+  headphone_output: "headphone_connector",
+  headphone_jack: "headphone_connector",
+  headset_jack: "headphone_connector"
 };
 
 const SPEC_LABELS: Record<string, string> = {
@@ -79,7 +112,6 @@ const SPEC_LABELS: Record<string, string> = {
   bluetooth_standard: "Стандарт Bluetooth",
   os: "Операционная система",
   network_standard: "Стандарты связи",
-  network: "Сеть",
   cpu: "Процессор",
   gpu: "Графический процессор",
   device_type: "Тип устройства",
@@ -98,12 +130,156 @@ const SPEC_LABELS: Record<string, string> = {
   frame_material: "Материал рамки",
   camera_count: "Количество камер",
   camera_features: "Характеристики камеры",
-  gps: "Геопозиционирование"
+  gps: "Геопозиционирование",
+  headphone_connector: "Выход на наушники",
+  wireless_interfaces: "Беспроводные интерфейсы"
 };
 
 const PLACEHOLDER_VALUES = new Set(["", "-", "--", "—", "n/a", "na", "none", "null", "unknown", "not specified", "не указано"]);
+const HIDDEN_SPEC_KEYS = new Set(["code", "код"]);
+const MEMORY_KEYS = new Set(["ram_gb", "storage_gb"]);
 
 const normalizeWhitespace = (value: string) => value.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+
+const normalizeUsbTypeC = (value: string): string => {
+  const normalized = normalizeWhitespace(value);
+  if (!normalized) return normalized;
+  if (/(?:usb\s*(?:type)?\s*-?\s*c|type\s*-?\s*c)/i.test(normalized)) {
+    return "USB Type-C";
+  }
+  return normalized;
+};
+
+const normalizeDeviceType = (value: string): string => {
+  const normalized = normalizeWhitespace(value);
+  const lower = normalized.toLowerCase();
+  if (lower === "smartphone" || lower === "смартфон") return "Smartphone";
+  return normalized;
+};
+
+const normalizeSimValue = (value: string): string => {
+  const normalized = normalizeWhitespace(value);
+  const lower = normalized.toLowerCase();
+
+  const hasNanoSim = /nano\s*-?\s*sim|nanosim/.test(lower);
+  const hasESim = /\be\s*-?\s*sim\b|\besim\b/.test(lower);
+  const hasDualSim = /dual\s*sim|2\s*sim|две\s*sim|2\s*карты|2\s*сим/.test(lower);
+
+  if (hasNanoSim && hasESim) return "Nano-SIM + eSIM";
+  if (hasDualSim) return "Dual SIM";
+  if (hasNanoSim) return "Nano-SIM";
+  if (hasESim) return "eSIM";
+  return normalized;
+};
+
+const normalizeNetworkValue = (value: string): string => {
+  const normalized = normalizeWhitespace(value);
+  const lower = normalized.toLowerCase();
+
+  const ordered: Array<[RegExp, string]> = [
+    [/\b2g\b/i, "2G"],
+    [/\b3g\b/i, "3G"],
+    [/\b4g\b/i, "4G"],
+    [/\blte\b/i, "LTE"],
+    [/\b5g\b/i, "5G"],
+    [/\b6g\b/i, "6G"]
+  ];
+
+  const values = ordered.filter(([pattern]) => pattern.test(lower)).map(([, label]) => label);
+  if (!values.length) return normalized;
+  return values.join(", ");
+};
+
+const normalizeWifiValue = (value: string): string => {
+  const normalized = normalizeWhitespace(value);
+  const lower = normalized.toLowerCase();
+
+  const wifiGenMatch = lower.match(/wi[\s-]?fi\s*([4-7])/i);
+  const wifiGeneration = wifiGenMatch ? `Wi-Fi ${wifiGenMatch[1]}` : null;
+
+  const order = ["a", "b", "g", "n", "ac", "ax", "be"];
+  const allowed = new Set(order);
+  const tokens: string[] = [];
+  const tokenRegex = /802\.11\s*([a-z0-9/\s,.-]+)/gi;
+  for (const match of lower.matchAll(tokenRegex)) {
+    const chunk = String(match[1] ?? "").toLowerCase();
+    for (const rawToken of chunk.split(/[/,\s.-]+/g)) {
+      const token = rawToken.trim().toLowerCase();
+      if (!allowed.has(token) || tokens.includes(token)) continue;
+      tokens.push(token);
+    }
+  }
+
+  const compactRegex = /802\.11([a-z]{1,2})/gi;
+  for (const match of lower.matchAll(compactRegex)) {
+    const token = String(match[1] ?? "").toLowerCase();
+    if (!allowed.has(token) || tokens.includes(token)) continue;
+    tokens.push(token);
+  }
+
+  const orderedTokens = order.filter((token) => tokens.includes(token));
+
+  if (!wifiGeneration && !orderedTokens.length) return normalized;
+  if (wifiGeneration && orderedTokens.length) return `${wifiGeneration} 802.11 ${orderedTokens.join("/")}`;
+  if (wifiGeneration) return wifiGeneration;
+  return `802.11 ${orderedTokens.join("/")}`;
+};
+
+const normalizeChargingPowerValue = (value: string): string => {
+  const normalized = normalizeWhitespace(value);
+  const match = normalized.match(/(\d{1,4}(?:[.,]\d+)?)\s*(?:w|вт)/i);
+  if (!match) return normalized;
+  const power = (match[1] ?? "").replace(",", ".");
+  return power ? `${power} Вт` : normalized;
+};
+
+const normalizeValueByKey = (key: string, value: string): string => {
+  if (key === "device_type") return normalizeDeviceType(value);
+  if (key === "sim_count" || key === "sim_type") return normalizeSimValue(value);
+  if (key === "network_standard" || key === "network") return normalizeNetworkValue(value);
+  if (key === "wifi_standard") return normalizeWifiValue(value);
+  if (key === "charging_power_w") return normalizeChargingPowerValue(value);
+  if (key === "charging_connector" || key === "headphone_connector") return normalizeUsbTypeC(value);
+  return normalizeWhitespace(value);
+};
+
+const normalizeSpecEntries = (key: string, value: string): Array<{ key: string; value: string }> => {
+  if (key !== "charging_connector") {
+    return [{ key, value: normalizeValueByKey(key, value) }];
+  }
+
+  const normalized = normalizeWhitespace(value);
+  const lower = normalized.toLowerCase();
+  const entries: Array<{ key: string; value: string }> = [];
+
+  const chargingPower = normalizeChargingPowerValue(normalized);
+  if (/(\d{1,4}(?:[.,]\d+)?)\s*(?:w|вт)/i.test(normalized)) {
+    entries.push({ key: "charging_power_w", value: chargingPower });
+  }
+
+  if (/беспровод|wireless|qi|magsafe/i.test(lower)) {
+    entries.push({ key: "charging_features", value: "Беспроводная зарядка" });
+  }
+
+  const usbTypeC = normalizeUsbTypeC(normalized);
+  if (usbTypeC === "USB Type-C") {
+    entries.push({ key: "charging_connector", value: usbTypeC });
+  }
+
+  if (!entries.length) {
+    entries.push({ key: "charging_connector", value: normalizeValueByKey("charging_connector", normalized) });
+  }
+
+  const deduplicated = new Map<string, string>();
+  for (const entry of entries) {
+    deduplicated.set(`${entry.key}:${entry.value}`, entry.value);
+  }
+
+  return Array.from(deduplicated.keys()).map((entryKey) => {
+    const [entrySpecKey = ""] = entryKey.split(":", 1);
+    return { key: entrySpecKey, value: deduplicated.get(entryKey) ?? "" };
+  });
+};
 
 export const normalizeSpecKey = (value: string): string => {
   const normalized = normalizeWhitespace(value.toLowerCase())
@@ -118,7 +294,9 @@ export const normalizeSpecKey = (value: string): string => {
     .replace(/^_+|_+$/g, "")
     .replace(/_+/g, "_");
   if (!snake) return "";
-  return SPEC_KEY_ALIASES[snake] ?? snake;
+
+  const canonical = SPEC_KEY_ALIASES[snake] ?? snake;
+  return SPEC_KEY_ALIASES_RUNTIME[canonical] ?? canonical;
 };
 
 const normalizeSpecValueToString = (value: unknown): string | null => {
@@ -150,10 +328,38 @@ const normalizeSpecValueToString = (value: unknown): string | null => {
 
 const isPlaceholder = (value: string) => PLACEHOLDER_VALUES.has(value.toLowerCase());
 
-const pickPreferredValue = (current: string | undefined, candidate: string): string => {
+const parseNumber = (value: string): number | null => {
+  const match = normalizeWhitespace(value).replace(",", ".").match(/-?\d+(?:\.\d+)?/);
+  if (!match) return null;
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const tokenCount = (value: string): number =>
+  normalizeWhitespace(value)
+    .split(/[,/|+]+/)
+    .map((item) => item.trim())
+    .filter(Boolean).length;
+
+const pickPreferredValue = (key: string, current: string | undefined, candidate: string): string => {
   if (!current) return candidate;
   if (isPlaceholder(current) && !isPlaceholder(candidate)) return candidate;
   if (isPlaceholder(candidate)) return current;
+
+  if (MEMORY_KEYS.has(key)) {
+    const currentNumeric = parseNumber(current);
+    const candidateNumeric = parseNumber(candidate);
+    if (currentNumeric !== null && candidateNumeric !== null) {
+      if (currentNumeric <= 0 && candidateNumeric > 0) return candidate;
+      if (candidateNumeric <= 0 && currentNumeric > 0) return current;
+    }
+  }
+
+  if (["network_standard", "wifi_standard", "sim_count"].includes(key)) {
+    const currentTokens = tokenCount(current);
+    const candidateTokens = tokenCount(candidate);
+    if (candidateTokens > currentTokens) return candidate;
+  }
 
   const currentDigits = (current.match(/\d/g) ?? []).length;
   const candidateDigits = (candidate.match(/\d/g) ?? []).length;
@@ -168,10 +374,20 @@ export const normalizeSpecsMap = (specs: Record<string, unknown> | null | undefi
   const normalized: Record<string, string> = {};
   for (const [rawKey, rawValue] of Object.entries(specs)) {
     const key = normalizeSpecKey(rawKey);
-    if (!key) continue;
+    if (!key || HIDDEN_SPEC_KEYS.has(key)) continue;
+
     const value = normalizeSpecValueToString(rawValue);
     if (!value) continue;
-    normalized[key] = pickPreferredValue(normalized[key], value);
+
+    for (const normalizedEntry of normalizeSpecEntries(key, value)) {
+      const entryKey = normalizeSpecKey(normalizedEntry.key);
+      if (!entryKey || HIDDEN_SPEC_KEYS.has(entryKey)) continue;
+
+      const entryValue = normalizeValueByKey(entryKey, normalizedEntry.value);
+      if (!entryValue || isPlaceholder(entryValue)) continue;
+
+      normalized[entryKey] = pickPreferredValue(entryKey, normalized[entryKey], entryValue);
+    }
   }
   return normalized;
 };

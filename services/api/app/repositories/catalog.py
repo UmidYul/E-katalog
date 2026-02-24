@@ -5,8 +5,10 @@ import hashlib
 import hmac
 import json
 import re
+from datetime import datetime
 from decimal import Decimal
 from typing import Literal
+from urllib.parse import unquote
 from uuid import UUID
 
 from sqlalchemy import and_, func, literal_column, or_, select, text
@@ -66,6 +68,36 @@ _PLACEHOLDER_SPEC_VALUES: set[str] = {
     "not specified",
     "\u043d\u0435 \u0443\u043a\u0430\u0437\u0430\u043d\u043e",
 }
+
+_SPEC_RUNTIME_KEY_ALIASES: dict[str, str] = {
+    "sim_type_card": "sim_count",
+    "sim_type": "sim_count",
+    "type_sim": "sim_count",
+    "sim": "sim_count",
+    "network": "network_standard",
+    "network_type": "network_standard",
+    "headphone_output": "headphone_connector",
+    "headphone_jack": "headphone_connector",
+    "headset_jack": "headphone_connector",
+    "wireless_interfaces": "wireless_interfaces",
+    "charging_port": "charging_connector",
+    "charging_socket": "charging_connector",
+    "charging_type": "charging_connector",
+    "code": "code",
+    "article": "code",
+    "sku": "code",
+    "\u0442\u0438\u043f_sim_\u043a\u0430\u0440\u0442\u044b": "sim_count",
+    "\u043a\u043e\u043b\u0438\u0447\u0435\u0441\u0442\u0432\u043e_sim_\u043a\u0430\u0440\u0442": "sim_count",
+    "\u0432\u044b\u0445\u043e\u0434_\u043d\u0430_\u043d\u0430\u0443\u0448\u043d\u0438\u043a\u0438": "headphone_connector",
+    "\u0440\u0430\u0437\u044a\u0435\u043c_\u0434\u043b\u044f_\u043d\u0430\u0443\u0448\u043d\u0438\u043a\u043e\u0432": "headphone_connector",
+    "\u0431\u0435\u0441\u043f\u0440\u043e\u0432\u043e\u0434\u043d\u044b\u0435_\u0438\u043d\u0442\u0435\u0440\u0444\u0435\u0439\u0441\u044b": "wireless_interfaces",
+    "\u0433\u0435\u043e\u043f\u043e\u0437\u0438\u0446\u0438\u043e\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435": "gps",
+    "\u0432\u0435\u0440\u0441\u0438\u044f_\u043e\u0441_\u043d\u0430_\u043d\u0430\u0447\u0430\u043b\u043e_\u043f\u0440\u043e\u0434\u0430\u0436": "os",
+    "\u043a\u043e\u0434": "code",
+}
+
+_HIDDEN_SPEC_KEYS: set[str] = {"code", "\u043a\u043e\u0434"}
+_MEMORY_SPEC_KEYS: set[str] = {"ram_gb", "storage_gb"}
 
 _HEX_COLOR_PATTERN = re.compile(r"^(?:#|0x)?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 
@@ -129,6 +161,484 @@ _OFFICIAL_COLOR_ALIASES: dict[str, str] = {
 }
 _OFFICIAL_COLOR_ALIAS_KEYS = sorted(_OFFICIAL_COLOR_ALIASES.keys(), key=len, reverse=True)
 
+_LOW_QUALITY_IMAGE_HINTS: tuple[str, ...] = (
+    "banner",
+    "poster",
+    "promo",
+    "advert",
+    "logo",
+    "watermark",
+    "placeholder",
+    "preview",
+    "thumbnail",
+    "thumb",
+)
+_WEAK_QUALITY_IMAGE_HINTS: tuple[str, ...] = (
+    "moderation",
+)
+_POSTER_IMAGE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"(?<!\w)frame(?!\w)", re.IGNORECASE),
+    re.compile(r"(?<!\w)photo\s+\d{4}(?!\d)", re.IGNORECASE),
+)
+_IMAGE_URL_EXTENSIONS: tuple[str, ...] = (
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".gif",
+    ".avif",
+    ".bmp",
+    ".heic",
+    ".heif",
+)
+
+_TITLE_NOISE_TOKENS: set[str] = {
+    "РєСѓРїРёС‚СЊ",
+    "С†РµРЅР°",
+    "С†РµРЅС‹",
+    "СЃРјР°СЂС‚С„РѕРЅ",
+    "СЃРјР°СЂС‚С„РѕРЅС‹",
+    "С‚РµР»РµС„РѕРЅ",
+    "С‚РµР»РµС„РѕРЅС‹",
+    "РјР°РіР°Р·РёРЅ",
+    "РјР°РіР°Р·РёРЅРµ",
+    "РґРѕСЃС‚Р°РІРєР°",
+    "СЂР°СЃСЃСЂРѕС‡РєР°",
+    "РѕСЂРёРіРёРЅР°Р»",
+    "РѕСЂРёРіРёРЅР°Р»СЊРЅС‹Р№",
+    "РѕС„РёС†РёР°Р»СЊРЅС‹Р№",
+    "official",
+    "store",
+    "shop",
+    "new",
+    "РЅРѕРІРёРЅРєР°",
+}
+
+_MEMORY_VALUES: tuple[str, ...] = ("64", "128", "256", "512", "1024")
+_LIKELY_RAM_VALUES: set[str] = {"2", "3", "4", "6", "8", "10", "12", "16", "18", "24"}
+_GB_PATTERN = r"(?:gb|\u0433\u0431)"
+_VARIANT_LABELS: dict[str, str] = {
+    "pro max": "Pro Max",
+    "promax": "Pro Max",
+    "pro": "Pro",
+    "plus": "Plus",
+    "mini": "Mini",
+    "max": "Max",
+    "air": "Air",
+    "se": "SE",
+    "e": "E",
+    "ultra": "Ultra",
+    "lite": "Lite",
+    "fe": "FE",
+}
+
+
+def _normalize_title_source_for_display(raw_title: str, brand_name: str | None = None) -> str:
+    title = str(raw_title or "").strip().replace("\u00a0", " ")
+    if not title:
+        return ""
+
+    brand_hint = str(brand_name or "").strip().lower()
+    brand_tokens = {brand_hint} if brand_hint else set()
+    brand_tokens.update({"apple", "iphone", "samsung", "galaxy"})
+
+    for separator in (" - ", " вЂ” ", " вЂ“ ", ": "):
+        if separator not in title:
+            continue
+        left, right = title.split(separator, 1)
+        left_lower = left.lower()
+        right_lower = right.lower()
+        has_brand_on_right = any(token in right_lower for token in brand_tokens if token)
+        has_brand_on_left = any(token in left_lower for token in brand_tokens if token)
+        if has_brand_on_right and not has_brand_on_left:
+            title = right.strip()
+            break
+
+    lowered = title.lower().replace("С‘", "Рµ")
+    lowered = lowered.replace("\u0451", "\u0435")
+    lowered = re.sub(r"\bРіР±\b", "gb", lowered, flags=re.IGNORECASE)
+    lowered = re.sub(r"\b(\d{1,2})\s*/\s*(\d{2,4})\s*(?:gb|РіР±)\b", r"\1/\2gb", lowered, flags=re.IGNORECASE)
+    lowered = re.sub(r"\b(" + "|".join(_MEMORY_VALUES) + r")\s*(?:gb|РіР±)\b", r"\1gb", lowered, flags=re.IGNORECASE)
+    lowered = re.sub(r"\b(?:\u0433\u0431)\b", "gb", lowered, flags=re.IGNORECASE)
+    lowered = re.sub(r"\b(\d{1,2})\s*/\s*(\d{2,4})\s*gb\b", r"\1/\2gb", lowered, flags=re.IGNORECASE)
+    lowered = re.sub(r"\b(" + "|".join(_MEMORY_VALUES) + r")\s*gb\b", r"\1gb", lowered, flags=re.IGNORECASE)
+    lowered = lowered.replace("+", " plus ")
+    lowered = re.sub(r"([a-zР°-СЏ])(\d)", r"\1 \2", lowered, flags=re.IGNORECASE)
+    lowered = re.sub(r"(\d)([a-zР°-СЏ])", r"\1 \2", lowered, flags=re.IGNORECASE)
+    lowered = re.sub(r"[^a-zР°-СЏ0-9/\s-]", " ", lowered, flags=re.IGNORECASE)
+    lowered = re.sub(r"\s+", " ", lowered).strip()
+    return lowered
+
+
+def _extract_memory_from_specs(specs: dict | None) -> tuple[str | None, str | None]:
+    if not isinstance(specs, dict):
+        return None, None
+
+    def parse_value(value: object, *, allow_storage_only: bool) -> str | None:
+        if value is None:
+            return None
+        text_value = str(value).lower().replace("РіР±", "gb")
+        text_value = text_value.replace("\u0433\u0431", "gb")
+        pair_match = re.search(r"\b(\d{1,2})\s*/\s*(\d{2,4})\b", text_value)
+        if pair_match:
+            left = pair_match.group(1)
+            right = pair_match.group(2)
+            if allow_storage_only and right in _MEMORY_VALUES:
+                return right
+            if not allow_storage_only:
+                try:
+                    left_int = int(left)
+                except ValueError:
+                    left_int = 0
+                if 2 <= left_int <= 24:
+                    return left
+        if allow_storage_only:
+            storage_match = re.search(r"\b(" + "|".join(_MEMORY_VALUES) + r")\b", text_value)
+            if storage_match:
+                return storage_match.group(1)
+            return None
+        ram_match = re.search(r"\b(\d{1,2})\b", text_value)
+        if not ram_match:
+            return None
+        ram_value = int(ram_match.group(1))
+        if 2 <= ram_value <= 24:
+            return str(ram_value)
+        return None
+
+    def classify_key(raw_key: object) -> str:
+        key = str(raw_key or "").strip().lower()
+        key = key.replace("\u0451", "\u0435")
+        key = key.replace("_", " ").replace("-", " ")
+        key = re.sub(r"\s+", " ", key).strip()
+        compact = key.replace(" ", "")
+
+        if "ram" in key or ("\u043e\u043f\u0435\u0440\u0430\u0442\u0438\u0432" in key and "\u043f\u0430\u043c\u044f\u0442" in key):
+            return "ram"
+        if ("\u0432\u0441\u0442\u0440\u043e\u0435\u043d" in key and "\u043f\u0430\u043c\u044f\u0442" in key) or ("\u043f\u043e\u0441\u0442\u043e\u044f\u043d" in key and "\u043f\u0430\u043c\u044f\u0442" in key):
+            return "storage"
+        if key in {"memory", "\u043f\u0430\u043c\u044f\u0442\u044c", "memory config", "\u043a\u043e\u043d\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044f \u043f\u0430\u043c\u044f\u0442\u0438"}:
+            return "both"
+        if "ram" in key or ("РѕРїРµСЂР°С‚РёРІ" in key and "РїР°РјСЏС‚" in key):
+            return "ram"
+        if (
+            "storage" in key
+            or "built in memory" in key
+            or "builtinmemory" in compact
+            or ("РІСЃС‚СЂРѕРµРЅ" in key and "РїР°РјСЏС‚" in key)
+            or ("РїРѕСЃС‚РѕСЏРЅ" in key and "РїР°РјСЏС‚" in key)
+        ):
+            return "storage"
+        if key in {"memory", "РїР°РјСЏС‚СЊ", "memory config", "РєРѕРЅС„РёРіСѓСЂР°С†РёСЏ РїР°РјСЏС‚Рё"}:
+            return "both"
+        return "unknown"
+
+    storage = None
+    ram = None
+    for key, value in specs.items():
+        kind = classify_key(key)
+        if kind in {"storage", "both"} and not storage:
+            storage = parse_value(value, allow_storage_only=True)
+        if kind in {"ram", "both"} and not ram:
+            ram = parse_value(value, allow_storage_only=False)
+        if ram and storage:
+            break
+
+    return ram, storage
+
+
+def _extract_memory_from_text(text: str) -> tuple[str | None, str | None]:
+    compact = str(text or "")
+    compact = re.sub(r"\b(?:\u0433\u0431|РіР±)\b", "gb", compact, flags=re.IGNORECASE)
+    pair_match = re.search(
+        r"\b(\d{1,2})\s*/\s*(" + "|".join(_MEMORY_VALUES) + r")\s*gb\b",
+        compact,
+        flags=re.IGNORECASE,
+    )
+    if pair_match:
+        ram = pair_match.group(1)
+        storage = pair_match.group(2)
+        try:
+            ram_int = int(ram)
+        except ValueError:
+            ram_int = 0
+        if 2 <= ram_int <= 24:
+            return ram, storage
+
+    spaced_pair_match = re.search(
+        r"\b(\d{1,2})\s+(" + "|".join(_MEMORY_VALUES) + r")\s*gb\b",
+        compact,
+        flags=re.IGNORECASE,
+    )
+    if spaced_pair_match:
+        ram = spaced_pair_match.group(1)
+        storage = spaced_pair_match.group(2)
+        if ram in _LIKELY_RAM_VALUES:
+            return ram, storage
+
+    storage_match = re.search(
+        r"\b(" + "|".join(_MEMORY_VALUES) + r")\s*gb\b",
+        compact,
+        flags=re.IGNORECASE,
+    )
+    storage = storage_match.group(1) if storage_match else None
+    return None, storage
+
+
+def _extract_esim(text: str, specs: dict | None) -> bool:
+    normalized = str(text or "").lower()
+    if "esim" in normalized or "e sim" in normalized:
+        return True
+    if not isinstance(specs, dict):
+        return False
+    for key, value in specs.items():
+        key_norm = str(key).strip().lower()
+        value_norm = str(value or "").strip().lower()
+        if "esim" in key_norm and value_norm not in {"", "false", "0", "no"}:
+            return True
+        if key_norm in {"sim", "sim_type", "sim_type_card", "type_sim", "С‚РёРї sim-РєР°СЂС‚С‹"} and "esim" in value_norm:
+            return True
+    return False
+
+
+def _detect_brand(raw_title: str, brand_name: str | None) -> str:
+    hint = str(brand_name or "").strip().lower()
+    if "apple" in hint:
+        return "apple"
+    if "samsung" in hint:
+        return "samsung"
+    title = str(raw_title or "").lower()
+    if "iphone" in title or "apple" in title:
+        return "apple"
+    if "samsung" in title or "galaxy" in title:
+        return "samsung"
+    return hint or "unknown"
+
+
+def _normalize_brand_label(brand_name: str | None, normalized_title: str) -> str | None:
+    canonical: dict[str, str] = {
+        "apple": "Apple",
+        "samsung": "Samsung",
+        "xiaomi": "Xiaomi",
+        "huawei": "Huawei",
+        "honor": "Honor",
+        "google": "Google",
+        "oneplus": "OnePlus",
+        "oppo": "OPPO",
+        "vivo": "Vivo",
+        "realme": "realme",
+        "motorola": "Motorola",
+        "nokia": "Nokia",
+        "sony": "Sony",
+        "infinix": "Infinix",
+        "tecno": "TECNO",
+        "nothing": "Nothing",
+        "poco": "POCO",
+        "asus": "ASUS",
+    }
+    hint = str(brand_name or "").strip()
+    if hint:
+        return canonical.get(hint.lower(), hint.title())
+    first_match = re.match(r"^\s*([a-z0-9]+)", normalized_title, flags=re.IGNORECASE)
+    if not first_match:
+        return None
+    first_token = str(first_match.group(1) or "").strip().lower()
+    if not first_token or first_token in _TITLE_NOISE_TOKENS:
+        return None
+    return canonical.get(first_token, first_token.title())
+
+
+def _extract_apple_model(text: str) -> str | None:
+    match = re.search(
+        r"\biphone\s*(\d{1,2})?\s*(pro\s*max|promax|pro|max|plus|mini|air|se|e)?\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return "iPhone" if "iphone" in text else None
+
+    number = match.group(1)
+    variant_raw = (match.group(2) or "").strip().lower()
+    variant = _VARIANT_LABELS.get(variant_raw, _VARIANT_LABELS.get(variant_raw.replace(" ", ""), ""))
+
+    parts = ["iPhone"]
+    if number:
+        parts.append(number)
+    if variant:
+        parts.append(variant)
+    return " ".join(parts).strip()
+
+
+def _extract_samsung_model(text: str) -> str | None:
+    z_match = re.search(
+        r"\b(?:galaxy\s*)?z\s*(fold|flip)\s*(\d{1,2})(?:\s*(fe))?\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if z_match:
+        family = z_match.group(1).capitalize()
+        generation = z_match.group(2)
+        suffix = _VARIANT_LABELS.get((z_match.group(3) or "").strip().lower(), "")
+        return f"Galaxy Z {family} {generation}{f' {suffix}' if suffix else ''}".strip()
+
+    note_match = re.search(
+        r"\b(?:galaxy\s*)?note\s*(\d{1,2})(?:\s*(ultra|plus|fe|lite))?\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if note_match:
+        generation = note_match.group(1)
+        suffix = _VARIANT_LABELS.get((note_match.group(2) or "").strip().lower(), "")
+        return f"Galaxy Note {generation}{f' {suffix}' if suffix else ''}".strip()
+
+    line_match = re.search(
+        r"\b(?:galaxy\s*)?(s|a|m|f)\s*(\d{1,3})(?:\s*(ultra|plus|fe|lite))?\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if line_match:
+        family = line_match.group(1).upper()
+        generation = line_match.group(2)
+        suffix = _VARIANT_LABELS.get((line_match.group(3) or "").strip().lower(), "")
+        return f"Galaxy {family}{generation}{f' {suffix}' if suffix else ''}".strip()
+
+    return "Galaxy" if "galaxy" in text else None
+
+
+def _title_case_fallback_tokens(tokens: list[str]) -> str:
+    formatted: list[str] = []
+    for token in tokens:
+        if token.lower() == "esim":
+            formatted.append("eSIM")
+        elif re.fullmatch(r"\d+g", token, flags=re.IGNORECASE):
+            formatted.append(token[:-1] + "G")
+        elif re.fullmatch(r"\d+gb", token, flags=re.IGNORECASE):
+            formatted.append(token[:-2] + "GB")
+        elif re.fullmatch(r"\d+/\d+gb", token, flags=re.IGNORECASE):
+            left, right = token[:-2].split("/", 1)
+            formatted.append(f"{left}/{right}GB")
+        else:
+            compact_variant = token.lower().replace(" ", "")
+            if compact_variant in _VARIANT_LABELS:
+                formatted.append(_VARIANT_LABELS[compact_variant])
+            else:
+                formatted.append(token.capitalize())
+    return " ".join(formatted).strip()
+
+
+_GENERIC_MODEL_DROP_TOKENS: set[str] = {
+    "buy",
+    "kupit",
+    "купить",
+    "price",
+    "цена",
+    "цены",
+    "phone",
+    "smartphone",
+    "mobile",
+    "new",
+    "global",
+    "version",
+    "оригинал",
+    "official",
+    "store",
+    "shop",
+    "dual",
+    "sim",
+    "nano",
+}
+
+
+def _extract_generic_model(text: str, *, brand_label: str | None = None) -> str | None:
+    cleaned = str(text or "").lower()
+    if brand_label:
+        brand_tokens = [token for token in re.split(r"\s+", brand_label.lower().strip()) if token]
+        for token in brand_tokens:
+            cleaned = re.sub(rf"^\s*{re.escape(token)}\b\s*", "", cleaned, flags=re.IGNORECASE)
+
+    cleaned = re.sub(r"\b([a-z])\s+(\d{1,3})\b", r"\1\2", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b(\d{1,2})\s+(" + "|".join(_MEMORY_VALUES) + r")\s*gb\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b\d{1,2}\s*/\s*\d{2,4}\s*gb\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b\d{2,4}\s*gb\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b(?:e\s*sim|esim)\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b(?:dual\s*sim|nano\s*sim|sim)\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"[^a-z0-9/\s-]", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+    if not cleaned:
+        return None
+
+    tokens = [
+        token
+        for token in cleaned.split()
+        if token
+        and token not in _TITLE_NOISE_TOKENS
+        and token not in _GENERIC_MODEL_DROP_TOKENS
+    ]
+    if not tokens:
+        return None
+    return _title_case_fallback_tokens(tokens[:8])
+
+
+def format_product_title(raw_title: str, *, brand_name: str | None = None, specs: dict | None = None) -> str:
+    normalized = _normalize_title_source_for_display(raw_title, brand_name=brand_name)
+    if not normalized:
+        return str(raw_title or "").strip()
+
+    brand = _detect_brand(normalized, brand_name)
+    if brand == "apple":
+        brand_label = "Apple"
+        model_label = _extract_apple_model(normalized)
+    elif brand == "samsung":
+        brand_label = "Samsung"
+        model_label = _extract_samsung_model(normalized)
+    else:
+        brand_label = _normalize_brand_label(brand_name, normalized)
+        model_label = _extract_generic_model(normalized, brand_label=brand_label)
+
+    if brand in {"apple", "samsung"} and not model_label:
+        model_label = _extract_generic_model(normalized, brand_label=brand_label)
+
+    ram_specs, storage_specs = _extract_memory_from_specs(specs)
+    ram_title, storage_title = _extract_memory_from_text(normalized)
+    ram = ram_specs or ram_title
+    storage = storage_title or storage_specs
+    esim = _extract_esim(normalized, specs)
+
+    memory_label = None
+    if ram and storage:
+        memory_label = f"{ram}/{storage}GB"
+    elif storage:
+        memory_label = f"{storage}GB"
+    elif ram:
+        memory_label = f"{ram}GB RAM"
+
+    parts: list[str] = []
+    if brand_label:
+        parts.append(brand_label)
+    if model_label:
+        parts.append(model_label)
+    if memory_label:
+        parts.append(memory_label)
+    if esim:
+        parts.append("eSIM")
+
+    if parts:
+        # Avoid duplicate "Apple iPhone" or "Samsung Galaxy" when model already starts with the brand.
+        joined = " ".join(parts)
+        joined = re.sub(r"\b(Apple)\s+Apple\b", r"\1", joined, flags=re.IGNORECASE)
+        joined = re.sub(r"\b(Samsung)\s+Samsung\b", r"\1", joined, flags=re.IGNORECASE)
+        joined = re.sub(r"\s+", " ", joined).strip()
+        return joined
+
+    fallback_tokens = [
+        token
+        for token in normalized.split()
+        if token not in _TITLE_NOISE_TOKENS and token not in {"apple", "iphone", "samsung", "galaxy"}
+    ]
+    if not fallback_tokens:
+        return str(raw_title or "").strip()
+    return _title_case_fallback_tokens(fallback_tokens[:8])
+
 
 def _normalize_spec_key(raw_key: object) -> str:
     key = str(raw_key).strip().lower().replace("\u00a0", " ")
@@ -140,7 +650,8 @@ def _normalize_spec_key(raw_key: object) -> str:
     snake = re.sub(r"[^\w]+", "_", alias, flags=re.UNICODE).strip("_")
     if not snake:
         return ""
-    return _SPEC_KEY_ALIASES.get(snake, snake)
+    canonical = _SPEC_KEY_ALIASES.get(snake, snake)
+    return _SPEC_RUNTIME_KEY_ALIASES.get(canonical, canonical)
 
 
 def _normalize_spec_value(raw_value: object) -> str | None:
@@ -177,13 +688,191 @@ def _is_placeholder_spec_value(value: str) -> bool:
     return value.strip().lower() in _PLACEHOLDER_SPEC_VALUES
 
 
-def _pick_preferred_spec_value(current: str | None, candidate: str) -> str:
+def _parse_first_float(value: str) -> float | None:
+    match = re.search(r"-?\d+(?:[.,]\d+)?", str(value))
+    if not match:
+        return None
+    token = match.group(0).replace(",", ".")
+    try:
+        return float(token)
+    except ValueError:
+        return None
+
+
+def _token_count(value: str) -> int:
+    return len([token for token in re.split(r"[,/|+]", value) if token.strip()])
+
+
+def _normalize_usb_type_c(value: str) -> str:
+    cleaned = re.sub(r"\s+", " ", str(value)).strip()
+    if re.search(r"(?:usb\s*(?:type)?\s*-?\s*c|type\s*-?\s*c)", cleaned, flags=re.IGNORECASE):
+        return "USB Type-C"
+    return cleaned
+
+
+def _normalize_device_type(value: str) -> str:
+    cleaned = re.sub(r"\s+", " ", str(value)).strip()
+    lowered = cleaned.lower()
+    if lowered in {"smartphone", "\u0441\u043c\u0430\u0440\u0442\u0444\u043e\u043d"}:
+        return "Smartphone"
+    return cleaned
+
+
+def _normalize_sim_value(value: str) -> str:
+    cleaned = re.sub(r"\s+", " ", str(value)).strip()
+    lowered = cleaned.lower()
+    has_nano_sim = bool(re.search(r"nano\s*-?\s*sim|nanosim", lowered))
+    has_esim = bool(re.search(r"\be\s*-?\s*sim\b|\besim\b", lowered))
+    has_dual_sim = bool(re.search(r"dual\s*sim|2\s*sim|2\s*\u0441\u0438\u043c|\u0434\u0432\u0435\s*sim", lowered))
+    if has_nano_sim and has_esim:
+        return "Nano-SIM + eSIM"
+    if has_dual_sim:
+        return "Dual SIM"
+    if has_nano_sim:
+        return "Nano-SIM"
+    if has_esim:
+        return "eSIM"
+    return cleaned
+
+
+def _normalize_network_standard_value(value: str) -> str:
+    cleaned = re.sub(r"\s+", " ", str(value)).strip()
+    lowered = cleaned.lower()
+    ordered: list[tuple[str, str]] = [
+        (r"\b2g\b", "2G"),
+        (r"\b3g\b", "3G"),
+        (r"\b4g\b", "4G"),
+        (r"\blte\b", "LTE"),
+        (r"\b5g\b", "5G"),
+        (r"\b6g\b", "6G"),
+    ]
+    values = [label for pattern, label in ordered if re.search(pattern, lowered, flags=re.IGNORECASE)]
+    if not values:
+        return cleaned
+    return ", ".join(values)
+
+
+def _normalize_wifi_standard_value(value: str) -> str:
+    cleaned = re.sub(r"\s+", " ", str(value)).strip()
+    lowered = cleaned.lower()
+    wifi_generation_match = re.search(r"wi[\s-]?fi\s*([4-7])", lowered, flags=re.IGNORECASE)
+    wifi_generation = f"Wi-Fi {wifi_generation_match.group(1)}" if wifi_generation_match else None
+
+    order = ["a", "b", "g", "n", "ac", "ax", "be"]
+    allowed = set(order)
+
+    tokens: set[str] = set()
+    for match in re.finditer(r"802\.11\s*([a-z0-9/\s,.-]+)", lowered, flags=re.IGNORECASE):
+        chunk = str(match.group(1) or "").lower()
+        for token in re.split(r"[/,\s.-]+", chunk):
+            current = token.strip().lower()
+            if current in allowed:
+                tokens.add(current)
+    for match in re.finditer(r"802\.11([a-z]{1,2})", lowered, flags=re.IGNORECASE):
+        token = str(match.group(1) or "").lower()
+        if token in allowed:
+            tokens.add(token)
+    ordered_tokens = [token for token in order if token in tokens]
+
+    if wifi_generation and ordered_tokens:
+        return f"{wifi_generation} 802.11 {'/'.join(ordered_tokens)}"
+    if wifi_generation:
+        return wifi_generation
+    if ordered_tokens:
+        return f"802.11 {'/'.join(ordered_tokens)}"
+    return cleaned
+
+
+def _normalize_power_value(value: str) -> str:
+    cleaned = re.sub(r"\s+", " ", str(value)).strip()
+    match = re.search(r"(\d{1,4}(?:[.,]\d+)?)\s*(?:w|\u0432\u0442)", cleaned, flags=re.IGNORECASE)
+    if not match:
+        return cleaned
+    token = str(match.group(1) or "").replace(",", ".")
+    return f"{token} \u0412\u0442" if token else cleaned
+
+
+def _normalize_spec_value_for_key(key: str, value: str) -> str | None:
+    if not value:
+        return None
+    cleaned = re.sub(r"\s+", " ", value).strip()
+    if not cleaned:
+        return None
+
+    if key in {"charging_connector", "headphone_connector"}:
+        cleaned = _normalize_usb_type_c(cleaned)
+    elif key == "device_type":
+        cleaned = _normalize_device_type(cleaned)
+    elif key in {"sim_count", "sim_type"}:
+        cleaned = _normalize_sim_value(cleaned)
+    elif key in {"network_standard", "network"}:
+        cleaned = _normalize_network_standard_value(cleaned)
+    elif key == "wifi_standard":
+        cleaned = _normalize_wifi_standard_value(cleaned)
+    elif key == "charging_power_w":
+        cleaned = _normalize_power_value(cleaned)
+
+    if key in _MEMORY_SPEC_KEYS:
+        numeric = _parse_first_float(cleaned)
+        if numeric is not None and numeric <= 0:
+            return None
+    return cleaned
+
+
+def _normalize_spec_entries(key: str, value: str) -> list[tuple[str, str]]:
+    if key != "charging_connector":
+        normalized_value = _normalize_spec_value_for_key(key, value)
+        return [(key, normalized_value)] if normalized_value else []
+
+    cleaned = re.sub(r"\s+", " ", value).strip()
+    lowered = cleaned.lower()
+    entries: list[tuple[str, str]] = []
+
+    if re.search(r"(\d{1,4}(?:[.,]\d+)?)\s*(?:w|\u0432\u0442)", cleaned, flags=re.IGNORECASE):
+        normalized_power = _normalize_spec_value_for_key("charging_power_w", cleaned)
+        if normalized_power:
+            entries.append(("charging_power_w", normalized_power))
+
+    if re.search(r"\u0431\u0435\u0441\u043f\u0440\u043e\u0432\u043e\u0434|wireless|qi|magsafe", lowered, flags=re.IGNORECASE):
+        entries.append(("charging_features", "\u0411\u0435\u0441\u043f\u0440\u043e\u0432\u043e\u0434\u043d\u0430\u044f \u0437\u0430\u0440\u044f\u0434\u043a\u0430"))
+
+    normalized_connector = _normalize_spec_value_for_key("charging_connector", cleaned)
+    if normalized_connector and normalized_connector == "USB Type-C":
+        entries.append(("charging_connector", normalized_connector))
+    elif not entries and normalized_connector:
+        entries.append(("charging_connector", normalized_connector))
+
+    unique: dict[str, str] = {}
+    for entry_key, entry_value in entries:
+        composite = f"{entry_key}:{entry_value}"
+        unique[composite] = entry_value
+    return [(item_key.split(":", 1)[0], item_value) for item_key, item_value in unique.items()]
+
+
+def _pick_preferred_spec_value(key: str, current: str | None, candidate: str) -> str:
     if not current:
         return candidate
     if _is_placeholder_spec_value(current) and not _is_placeholder_spec_value(candidate):
         return candidate
     if _is_placeholder_spec_value(candidate):
         return current
+
+    if key in _MEMORY_SPEC_KEYS:
+        current_numeric = _parse_first_float(current)
+        candidate_numeric = _parse_first_float(candidate)
+        if current_numeric is not None and candidate_numeric is not None:
+            if current_numeric <= 0 < candidate_numeric:
+                return candidate
+            if candidate_numeric <= 0 < current_numeric:
+                return current
+
+    if key in {"network_standard", "wifi_standard", "sim_count"}:
+        current_tokens = _token_count(current)
+        candidate_tokens = _token_count(candidate)
+        if candidate_tokens > current_tokens:
+            return candidate
+        if current_tokens > candidate_tokens:
+            return current
 
     current_digits = len(re.findall(r"\d", current))
     candidate_digits = len(re.findall(r"\d", candidate))
@@ -201,12 +890,26 @@ def _merge_specs_maps(*sources: dict | None) -> dict[str, str]:
             continue
         for raw_key, raw_value in source.items():
             key = _normalize_spec_key(raw_key)
-            if not key:
+            if not key or key in _HIDDEN_SPEC_KEYS:
                 continue
-            value = _normalize_spec_value(raw_value)
-            if not value:
+            base_value = _normalize_spec_value(raw_value)
+            if not base_value:
                 continue
-            merged[key] = _pick_preferred_spec_value(merged.get(key), value)
+            for entry_key, entry_value in _normalize_spec_entries(key, base_value):
+                normalized_key = _normalize_spec_key(entry_key)
+                if not normalized_key or normalized_key in _HIDDEN_SPEC_KEYS:
+                    continue
+                normalized_value = _normalize_spec_value_for_key(normalized_key, entry_value)
+                if not normalized_value:
+                    continue
+                merged[normalized_key] = _pick_preferred_spec_value(
+                    normalized_key,
+                    merged.get(normalized_key),
+                    normalized_value,
+                )
+
+    if not merged.get("charging_connector") and merged.get("headphone_connector") == "USB Type-C":
+        merged["charging_connector"] = "USB Type-C"
     return merged
 
 
@@ -297,6 +1000,163 @@ def _extract_model_signature(title: str) -> str | None:
     if samsung_match:
         return re.sub(r"\s+", " ", samsung_match.group(0).lower()).strip()
     return None
+
+
+def _contains_image_hint(normalized_text: str, token: str) -> bool:
+    return re.search(rf"(?<!\w){re.escape(token)}(?!\w)", normalized_text, flags=re.IGNORECASE) is not None
+
+
+def _has_known_image_extension(url: str) -> bool:
+    normalized = unquote(str(url or "")).strip().lower()
+    if not normalized:
+        return False
+    base = normalized.split("?", 1)[0].split("#", 1)[0]
+    return any(base.endswith(extension) for extension in _IMAGE_URL_EXTENSIONS)
+
+
+def _looks_like_poster_image(url: str) -> bool:
+    normalized = _normalize_color_text(unquote(str(url or "")))
+    if not normalized:
+        return True
+    return any(pattern.search(normalized) is not None for pattern in _POSTER_IMAGE_PATTERNS)
+
+
+def _image_quality_penalty(url: str) -> int:
+    normalized = _normalize_color_text(unquote(str(url or "")))
+    if not normalized:
+        return 200
+
+    penalty = 0
+    if any(_contains_image_hint(normalized, token) for token in _LOW_QUALITY_IMAGE_HINTS):
+        penalty += 55
+    if any(_contains_image_hint(normalized, token) for token in _WEAK_QUALITY_IMAGE_HINTS):
+        penalty += 15
+    if _looks_like_poster_image(url):
+        penalty += 50
+    if not _has_known_image_extension(url):
+        penalty += 25
+    return penalty
+
+
+def _looks_like_low_quality_image(url: str) -> bool:
+    return _image_quality_penalty(url) >= 50
+
+
+def _extract_image_color_hint(url: str, *, source_title: str | None = None, source_color: str | None = None) -> str | None:
+    for candidate in (source_color, source_title, unquote(url)):
+        color_name = _extract_official_color_name(str(candidate or ""))
+        if color_name:
+            return color_name
+    return None
+
+
+def _resolve_gallery_target_color(
+    preferred_color: str | None,
+    *,
+    source_rows: list[tuple[str | None, str | None]],
+) -> str | None:
+    preferred = _extract_official_color_name(preferred_color) or _format_color_label(preferred_color)
+
+    counts: dict[str, int] = {}
+    labels: dict[str, str] = {}
+    total_votes = 0
+    for source_color, source_title in source_rows:
+        vote = _extract_official_color_name(source_color) or _extract_official_color_name(source_title)
+        if not vote:
+            continue
+        key = vote.lower()
+        counts[key] = counts.get(key, 0) + 1
+        labels.setdefault(key, vote)
+        total_votes += 1
+
+    if total_votes == 0:
+        return preferred
+
+    top_key, top_count = max(counts.items(), key=lambda item: item[1])
+    top_share = top_count / total_votes
+    top_label = labels[top_key]
+
+    if preferred:
+        preferred_key = preferred.lower()
+        preferred_share = counts.get(preferred_key, 0) / total_votes
+        if preferred_share >= 0.25:
+            return preferred
+        if top_count >= 2 and top_share >= 0.45:
+            return top_label
+        return None
+
+    if top_count >= 2 and top_share >= 0.55:
+        return top_label
+    return None
+
+
+def _build_gallery_images(
+    candidates: list[dict[str, object]],
+    *,
+    target_color: str | None,
+    limit: int = 24,
+) -> list[str]:
+    prepared: list[dict[str, object]] = []
+    target_key = str(target_color or "").strip().lower() or None
+
+    for candidate in candidates:
+        url = str(candidate.get("url") or "").strip()
+        if not url:
+            continue
+        source_priority = int(candidate.get("source_priority") or 99)
+        order = int(candidate.get("order") or 0)
+        source_title = str(candidate.get("source_title") or "").strip() or None
+        source_color = str(candidate.get("source_color") or "").strip() or None
+
+        color_hint = _extract_image_color_hint(url, source_title=source_title, source_color=source_color)
+        color_key = str(color_hint or "").strip().lower() or None
+        quality_penalty = _image_quality_penalty(url)
+        low_quality = quality_penalty >= 50
+
+        score = 100 - (source_priority * 10) - quality_penalty
+        if quality_penalty == 0:
+            score += 10
+        if target_key and color_key:
+            if color_key == target_key:
+                score += 35
+            else:
+                score -= 30
+
+        prepared.append(
+            {
+                "url": url,
+                "order": order,
+                "score": score,
+                "source_priority": source_priority,
+                "color_key": color_key,
+                "has_extension": _has_known_image_extension(url),
+                "low_quality": low_quality,
+            }
+        )
+
+    if any(bool(item.get("has_extension")) for item in prepared):
+        prepared = [item for item in prepared if bool(item.get("has_extension"))]
+
+    if any(not bool(item.get("low_quality")) for item in prepared):
+        prepared = [item for item in prepared if not bool(item.get("low_quality"))]
+
+    if target_key and any(str(item.get("color_key") or "") == target_key for item in prepared):
+        prepared = [
+            item
+            for item in prepared
+            if item.get("color_key") is None or str(item.get("color_key")) == target_key
+        ]
+
+    prepared.sort(
+        key=lambda item: (
+            -int(item["score"]),
+            int(bool(item.get("low_quality"))),
+            int(item["source_priority"]),
+            int(item["order"]),
+        )
+    )
+
+    return [str(item["url"]) for item in prepared[: max(1, min(limit, 50))]]
 
 
 class CatalogRepository:
@@ -507,6 +1367,27 @@ class CatalogRepository:
         if int(current_offers or 0) > 0:
             return product_id
 
+        seed_row = (
+            await self.session.execute(
+                select(
+                    CatalogCanonicalProduct.normalized_title,
+                    CatalogCanonicalProduct.specs,
+                    CatalogCanonicalProduct.category_id,
+                    CatalogCanonicalProduct.brand_id,
+                ).where(CatalogCanonicalProduct.id == product_id)
+            )
+        ).one_or_none()
+        if seed_row is None:
+            return product_id
+
+        seed_specs = seed_row.specs if isinstance(seed_row.specs, dict) else {}
+        seed_model_signature = _extract_model_signature(str(seed_row.normalized_title or ""))
+        seed_ram_specs, seed_storage_specs = _extract_memory_from_specs(seed_specs)
+        seed_ram_title, seed_storage_title = _extract_memory_from_text(str(seed_row.normalized_title or ""))
+        seed_ram = seed_ram_specs or seed_ram_title
+        seed_storage = seed_storage_title or seed_storage_specs
+        seed_esim = _extract_esim(str(seed_row.normalized_title or ""), seed_specs)
+
         best_candidate_stmt = text(
             """
             with seed as (
@@ -517,6 +1398,8 @@ class CatalogRepository:
             ranked as (
                 select
                     cp.id,
+                    cp.normalized_title,
+                    cp.specs,
                     similarity(lower(cp.normalized_title), lower(seed.normalized_title)) as sim,
                     count(o.id) as offers_count
                 from seed
@@ -528,24 +1411,51 @@ class CatalogRepository:
                 join catalog_offers o
                   on o.canonical_product_id = cp.id
                  and o.is_valid = true
-                group by cp.id, seed.normalized_title
+                group by cp.id, cp.normalized_title, cp.specs, seed.normalized_title
             )
-            select id
+            select id, normalized_title, specs, sim, offers_count
             from ranked
             where sim >= :min_similarity
             order by sim desc, offers_count desc, id asc
-            limit 1
+            limit 20
             """
         )
-        candidate = (
+        candidates = (
             await self.session.execute(
                 best_candidate_stmt,
                 {"product_id": product_id, "min_similarity": 0.30},
             )
-        ).scalar_one_or_none()
-        if candidate is None:
+        ).mappings().all()
+        if not candidates:
             return product_id
-        return int(candidate)
+
+        for candidate in candidates:
+            candidate_title = str(candidate.get("normalized_title") or "")
+            candidate_specs = candidate.get("specs") if isinstance(candidate.get("specs"), dict) else {}
+            candidate_model_signature = _extract_model_signature(candidate_title)
+            candidate_ram_specs, candidate_storage_specs = _extract_memory_from_specs(candidate_specs)
+            candidate_ram_title, candidate_storage_title = _extract_memory_from_text(candidate_title)
+            candidate_ram = candidate_ram_specs or candidate_ram_title
+            candidate_storage = candidate_storage_title or candidate_storage_specs
+            candidate_esim = _extract_esim(candidate_title, candidate_specs)
+
+            if seed_model_signature:
+                if not candidate_model_signature or candidate_model_signature != seed_model_signature:
+                    continue
+            if seed_storage:
+                if not candidate_storage or candidate_storage != seed_storage:
+                    continue
+            if seed_ram:
+                if not candidate_ram or candidate_ram != seed_ram:
+                    continue
+            if seed_esim and not candidate_esim:
+                continue
+
+            candidate_id = candidate.get("id")
+            if candidate_id is not None:
+                return int(candidate_id)
+
+        return product_id
 
     async def get_product(self, product_ref: str | int, *, allow_numeric: bool = False) -> dict | None:
         product_id = await self.resolve_entity_ref("product", product_ref, allow_numeric=allow_numeric)
@@ -565,6 +1475,8 @@ class CatalogRepository:
                     CatalogCanonicalProduct.normalized_title,
                     CatalogCanonicalProduct.main_image,
                     CatalogCanonicalProduct.specs,
+                    CatalogCanonicalProduct.ai_short_description,
+                    CatalogCanonicalProduct.ai_whats_new,
                     CatalogCanonicalProduct.category_id,
                     CatalogCanonicalProduct.brand_id,
                     CatalogCanonicalProduct.is_active,
@@ -600,6 +1512,12 @@ class CatalogRepository:
                     last_seen_at
                 from catalog_store_products
                 where canonical_product_id = :product_id
+                   or id in (
+                        select o.store_product_id
+                        from catalog_offers o
+                        where o.canonical_product_id = :product_id
+                          and o.is_valid = true
+                   )
             )
             select specs
             from candidates
@@ -631,6 +1549,8 @@ class CatalogRepository:
         if title_color_hint:
             specs["color"] = title_color_hint
 
+        preferred_color = _extract_official_color_name(str(specs.get("color") or "")) or _format_color_label(str(specs.get("color") or ""))
+
         gallery_stmt = text(
             """
             select
@@ -638,43 +1558,232 @@ class CatalogRepository:
                 case
                     when jsonb_typeof(metadata->'images') = 'array' then metadata->'images'
                     else '[]'::jsonb
-                end as images
+                end as images,
+                coalesce(title_clean, title_raw) as source_title,
+                coalesce(
+                    metadata->>'color',
+                    case
+                        when jsonb_typeof(metadata->'specifications') = 'object' then metadata->'specifications'->>'color'
+                        else null
+                    end,
+                    case
+                        when jsonb_typeof(metadata->'specs') = 'object' then metadata->'specs'->>'color'
+                        else null
+                    end
+                ) as source_color
             from catalog_store_products
             where canonical_product_id = :product_id
+               or id in (
+                    select o.store_product_id
+                    from catalog_offers o
+                    where o.canonical_product_id = :product_id
+                      and o.is_valid = true
+               )
             order by last_seen_at desc, id desc
-            limit 40
+            limit 250
             """
         )
         gallery_rows = (await self.session.execute(gallery_stmt, {"product_id": product_id})).all()
-        gallery_images: list[str] = []
+        target_color = _resolve_gallery_target_color(
+            preferred_color,
+            source_rows=[
+                (
+                    str(gallery_row.source_color or "").strip() or None,
+                    str(gallery_row.source_title or "").strip() or None,
+                )
+                for gallery_row in gallery_rows
+            ],
+        )
+        gallery_candidates: list[dict[str, object]] = []
         seen_images: set[str] = set()
+        order_counter = 0
 
-        def push_gallery(url: object) -> None:
+        def push_gallery(
+            url: object,
+            *,
+            source_priority: int,
+            source_title: str | None = None,
+            source_color: str | None = None,
+        ) -> None:
+            nonlocal order_counter
             value = str(url or "").strip()
             if not value:
                 return
             if value in seen_images:
                 return
             seen_images.add(value)
-            gallery_images.append(value)
+            gallery_candidates.append(
+                {
+                    "url": value,
+                    "source_priority": source_priority,
+                    "source_title": source_title,
+                    "source_color": source_color,
+                    "order": order_counter,
+                }
+            )
+            order_counter += 1
 
-        push_gallery(row.main_image)
         for gallery_row in gallery_rows:
-            push_gallery(gallery_row.image_url)
+            source_title = str(gallery_row.source_title or "").strip() or None
+            source_color = str(gallery_row.source_color or "").strip() or None
             raw_images = gallery_row.images if hasattr(gallery_row, "images") else None
             if isinstance(raw_images, list):
                 for image in raw_images:
-                    push_gallery(image)
-        gallery_images = gallery_images[:24]
+                    push_gallery(
+                        image,
+                        source_priority=0,
+                        source_title=source_title,
+                        source_color=source_color,
+                    )
+            push_gallery(
+                gallery_row.image_url,
+                source_priority=1,
+                source_title=source_title,
+                source_color=source_color,
+            )
+        push_gallery(
+            row.main_image,
+            source_priority=2,
+            source_title=str(row.normalized_title or "").strip() or None,
+            source_color=str(specs.get("color") or "").strip() or None,
+        )
+        gallery_images = _build_gallery_images(
+            gallery_candidates,
+            target_color=target_color,
+            limit=24,
+        )
+        if gallery_images and all(_looks_like_low_quality_image(url) for url in gallery_images[: min(8, len(gallery_images))]):
+            seed_model_signature = _extract_model_signature(str(row.normalized_title or ""))
+            similar_gallery_stmt = text(
+                """
+                with seed as (
+                    select normalized_title, category_id, brand_id
+                    from catalog_canonical_products
+                    where id = :product_id
+                ),
+                candidates as (
+                    select
+                        cp.id,
+                        cp.normalized_title,
+                        similarity(lower(cp.normalized_title), lower(seed.normalized_title)) as sim
+                    from seed
+                    join catalog_canonical_products cp
+                      on cp.id <> :product_id
+                     and cp.is_active = true
+                     and cp.category_id = seed.category_id
+                     and (seed.brand_id is null or cp.brand_id is not distinct from seed.brand_id)
+                    where similarity(lower(cp.normalized_title), lower(seed.normalized_title)) >= :min_similarity
+                    order by sim desc, cp.id asc
+                    limit :candidate_limit
+                )
+                select
+                    case
+                        when jsonb_typeof(sp.metadata->'images') = 'array' then sp.metadata->'images'
+                        else '[]'::jsonb
+                    end as images,
+                    sp.image_url,
+                    coalesce(sp.title_clean, sp.title_raw, c.normalized_title) as source_title,
+                    c.normalized_title as candidate_title,
+                    coalesce(
+                        sp.metadata->>'color',
+                        case
+                            when jsonb_typeof(sp.metadata->'specifications') = 'object' then sp.metadata->'specifications'->>'color'
+                            else null
+                        end,
+                        case
+                            when jsonb_typeof(sp.metadata->'specs') = 'object' then sp.metadata->'specs'->>'color'
+                            else null
+                        end
+                    ) as source_color,
+                    c.sim
+                from candidates c
+                join catalog_store_products sp
+                  on sp.canonical_product_id = c.id
+                order by c.sim desc, sp.last_seen_at desc, sp.id desc
+                limit :image_limit
+                """
+            )
+            similar_rows = (
+                await self.session.execute(
+                    similar_gallery_stmt,
+                    {
+                        "product_id": int(row.id),
+                        "min_similarity": 0.40,
+                        "candidate_limit": 20,
+                        "image_limit": 250,
+                    },
+                )
+            ).all()
+            similar_candidates: list[dict[str, object]] = []
+            similar_seen: set[str] = set()
+            similar_order = 0
+            for similar_row in similar_rows:
+                candidate_title = str(similar_row.candidate_title or "")
+                if seed_model_signature:
+                    candidate_signature = _extract_model_signature(candidate_title)
+                    if not candidate_signature or candidate_signature != seed_model_signature:
+                        continue
+
+                source_title = str(similar_row.source_title or "").strip() or None
+                source_color = str(similar_row.source_color or "").strip() or None
+                raw_images = similar_row.images if hasattr(similar_row, "images") else None
+                if isinstance(raw_images, list):
+                    for image in raw_images:
+                        value = str(image or "").strip()
+                        if not value or value in similar_seen:
+                            continue
+                        similar_seen.add(value)
+                        similar_candidates.append(
+                            {
+                                "url": value,
+                                "source_priority": 0,
+                                "source_title": source_title,
+                                "source_color": source_color,
+                                "order": similar_order,
+                            }
+                        )
+                        similar_order += 1
+
+                row_image = str(similar_row.image_url or "").strip()
+                if row_image and row_image not in similar_seen:
+                    similar_seen.add(row_image)
+                    similar_candidates.append(
+                        {
+                            "url": row_image,
+                            "source_priority": 1,
+                            "source_title": source_title,
+                            "source_color": source_color,
+                            "order": similar_order,
+                        }
+                    )
+                    similar_order += 1
+
+            alternative_gallery = _build_gallery_images(
+                similar_candidates,
+                target_color=target_color,
+                limit=24,
+            )
+            if alternative_gallery:
+                gallery_images = alternative_gallery
+
+        resolved_main_image = gallery_images[0] if gallery_images else row.main_image
+        whats_new = row.ai_whats_new if isinstance(row.ai_whats_new, list) else []
+        whats_new = [str(item).strip() for item in whats_new if str(item).strip()]
 
         return {
             "id": row.uuid,
             "legacy_id": row.id,
-            "title": row.normalized_title,
+            "title": format_product_title(
+                row.normalized_title,
+                brand_name=row.brand_name,
+                specs=specs,
+            ),
             "category": row.category_name,
             "brand": row.brand_name,
-            "main_image": row.main_image,
+            "main_image": resolved_main_image,
             "gallery_images": gallery_images,
+            "short_description": row.ai_short_description,
+            "whats_new": whats_new,
             "specs": specs,
         }
 
@@ -778,6 +1887,67 @@ class CatalogRepository:
         )
         return result
 
+    async def _load_store_specs_for_products(self, product_ids: list[int]) -> dict[int, dict[str, str]]:
+        if not product_ids:
+            return {}
+        unique_ids = sorted({int(product_id) for product_id in product_ids})
+        if not unique_ids:
+            return {}
+        rows = (
+            await self.session.execute(
+                text(
+                    """
+                    with ranked_specs as (
+                        select
+                            canonical_product_id,
+                            case
+                                when jsonb_typeof(metadata->'specifications') = 'object' then metadata->'specifications'
+                                when jsonb_typeof(metadata->'specs') = 'object' then metadata->'specs'
+                                else '{}'::jsonb
+                            end as specs,
+                            case
+                                when jsonb_typeof(metadata->'specifications') = 'object' then (select count(*) from jsonb_each(metadata->'specifications'))
+                                when jsonb_typeof(metadata->'specs') = 'object' then (select count(*) from jsonb_each(metadata->'specs'))
+                                else 0
+                            end as specs_count,
+                            row_number() over (
+                                partition by canonical_product_id
+                                order by
+                                    case
+                                        when jsonb_typeof(metadata->'specifications') = 'object' then (select count(*) from jsonb_each(metadata->'specifications'))
+                                        when jsonb_typeof(metadata->'specs') = 'object' then (select count(*) from jsonb_each(metadata->'specs'))
+                                        else 0
+                                    end desc,
+                                    last_seen_at desc,
+                                    id desc
+                            ) as row_rank
+                        from catalog_store_products
+                        where canonical_product_id = any(cast(:product_ids as bigint[]))
+                    )
+                    select
+                        canonical_product_id,
+                        specs
+                    from ranked_specs
+                    where row_rank <= 8
+                      and specs <> '{}'::jsonb
+                    order by canonical_product_id asc, row_rank asc
+                    """
+                ),
+                {"product_ids": unique_ids},
+            )
+        ).all()
+
+        by_product: dict[int, dict[str, str]] = {}
+        for row in rows:
+            product_id = int(row.canonical_product_id)
+            specs = row.specs if isinstance(row.specs, dict) else {}
+            if not specs:
+                continue
+            merged = _merge_specs_maps(by_product.get(product_id), specs)
+            if merged:
+                by_product[product_id] = merged
+        return by_product
+
     async def get_offers(
         self,
         product_id: int,
@@ -844,6 +2014,8 @@ class CatalogRepository:
                 CatalogCanonicalProduct.uuid.label("product_uuid"),
                 CatalogCanonicalProduct.normalized_title,
                 CatalogCanonicalProduct.main_image,
+                CatalogCanonicalProduct.created_at,
+                CatalogCanonicalProduct.specs,
                 CatalogBrand.id.label("brand_id"),
                 CatalogBrand.uuid.label("brand_uuid"),
                 CatalogBrand.name.label("brand_name"),
@@ -926,29 +2098,90 @@ class CatalogRepository:
         stmt = stmt.order_by(*sort_map.get(sort, sort_map["relevance"]))
 
         decoded = self.decode_cursor(cursor)
+        if decoded and decoded.get("sort") and decoded.get("sort") != sort:
+            decoded = None
         if decoded:
-            last_price = Decimal(decoded["last_price"]) if "last_price" in decoded else None
+            last_id = int(decoded["last_id"])
             if sort == "price_asc":
+                last_price = Decimal(decoded["last_price"]) if "last_price" in decoded else None
                 stmt = stmt.where(
                     (CatalogProductSearch.min_price > last_price)
-                    | ((CatalogProductSearch.min_price == last_price) & (CatalogCanonicalProduct.id > decoded["last_id"]))
+                    | ((CatalogProductSearch.min_price == last_price) & (CatalogCanonicalProduct.id > last_id))
                 )
             elif sort == "price_desc":
+                last_price = Decimal(decoded["last_price"]) if "last_price" in decoded else None
                 stmt = stmt.where(
                     (CatalogProductSearch.min_price < last_price)
-                    | ((CatalogProductSearch.min_price == last_price) & (CatalogCanonicalProduct.id > decoded["last_id"]))
+                    | ((CatalogProductSearch.min_price == last_price) & (CatalogCanonicalProduct.id > last_id))
                 )
+            elif sort == "popular":
+                last_store_count = int(decoded.get("last_store_count", 0))
+                stmt = stmt.where(
+                    or_(
+                        CatalogProductSearch.store_count < last_store_count,
+                        and_(
+                            CatalogProductSearch.store_count == last_store_count,
+                            CatalogCanonicalProduct.id > last_id,
+                        ),
+                    )
+                )
+            elif sort == "newest":
+                last_created_at_raw = decoded.get("last_created_at")
+                last_created_at = None
+                if isinstance(last_created_at_raw, str):
+                    try:
+                        last_created_at = datetime.fromisoformat(last_created_at_raw)
+                    except ValueError:
+                        last_created_at = None
+                if last_created_at is not None:
+                    stmt = stmt.where(
+                        or_(
+                            CatalogCanonicalProduct.created_at < last_created_at,
+                            and_(
+                                CatalogCanonicalProduct.created_at == last_created_at,
+                                CatalogCanonicalProduct.id > last_id,
+                            ),
+                        )
+                    )
+                else:
+                    stmt = stmt.where(CatalogCanonicalProduct.id > last_id)
+            elif sort == "relevance":
+                last_rank_raw = decoded.get("last_rank")
+                try:
+                    last_rank = float(last_rank_raw)
+                except (TypeError, ValueError):
+                    last_rank = None
+                if last_rank is not None:
+                    stmt = stmt.where(
+                        or_(
+                            rank_expr < last_rank,
+                            and_(
+                                rank_expr == last_rank,
+                                CatalogCanonicalProduct.id > last_id,
+                            ),
+                        )
+                    )
+                else:
+                    stmt = stmt.where(CatalogCanonicalProduct.id > last_id)
             else:
-                stmt = stmt.where(CatalogCanonicalProduct.id > decoded["last_id"])
+                stmt = stmt.where(CatalogCanonicalProduct.id > last_id)
 
         rows = (await self.session.execute(stmt.limit(limit + 1))).all()
         has_next = len(rows) > limit
         rows = rows[:limit]
+        fallback_specs_map = await self._load_store_specs_for_products([int(row.id) for row in rows])
 
         items = [
             {
                 "id": r.product_uuid,
-                "normalized_title": r.normalized_title,
+                "normalized_title": format_product_title(
+                    r.normalized_title,
+                    brand_name=r.brand_name,
+                    specs=_merge_specs_maps(
+                        r.specs if isinstance(r.specs, dict) else {},
+                        fallback_specs_map.get(int(r.id)),
+                    ),
+                ),
                 "image_url": r.main_image,
                 "brand": {"id": r.brand_uuid, "name": r.brand_name} if r.brand_id else None,
                 "category": {"id": r.category_uuid, "name": r.category_name},
@@ -966,6 +2199,12 @@ class CatalogRepository:
             payload = {"last_id": last.id, "sort": sort}
             if sort in {"price_asc", "price_desc"}:
                 payload["last_price"] = str(last.min_price or "0")
+            elif sort == "popular":
+                payload["last_store_count"] = int(last.store_count or 0)
+            elif sort == "newest" and last.created_at is not None:
+                payload["last_created_at"] = last.created_at.isoformat()
+            elif sort == "relevance":
+                payload["last_rank"] = float(last.rank or 0)
             next_cursor = self._encode_cursor(payload)
 
         return items, next_cursor
@@ -998,10 +2237,28 @@ class CatalogRepository:
 
     async def list_brands(self, q: str | None = None, category_id: int | None = None, limit: int = 100) -> list[dict]:
         stmt = (
-            select(CatalogBrand.id, CatalogBrand.uuid, CatalogBrand.name, func.count(CatalogCanonicalProduct.id).label("products_count"))
-            .join(CatalogCanonicalProduct, CatalogCanonicalProduct.brand_id == CatalogBrand.id, isouter=True)
+            select(
+                CatalogBrand.id,
+                CatalogBrand.uuid,
+                CatalogBrand.name,
+                func.count(func.distinct(CatalogCanonicalProduct.id)).label("products_count"),
+            )
+            .join(
+                CatalogCanonicalProduct,
+                and_(
+                    CatalogCanonicalProduct.brand_id == CatalogBrand.id,
+                    CatalogCanonicalProduct.is_active.is_(True),
+                ),
+            )
+            .join(
+                CatalogProductSearch,
+                and_(
+                    CatalogProductSearch.product_id == CatalogCanonicalProduct.id,
+                    CatalogProductSearch.store_count > 0,
+                ),
+            )
             .group_by(CatalogBrand.id, CatalogBrand.name)
-            .order_by(CatalogBrand.name.asc())
+            .order_by(func.count(func.distinct(CatalogCanonicalProduct.id)).desc(), CatalogBrand.name.asc())
             .limit(limit)
         )
         if q:
@@ -1009,7 +2266,7 @@ class CatalogRepository:
         if category_id:
             stmt = stmt.where(CatalogCanonicalProduct.category_id == category_id)
         rows = (await self.session.execute(stmt)).all()
-        return [{"id": r.uuid, "name": r.name, "products_count": r.products_count} for r in rows]
+        return [{"id": r.uuid, "name": r.name, "products_count": int(r.products_count or 0)} for r in rows]
 
     async def get_filter_buckets(self, category_id: int | None = None, q: str | None = None) -> dict:
         base = (

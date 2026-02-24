@@ -11,6 +11,7 @@ celery_app = Celery(
     include=[
         "app.tasks.scrape_tasks",
         "app.tasks.normalize_tasks",
+        "app.tasks.copywriting_tasks",
         "app.tasks.dedupe_tasks",
         "app.tasks.embedding_tasks",
         "app.tasks.reindex_tasks",
@@ -54,6 +55,8 @@ celery_app.conf.update(
         "app.tasks.scrape_tasks.retry_failed_items": {"queue": "scrape.default", "routing_key": "scrape.default"},
         "app.tasks.normalize_tasks.normalize_product_batch": {"queue": "normalize", "routing_key": "normalize"},
         "app.tasks.normalize_tasks.enqueue_dirty_products": {"queue": "normalize", "routing_key": "normalize"},
+        "app.tasks.copywriting_tasks.generate_product_copy_batch": {"queue": "normalize", "routing_key": "normalize"},
+        "app.tasks.copywriting_tasks.enqueue_product_copy_batches": {"queue": "normalize", "routing_key": "normalize"},
         "app.tasks.dedupe_tasks.find_duplicate_candidates_task": {"queue": "dedupe", "routing_key": "dedupe"},
         "app.tasks.dedupe_tasks.enqueue_dedupe_batches": {"queue": "dedupe", "routing_key": "dedupe"},
         "app.tasks.embedding_tasks.generate_embeddings_batch": {"queue": "embedding", "routing_key": "embedding"},
@@ -64,7 +67,12 @@ celery_app.conf.update(
         "app.tasks.export_tasks.export_csv": {"queue": "export", "routing_key": "export"},
         "app.tasks.maintenance_tasks.cleanup_stale_offers": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.maintenance_tasks.cleanup_empty_canonicals": {"queue": "maintenance", "routing_key": "maintenance"},
+        "app.tasks.maintenance_tasks.deactivate_no_offer_products": {"queue": "maintenance", "routing_key": "maintenance"},
+        "app.tasks.maintenance_tasks.enqueue_auto_deactivate_no_offer_products": {"queue": "maintenance", "routing_key": "maintenance"},
+        "app.tasks.maintenance_tasks.send_test_quality_alert": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.maintenance_tasks.rotate_price_history_partitions": {"queue": "maintenance", "routing_key": "maintenance"},
+        "app.tasks.maintenance_tasks.generate_catalog_quality_report": {"queue": "maintenance", "routing_key": "maintenance"},
+        "app.tasks.maintenance_tasks.enqueue_catalog_quality_reports": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.maintenance_tasks.enqueue_full_catalog_rebuild": {"queue": "maintenance", "routing_key": "maintenance"},
     },
     beat_schedule={
@@ -80,6 +88,11 @@ celery_app.conf.update(
         },
         "normalize-dirty-products-every-15m": {
             "task": "app.tasks.normalize_tasks.enqueue_dirty_products",
+            "schedule": crontab(minute="*/15"),
+            "options": {"queue": "normalize", "routing_key": "normalize"},
+        },
+        "copywriting-every-15m": {
+            "task": "app.tasks.copywriting_tasks.enqueue_product_copy_batches",
             "schedule": crontab(minute="*/15"),
             "options": {"queue": "normalize", "routing_key": "normalize"},
         },
@@ -106,6 +119,16 @@ celery_app.conf.update(
         "cleanup-empty-canonicals-daily-0245": {
             "task": "app.tasks.maintenance_tasks.cleanup_empty_canonicals",
             "schedule": crontab(minute=45, hour=2),
+            "options": {"queue": "maintenance", "routing_key": "maintenance"},
+        },
+        "quality-report-every-6h": {
+            "task": "app.tasks.maintenance_tasks.enqueue_catalog_quality_reports",
+            "schedule": crontab(minute=10, hour="*/6"),
+            "options": {"queue": "maintenance", "routing_key": "maintenance"},
+        },
+        "auto-deactivate-no-offer-products-every-6h": {
+            "task": "app.tasks.maintenance_tasks.enqueue_auto_deactivate_no_offer_products",
+            "schedule": crontab(minute=20, hour="*/6"),
             "options": {"queue": "maintenance", "routing_key": "maintenance"},
         },
         "full-catalog-rebuild-daily-0315": {

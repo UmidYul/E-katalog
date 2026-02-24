@@ -122,6 +122,8 @@ async def get_product(
         "brand": product["brand"],
         "main_image": product["main_image"],
         "gallery_images": product.get("gallery_images", []),
+        "short_description": product.get("short_description"),
+        "whats_new": product.get("whats_new", []),
         "specs": product["specs"],
         "offers_by_store": offers_by_store,
     }

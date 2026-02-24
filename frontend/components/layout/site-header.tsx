@@ -17,6 +17,13 @@ const links = [
   { href: "/favorites", label: "Favorites" }
 ];
 
+const slugify = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
 export function SiteHeader() {
   const router = useRouter();
   const pathname = usePathname();
@@ -42,18 +49,27 @@ export function SiteHeader() {
   const virtualBrandCategories = useMemo(() => {
     if (!hydrated) return [];
     const source = brands.data ?? [];
-    const labelBySlug = new Map<string, string>();
+    const bySlug = new Map<string, { slug: string; name: string; productsCount: number }>();
     for (const brand of source) {
-      const slug = brand.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+      const slug = slugify(brand.name);
       if (!slug) continue;
-      if (slug === "apple" || slug === "samsung") {
-        labelBySlug.set(slug, brand.name);
+      const productsCount = Number(brand.products_count ?? 0);
+      const current = bySlug.get(slug);
+      if (!current || productsCount > current.productsCount) {
+        bySlug.set(slug, { slug, name: brand.name, productsCount });
       }
     }
-    return ["apple", "samsung"].map((slug) => ({
-      href: `/category/smartphone-${slug}`,
-      label: `Smartphones - ${labelBySlug.get(slug) ?? (slug === "apple" ? "Apple" : "Samsung")}`,
-    }));
+
+    return Array.from(bySlug.values())
+      .sort((left, right) => {
+        if (right.productsCount !== left.productsCount) return right.productsCount - left.productsCount;
+        return left.name.localeCompare(right.name);
+      })
+      .slice(0, 8)
+      .map((brand) => ({
+        href: `/category/brand-${brand.slug}`,
+        label: `Brand - ${brand.name}`,
+      }));
   }, [brands.data, hydrated]);
   const compareCount = hydrated ? compareCountFromStore : 0;
   const isLoginPage = pathname === "/login";
