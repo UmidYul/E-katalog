@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from statistics import median
 from typing import Any
 
@@ -930,6 +930,114 @@ def deactivate_no_offer_products(self, limit: int | None = None, min_age_hours: 
 @celery_app.task(bind=True)
 def enqueue_auto_deactivate_no_offer_products(self) -> str:
     return deactivate_no_offer_products.delay().id
+
+
+async def _cleanup_auth_sessions_redis(*, max_age_days: int, scan_limit: int) -> dict[str, Any]:
+    if not settings.auth_session_cleanup_enabled:
+        return {"status": "disabled", "at": datetime.now(UTC).isoformat()}
+
+    cutoff = datetime.now(UTC) - timedelta(days=max(1, int(max_age_days)))
+    redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    user_sets_scanned = 0
+    sessions_scanned = 0
+    sessions_revoked = 0
+    stale_refs_removed = 0
+    token_keys_removed = 0
+    scan_cap = max(1, int(scan_limit))
+
+    async for user_sessions_key in redis.scan_iter(match="auth:user:*:sessions"):
+        user_sets_scanned += 1
+        if user_sets_scanned > scan_cap:
+            break
+        session_ids = await redis.smembers(user_sessions_key)
+        if not session_ids:
+            continue
+
+        for session_id in session_ids:
+            sessions_scanned += 1
+            session_key = f"auth:session:{session_id}"
+            payload = await redis.hgetall(session_key)
+            if not payload:
+                await redis.srem(user_sessions_key, session_id)
+                stale_refs_removed += 1
+                continue
+
+            last_seen = _parse_iso_datetime(payload.get("last_seen_at") or payload.get("created_at"))
+            if last_seen is not None and last_seen >= cutoff:
+                continue
+
+            access_set_key = f"auth:session:{session_id}:access_tokens"
+            refresh_set_key = f"auth:session:{session_id}:refresh_tokens"
+            access_tokens = await redis.smembers(access_set_key)
+            refresh_tokens = await redis.smembers(refresh_set_key)
+
+            pipe = redis.pipeline()
+            for token in access_tokens:
+                pipe.delete(f"auth:access:{token}")
+            for token in refresh_tokens:
+                pipe.delete(f"auth:refresh:{token}")
+            pipe.delete(session_key)
+            pipe.delete(access_set_key)
+            pipe.delete(refresh_set_key)
+            pipe.srem(user_sessions_key, session_id)
+            await pipe.execute()
+
+            token_keys_removed += len(access_tokens) + len(refresh_tokens)
+            sessions_revoked += 1
+
+    if hasattr(redis, "aclose"):
+        await redis.aclose()
+    else:
+        await redis.close()
+
+    logger.info(
+        "cleanup_auth_sessions_completed",
+        max_age_days=max(1, int(max_age_days)),
+        scan_limit=scan_cap,
+        user_sets_scanned=user_sets_scanned,
+        sessions_scanned=sessions_scanned,
+        sessions_revoked=sessions_revoked,
+        stale_refs_removed=stale_refs_removed,
+        token_keys_removed=token_keys_removed,
+    )
+
+    return {
+        "status": "ok",
+        "max_age_days": max(1, int(max_age_days)),
+        "scan_limit": scan_cap,
+        "cutoff_at": cutoff.isoformat(),
+        "user_sets_scanned": user_sets_scanned,
+        "sessions_scanned": sessions_scanned,
+        "sessions_revoked": sessions_revoked,
+        "stale_refs_removed": stale_refs_removed,
+        "token_keys_removed": token_keys_removed,
+        "at": datetime.now(UTC).isoformat(),
+    }
+
+
+@celery_app.task(bind=True)
+def cleanup_auth_sessions(self, max_age_days: int | None = None, scan_limit: int | None = None) -> dict[str, Any]:
+    effective_max_age_days = (
+        int(max_age_days)
+        if isinstance(max_age_days, int) and max_age_days > 0
+        else int(settings.auth_session_cleanup_max_age_days)
+    )
+    effective_scan_limit = (
+        int(scan_limit)
+        if isinstance(scan_limit, int) and scan_limit > 0
+        else int(settings.auth_session_cleanup_scan_limit)
+    )
+    return asyncio.run(
+        _cleanup_auth_sessions_redis(
+            max_age_days=effective_max_age_days,
+            scan_limit=effective_scan_limit,
+        )
+    )
+
+
+@celery_app.task(bind=True)
+def enqueue_cleanup_auth_sessions(self) -> str:
+    return cleanup_auth_sessions.delay().id
 
 
 @celery_app.task(bind=True)

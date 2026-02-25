@@ -34,11 +34,15 @@ export const ensurePriceAlertMeta = (
     };
   }
   if (normalizedPrice == null) return metas;
+  const nextBaselinePrice = existing.baseline_price ?? normalizedPrice;
+  if (nextBaselinePrice === existing.baseline_price && existing.last_seen_price === normalizedPrice) {
+    return metas;
+  }
   return {
     ...metas,
     [productId]: {
       ...existing,
-      baseline_price: existing.baseline_price ?? normalizedPrice,
+      baseline_price: nextBaselinePrice,
       last_seen_price: normalizedPrice,
       updated_at: timestamp
     }
@@ -54,14 +58,25 @@ export const setPriceAlertsEnabled = (
 ): PriceAlertMetaMap => {
   if (!productId) return metas;
   const existing = metas[productId];
-  const meta = existing ?? createPriceAlertMeta(productId, currentPrice, timestamp);
+  const normalizedPrice = toPositivePriceOrNull(currentPrice);
+  const meta = existing ?? createPriceAlertMeta(productId, normalizedPrice, timestamp);
+  const nextBaselinePrice = meta.baseline_price ?? normalizedPrice;
+  const nextLastSeenPrice = normalizedPrice ?? meta.last_seen_price;
+  if (
+    existing &&
+    existing.alerts_enabled === enabled &&
+    existing.baseline_price === nextBaselinePrice &&
+    existing.last_seen_price === nextLastSeenPrice
+  ) {
+    return metas;
+  }
   return {
     ...metas,
     [productId]: {
       ...meta,
       alerts_enabled: enabled,
-      baseline_price: meta.baseline_price ?? toPositivePriceOrNull(currentPrice),
-      last_seen_price: toPositivePriceOrNull(currentPrice) ?? meta.last_seen_price,
+      baseline_price: nextBaselinePrice,
+      last_seen_price: nextLastSeenPrice,
       updated_at: timestamp
     }
   };
@@ -76,11 +91,13 @@ export const setPriceAlertTarget = (
   if (!productId) return metas;
   const existing = metas[productId];
   if (!existing) return metas;
+  const normalizedTargetPrice = toPositivePriceOrNull(targetPrice);
+  if (existing.target_price === normalizedTargetPrice) return metas;
   return {
     ...metas,
     [productId]: {
       ...existing,
-      target_price: toPositivePriceOrNull(targetPrice),
+      target_price: normalizedTargetPrice,
       updated_at: timestamp
     }
   };
@@ -96,6 +113,9 @@ export const resetPriceAlertBaseline = (
   const existing = metas[productId];
   if (!existing) return metas;
   const normalized = toPositivePriceOrNull(baselinePrice);
+  if (existing.baseline_price === normalized && existing.last_seen_price === normalized) {
+    return metas;
+  }
   return {
     ...metas,
     [productId]: {
@@ -117,12 +137,16 @@ export const updatePriceAlertLastSeen = (
   const existing = metas[productId];
   const normalized = toPositivePriceOrNull(currentPrice);
   if (!existing || normalized == null) return metas;
+  const nextBaselinePrice = existing.baseline_price ?? normalized;
+  if (existing.last_seen_price === normalized && existing.baseline_price === nextBaselinePrice) {
+    return metas;
+  }
   return {
     ...metas,
     [productId]: {
       ...existing,
       last_seen_price: normalized,
-      baseline_price: existing.baseline_price ?? normalized,
+      baseline_price: nextBaselinePrice,
       updated_at: timestamp
     }
   };
@@ -152,5 +176,6 @@ export const removePriceAlertMeta = (metas: PriceAlertMetaMap, productId: string
 export const syncPriceAlertMetasWithFavorites = (metas: PriceAlertMetaMap, favoriteProductIds: string[]): PriceAlertMetaMap => {
   const favoriteSet = new Set(favoriteProductIds.filter(Boolean));
   const nextEntries = Object.entries(metas).filter(([productId]) => favoriteSet.has(productId));
+  if (nextEntries.length === Object.keys(metas).length) return metas;
   return Object.fromEntries(nextEntries);
 };

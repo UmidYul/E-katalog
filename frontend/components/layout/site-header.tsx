@@ -87,7 +87,7 @@ export function SiteHeader() {
   };
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border/80 bg-background/92 backdrop-blur">
+    <header className="sticky top-0 z-40 border-b border-border/80 bg-background/97 backdrop-blur-[2px] dark:bg-background/90 dark:backdrop-blur">
       <div className="container flex h-16 items-center gap-3">
         <Link href="/" className="flex items-center gap-2 font-heading text-lg font-extrabold tracking-tight">
           <ShoppingBag className="h-5 w-5 text-primary" />

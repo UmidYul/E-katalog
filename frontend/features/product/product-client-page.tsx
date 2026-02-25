@@ -74,29 +74,31 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
     () => (product.data ? toPositivePriceOrNull(getProductMinPrice(product.data.offers_by_store)) : null),
     [product.data]
   );
+  const currentProductId = product.data?.id;
+  const currentProductTitle = product.data?.title;
 
-  const isFavorite = Boolean(product.data && favoriteSet.has(product.data.id));
+  const isFavorite = Boolean(currentProductId && favoriteSet.has(currentProductId));
 
   useEffect(() => {
-    if (!product.data) return;
+    if (!currentProductId || !currentProductTitle) return;
     pushRecentlyViewed({
-      id: product.data.id,
+      id: currentProductId,
       slug,
-      title: product.data.title,
+      title: currentProductTitle,
       minPrice: currentMinPrice
     });
     if (me.data?.id) {
-      void userApi.pushRecentlyViewed(product.data.id).catch(() => undefined);
+      void userApi.pushRecentlyViewed(currentProductId).catch(() => undefined);
     }
-  }, [currentMinPrice, me.data?.id, product.data, pushRecentlyViewed, slug]);
+  }, [currentMinPrice, currentProductId, currentProductTitle, me.data?.id, pushRecentlyViewed, slug]);
 
   useEffect(() => {
-    if (!product.data || !isFavorite) return;
-    ensureAlertMeta(product.data.id, currentMinPrice);
-    updateLastSeen(product.data.id, currentMinPrice);
-  }, [currentMinPrice, ensureAlertMeta, isFavorite, product.data, updateLastSeen]);
+    if (!currentProductId || !isFavorite) return;
+    ensureAlertMeta(currentProductId, currentMinPrice);
+    updateLastSeen(currentProductId, currentMinPrice);
+  }, [currentMinPrice, currentProductId, ensureAlertMeta, isFavorite, updateLastSeen]);
 
-  const alertMeta = product.data ? alertMetas[product.data.id] : undefined;
+  const alertMeta = currentProductId ? alertMetas[currentProductId] : undefined;
   const alertSignal = alertMeta ? buildPriceAlertSignal(alertMeta, currentMinPrice) : null;
 
   useEffect(() => {

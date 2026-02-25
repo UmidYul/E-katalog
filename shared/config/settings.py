@@ -77,6 +77,12 @@ class Settings(BaseSettings):
     admin_password: str = "Admin12345"
     admin_full_name: str = "Platform Admin"
     admin_role: Literal["admin", "moderator"] = "admin"
+    auth_storage_mode: Literal["redis", "dual", "postgres"] = "redis"
+    auth_session_cleanup_enabled: bool = True
+    auth_session_cleanup_max_age_days: int = 90
+    auth_session_cleanup_scan_limit: int = 50000
+    auth_password_reset_ttl_seconds: int = 1800
+    auth_password_reset_debug_return_token: bool = False
     next_public_app_url: str = "http://localhost"
     oauth_totp_issuer: str = "ZincMarket"
     oauth_google_client_id: str | None = None

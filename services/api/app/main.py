@@ -10,6 +10,7 @@ from app.api.v1.routers.auth import ensure_seed_admin
 from app.api.v1.routers import api_router
 from app.core.config import settings
 from app.core.logging import configure_logging, logger
+from app.db.session import AsyncSessionLocal
 
 configure_logging(settings.log_level)
 
@@ -39,6 +40,7 @@ app.include_router(api_router)
 @app.on_event("startup")
 async def startup_seed_admin() -> None:
     redis = get_redis()
-    user = await ensure_seed_admin(redis)
+    async with AsyncSessionLocal() as db:
+        user = await ensure_seed_admin(redis, db=db)
     if user:
         logger.info("seed_admin_ready", email=user["email"], role=user["role"])

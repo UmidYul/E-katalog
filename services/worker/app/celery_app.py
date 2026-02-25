@@ -66,6 +66,8 @@ celery_app.conf.update(
         "app.tasks.export_tasks.export_json": {"queue": "export", "routing_key": "export"},
         "app.tasks.export_tasks.export_csv": {"queue": "export", "routing_key": "export"},
         "app.tasks.maintenance_tasks.cleanup_stale_offers": {"queue": "maintenance", "routing_key": "maintenance"},
+        "app.tasks.maintenance_tasks.cleanup_auth_sessions": {"queue": "maintenance", "routing_key": "maintenance"},
+        "app.tasks.maintenance_tasks.enqueue_cleanup_auth_sessions": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.maintenance_tasks.cleanup_empty_canonicals": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.maintenance_tasks.deactivate_no_offer_products": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.maintenance_tasks.enqueue_auto_deactivate_no_offer_products": {"queue": "maintenance", "routing_key": "maintenance"},
@@ -121,6 +123,11 @@ celery_app.conf.update(
         "cleanup-empty-canonicals-daily-0245": {
             "task": "app.tasks.maintenance_tasks.cleanup_empty_canonicals",
             "schedule": crontab(minute=45, hour=2),
+            "options": {"queue": "maintenance", "routing_key": "maintenance"},
+        },
+        "cleanup-auth-sessions-daily-0340": {
+            "task": "app.tasks.maintenance_tasks.enqueue_cleanup_auth_sessions",
+            "schedule": crontab(minute=40, hour=3),
             "options": {"queue": "maintenance", "routing_key": "maintenance"},
         },
         "quality-report-every-6h": {

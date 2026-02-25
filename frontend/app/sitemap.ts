@@ -11,6 +11,7 @@ const PRODUCT_PAGE_SIZE = 100;
 const MAX_PRODUCT_PAGES = 250;
 const MAX_PRODUCTS_IN_SITEMAP = 25000;
 const SITEMAP_REVALIDATE_SECONDS = 3600;
+const SITEMAP_FETCH_TIMEOUT_MS = 8000;
 
 export const revalidate = SITEMAP_REVALIDATE_SECONDS;
 export const dynamic = "force-dynamic";
@@ -23,6 +24,9 @@ const slugify = (value: string) =>
     .replace(/^-+|-+$/g, "");
 
 const baseUrl = env.appUrl.endsWith("/") ? env.appUrl.slice(0, -1) : env.appUrl;
+const normalizeOrigin = (value: string) => String(value || "").trim().replace(/\/+$/g, "");
+const apiOrigins = Array.from(new Set([env.apiInternalOrigin, env.apiOrigin, baseUrl].map(normalizeOrigin).filter(Boolean)));
+let preferredApiOrigin: string | null = null;
 
 const absoluteUrl = (route: string) => {
   if (!route) return baseUrl;
@@ -30,21 +34,28 @@ const absoluteUrl = (route: string) => {
 };
 
 async function fetchApi<T>(path: string): Promise<T | null> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 12000);
-  try {
-    const response = await fetch(`${env.apiInternalOrigin}${env.apiPrefix}${path}`, {
-      signal: controller.signal,
-      next: { revalidate: SITEMAP_REVALIDATE_SECONDS },
-      headers: { "Content-Type": "application/json" }
-    });
-    if (!response.ok) return null;
-    return (await response.json()) as T;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timeoutId);
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const candidates = preferredApiOrigin ? [preferredApiOrigin, ...apiOrigins.filter((origin) => origin !== preferredApiOrigin)] : apiOrigins;
+
+  for (const origin of candidates) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), SITEMAP_FETCH_TIMEOUT_MS);
+    try {
+      const response = await fetch(`${origin}${env.apiPrefix}${normalizedPath}`, {
+        signal: controller.signal,
+        next: { revalidate: SITEMAP_REVALIDATE_SECONDS },
+        headers: { "Content-Type": "application/json" }
+      });
+      if (!response.ok) continue;
+      preferredApiOrigin = origin;
+      return (await response.json()) as T;
+    } catch {
+      continue;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
+  return null;
 }
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {

@@ -35,19 +35,28 @@ export function ProductCard({
   const storesLabel = product.store_count === 1 ? "магазин" : "магазинов";
   const hasPriceComparison = product.store_count >= 2;
   const hasPriceRange = product.min_price != null && product.max_price != null && product.max_price > product.min_price;
+  const productHref = `/product/${product.id}-${slugify(product.normalized_title)}`;
 
   return (
     <motion.article layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
       <div className="group overflow-hidden rounded-2xl border border-border/80 bg-card shadow-soft">
         <div className="relative aspect-[4/3] bg-muted/35 p-2">
-          <Image
-            src={product.image_url ?? "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&w=1200&q=80"}
-            alt={product.normalized_title}
-            fill
-            className="object-contain transition-transform duration-300 group-hover:scale-[1.02]"
-            sizes="(max-width: 768px) 100vw, 30vw"
-          />
-          <Button variant={favorite ? "default" : "secondary"} size="icon" className="absolute right-3 top-3 h-9 w-9" onClick={() => onFavorite?.(product.id)} aria-label="Добавить в избранное">
+          <Link href={productHref} className="absolute inset-0 block" aria-label={product.normalized_title}>
+            <Image
+              src={product.image_url ?? "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&w=1200&q=80"}
+              alt={product.normalized_title}
+              fill
+              className="object-contain transition-transform duration-300 group-hover:scale-[1.02]"
+              sizes="(max-width: 768px) 100vw, 30vw"
+            />
+          </Link>
+          <Button
+            variant={favorite ? "default" : "secondary"}
+            size="icon"
+            className="absolute right-3 top-3 z-10 h-9 w-9"
+            onClick={() => onFavorite?.(product.id)}
+            aria-label="Добавить в избранное"
+          >
             <Heart className={`h-4 w-4 ${favorite ? "fill-current" : ""}`} />
           </Button>
         </div>
@@ -63,7 +72,7 @@ export function ProductCard({
           {isTracking ? <Badge className="border-primary/40 bg-primary/15 text-primary">Отслеживается</Badge> : null}
           <PriceAlertBadge signal={priceAlertSignal} />
 
-          <Link href={`/product/${product.id}-${slugify(product.normalized_title)}`} className="line-clamp-2 text-sm font-semibold hover:text-primary">
+          <Link href={productHref} className="line-clamp-2 text-sm font-semibold hover:text-primary">
             {product.normalized_title}
           </Link>
           {hasPriceRange ? (

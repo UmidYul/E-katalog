@@ -27,44 +27,53 @@ type PriceAlertsState = {
 
 export const usePriceAlertsStore = create<PriceAlertsState>()(
   persist(
-    (set, get) => ({
-      metas: {},
-      ensureMeta: (productId, currentPrice) => {
-        if (!productId) return;
-        set((state) => ({ metas: ensurePriceAlertMeta(state.metas, productId, currentPrice) }));
-      },
-      setAlertsEnabled: (productId, enabled, currentPrice) => {
-        if (!productId) return;
-        set((state) => ({ metas: setPriceAlertsEnabled(state.metas, productId, enabled, currentPrice) }));
-      },
-      setTargetPrice: (productId, targetPrice) => {
-        if (!productId) return;
-        if (!get().metas[productId]) return;
-        set((state) => ({ metas: setPriceAlertTarget(state.metas, productId, targetPrice) }));
-      },
-      resetBaseline: (productId, baselinePrice) => {
-        if (!productId) return;
-        if (!get().metas[productId]) return;
-        set((state) => ({ metas: resetPriceAlertBaseline(state.metas, productId, baselinePrice) }));
-      },
-      updateLastSeen: (productId, currentPrice) => {
-        if (!productId) return;
-        if (!get().metas[productId]) return;
-        set((state) => ({ metas: updatePriceAlertLastSeen(state.metas, productId, currentPrice) }));
-      },
-      markNotified: (productId) => {
-        if (!productId) return;
-        if (!get().metas[productId]) return;
-        set((state) => ({ metas: markPriceAlertNotified(state.metas, productId) }));
-      },
-      removeMeta: (productId) => {
-        if (!productId) return;
-        set((state) => ({ metas: removePriceAlertMeta(state.metas, productId) }));
-      },
-      syncWithFavorites: (favoriteProductIds) => {
-        set((state) => ({ metas: syncPriceAlertMetasWithFavorites(state.metas, favoriteProductIds) }));
-      }
-    }),
+    (set, get) => {
+      const updateMetas = (updater: (metas: Record<string, PriceAlertMeta>) => Record<string, PriceAlertMeta>) => {
+        const currentMetas = get().metas;
+        const nextMetas = updater(currentMetas);
+        if (nextMetas === currentMetas) return;
+        set({ metas: nextMetas });
+      };
+
+      return {
+        metas: {},
+        ensureMeta: (productId, currentPrice) => {
+          if (!productId) return;
+          updateMetas((metas) => ensurePriceAlertMeta(metas, productId, currentPrice));
+        },
+        setAlertsEnabled: (productId, enabled, currentPrice) => {
+          if (!productId) return;
+          updateMetas((metas) => setPriceAlertsEnabled(metas, productId, enabled, currentPrice));
+        },
+        setTargetPrice: (productId, targetPrice) => {
+          if (!productId) return;
+          if (!get().metas[productId]) return;
+          updateMetas((metas) => setPriceAlertTarget(metas, productId, targetPrice));
+        },
+        resetBaseline: (productId, baselinePrice) => {
+          if (!productId) return;
+          if (!get().metas[productId]) return;
+          updateMetas((metas) => resetPriceAlertBaseline(metas, productId, baselinePrice));
+        },
+        updateLastSeen: (productId, currentPrice) => {
+          if (!productId) return;
+          if (!get().metas[productId]) return;
+          updateMetas((metas) => updatePriceAlertLastSeen(metas, productId, currentPrice));
+        },
+        markNotified: (productId) => {
+          if (!productId) return;
+          if (!get().metas[productId]) return;
+          updateMetas((metas) => markPriceAlertNotified(metas, productId));
+        },
+        removeMeta: (productId) => {
+          if (!productId) return;
+          updateMetas((metas) => removePriceAlertMeta(metas, productId));
+        },
+        syncWithFavorites: (favoriteProductIds) => {
+          updateMetas((metas) => syncPriceAlertMetasWithFavorites(metas, favoriteProductIds));
+        }
+      };
+    },
     {
       name: "price-alerts-store-v1",
       skipHydration: true

@@ -376,6 +376,112 @@ class AdminAlertEvent(CatalogUuidMixin, Base):
     )
 
 
+class AuthUser(Base):
+    __tablename__ = "auth_users"
+    __table_args__ = (
+        UniqueConstraint("uuid", name="uq_auth_users_uuid"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    uuid: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        nullable=False,
+        default=lambda: str(uuid4()),
+        server_default=text("gen_random_uuid()"),
+    )
+    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    role: Mapped[str] = mapped_column(String(32), nullable=False, default="user", server_default="user")
+    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
+    phone: Mapped[str] = mapped_column(String(32), nullable=False, default="", server_default="")
+    city: Mapped[str] = mapped_column(String(120), nullable=False, default="", server_default="")
+    telegram: Mapped[str] = mapped_column(String(64), nullable=False, default="", server_default="")
+    about: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    notification_preferences: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    twofa_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    twofa_secret: Mapped[str | None] = mapped_column(String(255))
+    twofa_recovery_codes_hash: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+    twofa_pending_secret: Mapped[str | None] = mapped_column(String(255))
+    twofa_pending_recovery_codes_hash: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
+    auth_provider: Mapped[str | None] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AuthSession(Base):
+    __tablename__ = "auth_sessions"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        nullable=False,
+        default=lambda: str(uuid4()),
+        server_default=text("gen_random_uuid()"),
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("auth_users.id", ondelete="CASCADE"), nullable=False)
+    device: Mapped[str] = mapped_column(String(255), nullable=False, default="unknown device", server_default="unknown device")
+    ip_address: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown", server_default="unknown")
+    location: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown", server_default="unknown")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AuthSessionToken(Base):
+    __tablename__ = "auth_session_tokens"
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_auth_session_tokens_token_hash"),
+        CheckConstraint("token_type in ('access', 'refresh')", name="ck_auth_session_tokens_type"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("auth_sessions.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("auth_users.id", ondelete="CASCADE"), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    token_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AuthOAuthIdentity(Base):
+    __tablename__ = "auth_oauth_identities"
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_user_id", name="uq_auth_oauth_provider_user"),
+        UniqueConstraint("user_id", "provider", name="uq_auth_oauth_user_provider"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("auth_users.id", ondelete="CASCADE"), nullable=False)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    provider_user_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AuthPasswordResetToken(Base):
+    __tablename__ = "auth_password_reset_tokens"
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_auth_password_reset_tokens_hash"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("auth_users.id", ondelete="CASCADE"), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 Index("ix_catalog_categories_parent_id", CatalogCategory.parent_id)
 Index("ix_catalog_categories_lft_rgt", CatalogCategory.lft, CatalogCategory.rgt)
 Index("ix_catalog_brands_normalized_name", CatalogBrand.normalized_name)
@@ -423,6 +529,16 @@ Index("ix_admin_alert_events_status_severity_created", AdminAlertEvent.status, A
 Index("ix_admin_alert_events_source_code", AdminAlertEvent.source, AdminAlertEvent.code)
 Index("ix_catalog_crawl_jobs_store_started", CatalogCrawlJob.store_id, CatalogCrawlJob.started_at.desc())
 Index("ix_catalog_crawl_job_items_job_status", CatalogCrawlJobItem.crawl_job_id, CatalogCrawlJobItem.status)
+Index("ix_auth_users_email", AuthUser.email)
+Index("ix_auth_users_role_active", AuthUser.role, AuthUser.is_active)
+Index("ix_auth_users_last_seen_at", AuthUser.last_seen_at.desc())
+Index("ix_auth_sessions_user_last_seen", AuthSession.user_id, AuthSession.last_seen_at.desc())
+Index("ix_auth_sessions_revoked_at", AuthSession.revoked_at)
+Index("ix_auth_session_tokens_session_type", AuthSessionToken.session_id, AuthSessionToken.token_type)
+Index("ix_auth_session_tokens_user_type", AuthSessionToken.user_id, AuthSessionToken.token_type)
+Index("ix_auth_session_tokens_expires_at", AuthSessionToken.expires_at)
+Index("ix_auth_oauth_identities_user_id", AuthOAuthIdentity.user_id)
+Index("ix_auth_password_reset_tokens_user_expires", AuthPasswordResetToken.user_id, AuthPasswordResetToken.expires_at)
 
 # Postgres-specific indexes to create in migrations:
 # - lower(normalized_title) gin_trgm_ops

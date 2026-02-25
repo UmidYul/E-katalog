@@ -106,7 +106,8 @@ export function LoginForm() {
               setChallengeToken(null);
               setTwoFactorCode("");
               setRecoveryCode("");
-              router.push(next);
+              router.replace(next);
+              router.refresh();
             } catch (error) {
               setSubmitError(extractErrorMessage(error));
             }

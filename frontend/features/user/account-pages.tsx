@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Modal } from "@/components/ui/modal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -101,6 +102,8 @@ export function ProfileClient() {
     otpauth_url: string;
   } | null>(null);
   const [twoFactorCode, setTwoFactorCode] = useState("");
+  const [recoveryCodesModalOpen, setRecoveryCodesModalOpen] = useState(false);
+  const [latestRecoveryCodes, setLatestRecoveryCodes] = useState<string[]>([]);
   const [status, setStatus] = useState<string | null>(null);
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
 
@@ -300,6 +303,8 @@ export function ProfileClient() {
       const payload = await setupTwoFactorMutation.mutateAsync();
       setTwoFactorSetupPayload(payload);
       setTwoFactorCode("");
+      setLatestRecoveryCodes([]);
+      setRecoveryCodesModalOpen(false);
       setStatus("2FA setup created. Scan QR and confirm with one-time code.");
     } catch (error) {
       setStatus(getErrorMessage(error, "Failed to initialize 2FA setup."));
@@ -314,9 +319,12 @@ export function ProfileClient() {
     try {
       const result = await verifyTwoFactorMutation.mutateAsync(twoFactorCode.trim());
       if ("enabled" in result && result.enabled) {
+        const recoveryCodes = twoFactorSetupPayload?.recovery_codes ?? [];
         setTwoFactorEnabled(true);
         setTwoFactorSetupPayload(null);
         setTwoFactorCode("");
+        setLatestRecoveryCodes(recoveryCodes);
+        setRecoveryCodesModalOpen(recoveryCodes.length > 0);
         setStatus("2FA enabled.");
         await queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
       } else {
@@ -333,6 +341,8 @@ export function ProfileClient() {
       setTwoFactorEnabled(false);
       setTwoFactorSetupPayload(null);
       setTwoFactorCode("");
+      setLatestRecoveryCodes([]);
+      setRecoveryCodesModalOpen(false);
       setStatus("2FA disabled.");
       await queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
     } catch (error) {
@@ -462,7 +472,7 @@ export function ProfileClient() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+      <div className="grid gap-6 xl:grid-cols-2">
         <div className="space-y-6">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
@@ -553,9 +563,6 @@ export function ProfileClient() {
               />
             </CardContent>
           </Card>
-        </div>
-
-        <div className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle>Сводка аккаунта</CardTitle>
@@ -582,6 +589,7 @@ export function ProfileClient() {
               </div>
             </CardContent>
           </Card>
+
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
@@ -613,6 +621,10 @@ export function ProfileClient() {
             </CardContent>
           </Card>
 
+
+        </div>
+
+        <div className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -674,26 +686,39 @@ export function ProfileClient() {
                 </Button>
               </div>
 
-              <div className="rounded-xl border border-border p-3 space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-medium">Two-Factor Authentication (2FA)</p>
-                  <Badge className={twoFactorEnabled ? "bg-emerald-600 text-white" : "bg-secondary text-foreground"}>
-                    {twoFactorEnabled ? "Enabled" : "Disabled"}
-                  </Badge>
-                </div>
-                {!twoFactorEnabled ? (
-                  <Button size="sm" onClick={onStartTwoFactorSetup} disabled={setupTwoFactorMutation.isPending}>
-                    {setupTwoFactorMutation.isPending ? "Preparing..." : "Enable 2FA"}
-                  </Button>
-                ) : (
-                  <Button variant="outline" size="sm" onClick={onDisableTwoFactor} disabled={disableTwoFactorMutation.isPending}>
-                    {disableTwoFactorMutation.isPending ? "Disabling..." : "Disable 2FA"}
-                  </Button>
-                )}
-                {twoFactorSetupPayload ? (
-                  <div className="space-y-2 rounded-lg border border-border/70 p-2">
-                    <p className="text-xs text-muted-foreground">Scan QR in authenticator app, then enter code.</p>
-                    <div className="rounded-md bg-white p-2" dangerouslySetInnerHTML={{ __html: twoFactorSetupPayload.qr_svg }} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between gap-2">
+              <CardTitle className="text-sm font-semibold">Two-Factor Authentication (2FA)</CardTitle>
+              <Badge className={twoFactorEnabled ? "bg-emerald-600 text-white" : "bg-secondary text-foreground"}>
+                {twoFactorEnabled ? "Enabled" : "Disabled"}
+              </Badge>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {!twoFactorEnabled ? (
+                <Button size="sm" onClick={onStartTwoFactorSetup} disabled={setupTwoFactorMutation.isPending}>
+                  {setupTwoFactorMutation.isPending ? "Preparing..." : "Enable 2FA"}
+                </Button>
+              ) : (
+                <Button variant="outline" size="sm" onClick={onDisableTwoFactor} disabled={disableTwoFactorMutation.isPending}>
+                  {disableTwoFactorMutation.isPending ? "Disabling..." : "Disable 2FA"}
+                </Button>
+              )}
+              {twoFactorSetupPayload ? (
+                <div className="space-y-3">
+                  <div className="space-y-2 rounded-lg border border-border/70 p-3">
+                    <p className="text-sm font-medium">1. Scan QR code</p>
+                    <p className="text-xs text-muted-foreground">Open Google/Microsoft Authenticator and scan the QR.</p>
+                    <div
+                      className="overflow-hidden rounded-md bg-white p-2 [&>svg]:mx-auto [&>svg]:block [&>svg]:h-auto [&>svg]:max-w-full"
+                      dangerouslySetInnerHTML={{ __html: twoFactorSetupPayload.qr_svg }}
+                    />
+                  </div>
+
+                  <div className="space-y-2 rounded-lg border border-border/70 p-3">
+                    <p className="text-sm font-medium">2. Enter one-time code</p>
                     <Input
                       placeholder="One-time code"
                       inputMode="numeric"
@@ -703,68 +728,96 @@ export function ProfileClient() {
                     <Button size="sm" onClick={onVerifyTwoFactorSetup} disabled={verifyTwoFactorMutation.isPending || !twoFactorCode.trim()}>
                       {verifyTwoFactorMutation.isPending ? "Verifying..." : "Verify and Enable"}
                     </Button>
-                    <div className="space-y-1">
-                      <p className="text-xs text-muted-foreground">Recovery codes (save these):</p>
-                      <div className="grid grid-cols-2 gap-1 text-xs">
-                        {twoFactorSetupPayload.recovery_codes.map((code) => (
-                          <code key={code} className="rounded bg-secondary px-2 py-1">
-                            {code}
-                          </code>
-                        ))}
+                  </div>
+
+                  <div className="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-medium">3. Recovery codes will be shown after verification</p>
+                    </div>
+                    <p className="text-xs text-muted-foreground">After "Verify and Enable" you will see codes in a separate modal window.</p>
+                  </div>
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between gap-2">
+              <CardTitle className="text-sm font-semibold">Active Sessions</CardTitle>
+              <Button variant="outline" size="sm" onClick={onRevokeOtherSessions} disabled={revokeOtherSessionsMutation.isPending}>
+                {revokeOtherSessionsMutation.isPending ? "Revoking..." : "Revoke Others"}
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {sessionsQuery.isLoading ? (
+                <p className="text-xs text-muted-foreground">Loading sessions...</p>
+              ) : sessionsQuery.data && sessionsQuery.data.length ? (
+                <div className="space-y-2">
+                  {sessionsQuery.data.map((session) => (
+                    <div key={session.id} className="rounded-lg border border-border/70 p-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <p className="text-xs font-medium">{session.device}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {session.ip_address} | {session.location}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground">
+                            Last seen: {formatDateTime(session.last_seen_at)}
+                            {session.is_current ? " (current)" : ""}
+                          </p>
+                        </div>
+                        {!session.is_current ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => onRevokeSession(session.id)}
+                            disabled={revokeSessionMutation.isPending}
+                          >
+                            Revoke
+                          </Button>
+                        ) : (
+                          <Badge>Current</Badge>
+                        )}
                       </div>
                     </div>
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="rounded-xl border border-border p-3 space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-medium">Active Sessions</p>
-                  <Button variant="outline" size="sm" onClick={onRevokeOtherSessions} disabled={revokeOtherSessionsMutation.isPending}>
-                    {revokeOtherSessionsMutation.isPending ? "Revoking..." : "Revoke Others"}
-                  </Button>
+                  ))}
                 </div>
-                {sessionsQuery.isLoading ? (
-                  <p className="text-xs text-muted-foreground">Loading sessions...</p>
-                ) : sessionsQuery.data && sessionsQuery.data.length ? (
-                  <div className="space-y-2">
-                    {sessionsQuery.data.map((session) => (
-                      <div key={session.id} className="rounded-lg border border-border/70 p-2">
-                        <div className="flex items-center justify-between gap-2">
-                          <div>
-                            <p className="text-xs font-medium">{session.device}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {session.ip_address} | {session.location}
-                            </p>
-                            <p className="text-[11px] text-muted-foreground">
-                              Last seen: {formatDateTime(session.last_seen_at)}
-                              {session.is_current ? " (current)" : ""}
-                            </p>
-                          </div>
-                          {!session.is_current ? (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => onRevokeSession(session.id)}
-                              disabled={revokeSessionMutation.isPending}
-                            >
-                              Revoke
-                            </Button>
-                          ) : (
-                            <Badge>Current</Badge>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">No active sessions found.</p>
-                )}
-              </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">No active sessions found.</p>
+              )}
             </CardContent>
           </Card>
         </div>
       </div>
+
+      <Modal
+        open={recoveryCodesModalOpen}
+        onOpenChange={setRecoveryCodesModalOpen}
+        title="Recovery codes"
+        footer={
+          <Button size="sm" onClick={() => setRecoveryCodesModalOpen(false)}>
+            I saved these codes
+          </Button>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Save these recovery codes in a safe place. Each code can be used once if you lose access to your authenticator app.
+          </p>
+          <div className="grid grid-cols-1 gap-1 text-xs sm:grid-cols-2">
+            {latestRecoveryCodes.map((code) => (
+              <code key={code} className="rounded bg-secondary px-2 py-1">
+                {code}
+              </code>
+            ))}
+          </div>
+          <div className="flex justify-end">
+            <Button type="button" variant="outline" size="sm" onClick={() => copyValue(latestRecoveryCodes.join("\n"), "Recovery codes")}>
+              Copy codes
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -855,4 +908,3 @@ export function RecentlyViewedClient() {
     </div>
   );
 }
-
