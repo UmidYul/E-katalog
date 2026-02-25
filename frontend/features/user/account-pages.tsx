@@ -1,9 +1,9 @@
 "use client";
 
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, Download, History, LogOut, Mail, Save, ShieldCheck, Sparkles, Trash2, UserRound } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useQueries } from "@tanstack/react-query";
 
 import { EmptyState } from "@/components/common/empty-state";
 import { ErrorState } from "@/components/common/error-state";
@@ -16,12 +16,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuthMe, useLogout } from "@/features/auth/use-auth";
-import { useFavorites, useToggleFavorite } from "@/features/user/use-favorites";
-import { catalogApi } from "@/lib/api/openapi-client";
-import { useUpdateUserProfile, useUserProfile } from "@/features/user/use-profile";
+import { useNotificationPreferences, useUpdateNotificationPreferences, useUpdateUserProfile, useUserProfile } from "@/features/user/use-profile";
+import { useFavorites } from "@/features/user/use-favorites";
+import { authApi, userApi } from "@/lib/api/openapi-client";
 import { formatPrice } from "@/lib/utils/format";
-import { COMPARE_LIMIT, useCompareStore } from "@/store/compare.store";
-import { type LocalProfileDraft, useProfileStore } from "@/store/profile.store";
+import { defaultProfilePreferences, type LocalProfileDraft, type ProfilePreferences, useProfileStore } from "@/store/profile.store";
 import { useRecentlyViewedStore } from "@/store/recentlyViewed.store";
 
 const emptyProfileForm: LocalProfileDraft = {
@@ -47,39 +46,124 @@ const formatShortAccountId = (value: string) => {
 };
 
 const formatDateTime = (value?: string) => {
-  if (!value) return "Never";
+  if (!value) return "Никогда";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Never";
-  return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(date);
+  if (Number.isNaN(date.getTime())) return "Никогда";
+  return new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(date);
 };
 
 const getErrorMessage = (error: unknown, fallback: string): string => {
   if (error && typeof error === "object") {
     const candidate = error as { message?: unknown };
-    if (typeof candidate.message === "string") {
-      return candidate.message;
-    }
+    if (typeof candidate.message === "string") return candidate.message;
   }
   return fallback;
 };
 
 export function ProfileClient() {
+  const queryClient = useQueryClient();
   const me = useAuthMe();
   const profileQuery = useUserProfile();
   const updateProfile = useUpdateUserProfile();
+  const notificationPreferences = useNotificationPreferences();
+  const updateNotificationPreferences = useUpdateNotificationPreferences();
   const logout = useLogout();
   const favorites = useFavorites();
-  const { items: recentItems, clear: clearRecent } = useRecentlyViewedStore();
+  const recentItems = useRecentlyViewedStore((s) => s.items);
+  const clearRecent = useRecentlyViewedStore((s) => s.clear);
+  const mergeRemoteRecent = useRecentlyViewedStore((s) => s.mergeRemote);
   const storedDraft = useProfileStore((s) => s.draft);
   const preferences = useProfileStore((s) => s.preferences);
   const saveDraft = useProfileStore((s) => s.saveDraft);
   const resetDraft = useProfileStore((s) => s.resetDraft);
   const setPreference = useProfileStore((s) => s.setPreference);
   const resetPreferences = useProfileStore((s) => s.resetPreferences);
+  const remoteRecentlyViewed = useQuery({
+    queryKey: ["user", "recently-viewed"],
+    enabled: Boolean(me.data?.id),
+    queryFn: async () => {
+      const { data } = await userApi.recentlyViewed();
+      return data;
+    }
+  });
   const [profileForm, setProfileForm] = useState<LocalProfileDraft>(() => ({ ...emptyProfileForm, ...storedDraft }));
   const [hydratedFromServer, setHydratedFromServer] = useState(false);
+  const [hydratedPreferences, setHydratedPreferences] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [revokeOtherSessionsOnPasswordChange, setRevokeOtherSessionsOnPasswordChange] = useState(false);
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(Boolean(me.data?.twofa_enabled));
+  const [twoFactorSetupPayload, setTwoFactorSetupPayload] = useState<{
+    secret: string;
+    qr_svg: string;
+    recovery_codes: string[];
+    otpauth_url: string;
+  } | null>(null);
+  const [twoFactorCode, setTwoFactorCode] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
+
+  const sessionsQuery = useQuery({
+    queryKey: ["auth", "sessions"],
+    enabled: Boolean(me.data?.id),
+    queryFn: async () => {
+      const { data } = await authApi.sessions();
+      return data;
+    }
+  });
+
+  const changePasswordMutation = useMutation({
+    mutationFn: async (payload: { current_password: string; new_password: string; revoke_other_sessions: boolean }) => {
+      const { data } = await authApi.changePassword(payload);
+      return data;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["auth", "sessions"] });
+    }
+  });
+
+  const setupTwoFactorMutation = useMutation({
+    mutationFn: async () => {
+      const { data } = await authApi.twoFactorSetup();
+      return data;
+    }
+  });
+
+  const verifyTwoFactorMutation = useMutation({
+    mutationFn: async (code: string) => {
+      const { data } = await authApi.twoFactorVerify({ code });
+      return data;
+    }
+  });
+
+  const disableTwoFactorMutation = useMutation({
+    mutationFn: async () => {
+      const { data } = await authApi.twoFactorDisable();
+      return data;
+    }
+  });
+
+  const revokeSessionMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      const { data } = await authApi.revokeSession(sessionId);
+      return data;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["auth", "sessions"] });
+      await queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+    }
+  });
+
+  const revokeOtherSessionsMutation = useMutation({
+    mutationFn: async () => {
+      const { data } = await authApi.revokeOtherSessions();
+      return data;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["auth", "sessions"] });
+    }
+  });
 
   useEffect(() => {
     if (!profileQuery.data || hydratedFromServer) return;
@@ -98,6 +182,25 @@ export function ProfileClient() {
     setProfileForm(preferLocalBackup ? { ...serverDraft, ...normalizedStored } : serverDraft);
     setHydratedFromServer(true);
   }, [hydratedFromServer, profileQuery.data, storedDraft]);
+
+  useEffect(() => {
+    if (!remoteRecentlyViewed.data?.length) return;
+    mergeRemoteRecent(remoteRecentlyViewed.data);
+  }, [mergeRemoteRecent, remoteRecentlyViewed.data]);
+
+  useEffect(() => {
+    if (!notificationPreferences.data || hydratedPreferences) return;
+    setPreference("price_drop_alerts", notificationPreferences.data.price_drop_alerts);
+    setPreference("stock_alerts", notificationPreferences.data.stock_alerts);
+    setPreference("weekly_digest", notificationPreferences.data.weekly_digest);
+    setPreference("public_profile", notificationPreferences.data.public_profile);
+    setPreference("compact_view", notificationPreferences.data.compact_view);
+    setHydratedPreferences(true);
+  }, [hydratedPreferences, notificationPreferences.data, setPreference]);
+
+  useEffect(() => {
+    setTwoFactorEnabled(Boolean(me.data?.twofa_enabled));
+  }, [me.data?.twofa_enabled]);
 
   useEffect(() => {
     if (!status && !copyStatus) return;
@@ -119,9 +222,7 @@ export function ProfileClient() {
     [me.data?.full_name, profileQuery.data?.about, profileQuery.data?.city, profileQuery.data?.display_name, profileQuery.data?.phone, profileQuery.data?.telegram]
   );
 
-  const hasDraftChanges = useMemo(() => {
-    return JSON.stringify(normalizeDraft(profileForm)) !== JSON.stringify(normalizeDraft(baselineDraft));
-  }, [baselineDraft, profileForm]);
+  const hasDraftChanges = useMemo(() => JSON.stringify(normalizeDraft(profileForm)) !== JSON.stringify(normalizeDraft(baselineDraft)), [baselineDraft, profileForm]);
 
   const completionScore = useMemo(() => {
     const checks = [
@@ -145,19 +246,131 @@ export function ProfileClient() {
     setProfileForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  const onPreferenceChange = <K extends keyof ProfilePreferences>(key: K, value: ProfilePreferences[K]) => {
+    setPreference(key, value);
+    void updateNotificationPreferences
+      .mutateAsync({ [key]: value } as Pick<ProfilePreferences, K>)
+      .catch(() => setStatus("Не удалось синхронизировать настройки уведомлений с сервером."));
+  };
+
+  const onResetPreferences = () => {
+    resetPreferences();
+    void updateNotificationPreferences
+      .mutateAsync(defaultProfilePreferences)
+      .catch(() => setStatus("Локальные настройки сброшены, но серверную синхронизацию выполнить не удалось."));
+  };
+
+  const onClearRecent = () => {
+    clearRecent();
+    if (me.data?.id) {
+      void userApi.clearRecentlyViewed().catch(() => undefined);
+    }
+  };
+
+  const onChangePassword = async () => {
+    if (newPassword.trim().length < 8) {
+      setStatus("New password must be at least 8 characters.");
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setStatus("New password confirmation does not match.");
+      return;
+    }
+    try {
+      const result = await changePasswordMutation.mutateAsync({
+        current_password: currentPassword,
+        new_password: newPassword,
+        revoke_other_sessions: revokeOtherSessionsOnPasswordChange
+      });
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmNewPassword("");
+      setStatus(
+        result.revoked_sessions > 0
+          ? `Password changed. Revoked ${result.revoked_sessions} other sessions.`
+          : "Password changed."
+      );
+    } catch (error) {
+      setStatus(getErrorMessage(error, "Failed to change password."));
+    }
+  };
+
+  const onStartTwoFactorSetup = async () => {
+    try {
+      const payload = await setupTwoFactorMutation.mutateAsync();
+      setTwoFactorSetupPayload(payload);
+      setTwoFactorCode("");
+      setStatus("2FA setup created. Scan QR and confirm with one-time code.");
+    } catch (error) {
+      setStatus(getErrorMessage(error, "Failed to initialize 2FA setup."));
+    }
+  };
+
+  const onVerifyTwoFactorSetup = async () => {
+    if (!twoFactorCode.trim()) {
+      setStatus("Enter 2FA code to complete setup.");
+      return;
+    }
+    try {
+      const result = await verifyTwoFactorMutation.mutateAsync(twoFactorCode.trim());
+      if ("enabled" in result && result.enabled) {
+        setTwoFactorEnabled(true);
+        setTwoFactorSetupPayload(null);
+        setTwoFactorCode("");
+        setStatus("2FA enabled.");
+        await queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+      } else {
+        setStatus("Unexpected 2FA verification response.");
+      }
+    } catch (error) {
+      setStatus(getErrorMessage(error, "Invalid 2FA code."));
+    }
+  };
+
+  const onDisableTwoFactor = async () => {
+    try {
+      await disableTwoFactorMutation.mutateAsync();
+      setTwoFactorEnabled(false);
+      setTwoFactorSetupPayload(null);
+      setTwoFactorCode("");
+      setStatus("2FA disabled.");
+      await queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+    } catch (error) {
+      setStatus(getErrorMessage(error, "Failed to disable 2FA."));
+    }
+  };
+
+  const onRevokeSession = async (sessionId: string) => {
+    try {
+      await revokeSessionMutation.mutateAsync(sessionId);
+      setStatus("Session revoked.");
+    } catch (error) {
+      setStatus(getErrorMessage(error, "Failed to revoke session."));
+    }
+  };
+
+  const onRevokeOtherSessions = async () => {
+    try {
+      const result = await revokeOtherSessionsMutation.mutateAsync();
+      setStatus(result.revoked > 0 ? `Revoked ${result.revoked} sessions.` : "No other sessions to revoke.");
+    } catch (error) {
+      setStatus(getErrorMessage(error, "Failed to revoke other sessions."));
+    }
+  };
+
   const saveServerProfile = async () => {
     const normalized = normalizeDraft(profileForm);
     if (normalized.display_name.length < 2) {
-      setStatus("Display name must be at least 2 characters");
+      setStatus("Имя должно содержать минимум 2 символа.");
       return;
     }
     try {
       await updateProfile.mutateAsync(normalized);
       saveDraft(normalized);
-      setStatus("Profile saved");
+      setStatus("Профиль сохранён.");
     } catch (error) {
       saveDraft(normalized);
-      setStatus(getErrorMessage(error, "Failed to save profile on server. Backup saved locally."));
+      setStatus(getErrorMessage(error, "Не удалось сохранить профиль на сервере. Локальная копия обновлена."));
     }
   };
 
@@ -165,7 +378,7 @@ export function ProfileClient() {
     if (!hasDraftChanges) return;
     setProfileForm(baselineDraft);
     resetDraft();
-    setStatus("Changes reset");
+    setStatus("Изменения сброшены.");
   };
 
   const exportAccountSnapshot = () => {
@@ -188,15 +401,15 @@ export function ProfileClient() {
     anchor.click();
     anchor.remove();
     window.URL.revokeObjectURL(url);
-    setStatus("Snapshot exported");
+    setStatus("Снимок профиля экспортирован.");
   };
 
   const copyValue = async (value: string, label: string) => {
     try {
       await navigator.clipboard.writeText(value);
-      setCopyStatus(`${label} copied`);
+      setCopyStatus(`${label} скопирован.`);
     } catch {
-      setCopyStatus(`Failed to copy ${label.toLowerCase()}`);
+      setCopyStatus(`Не удалось скопировать: ${label.toLowerCase()}.`);
     }
   };
 
@@ -213,7 +426,7 @@ export function ProfileClient() {
   }
 
   if (me.error || !me.data) {
-    return <ErrorState title="Profile unavailable" message="Unable to load your profile right now." />;
+    return <ErrorState title="Профиль недоступен" message="Сейчас не удалось загрузить профиль. Попробуйте обновить страницу позже." />;
   }
 
   return (
@@ -229,18 +442,18 @@ export function ProfileClient() {
                 <p className="text-xl font-semibold">{profileForm.display_name || me.data.full_name}</p>
                 <p className="text-sm text-muted-foreground">{me.data.email}</p>
                 <div className="flex flex-wrap items-center gap-2">
-                  <Badge className="bg-primary text-primary-foreground">Account {formatShortAccountId(me.data.id)}</Badge>
-                  <Badge>{favoritesCount} favorites</Badge>
-                  <Badge>{recentCount} recent views</Badge>
+                  <Badge className="bg-primary text-primary-foreground">Аккаунт {formatShortAccountId(me.data.id)}</Badge>
+                  <Badge>{favoritesCount} в избранном</Badge>
+                  <Badge>{recentCount} недавних просмотров</Badge>
                 </div>
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" className="gap-2" onClick={exportAccountSnapshot}>
-                <Download className="h-4 w-4" /> Export data
+                <Download className="h-4 w-4" /> Экспорт данных
               </Button>
               <Button variant="outline" className="gap-2" onClick={() => logout.mutate()} disabled={logout.isPending}>
-                <LogOut className="h-4 w-4" /> {logout.isPending ? "Logging out..." : "Logout"}
+                <LogOut className="h-4 w-4" /> {logout.isPending ? "Выходим..." : "Выйти"}
               </Button>
             </div>
           </div>
@@ -254,9 +467,9 @@ export function ProfileClient() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="flex items-center gap-2">
-                <UserRound className="h-4 w-4 text-primary" /> Profile details
+                <UserRound className="h-4 w-4 text-primary" /> Данные профиля
               </CardTitle>
-              <Badge className="bg-secondary/80">{completionScore}% complete</Badge>
+              <Badge className="bg-secondary/80">Заполнено: {completionScore}%</Badge>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="h-2 overflow-hidden rounded-full bg-secondary">
@@ -264,15 +477,15 @@ export function ProfileClient() {
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Display name</label>
+                  <label className="text-xs font-medium text-muted-foreground">Отображаемое имя</label>
                   <Input value={profileForm.display_name} onChange={(e) => onDraftFieldChange("display_name", e.target.value)} />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Phone</label>
+                  <label className="text-xs font-medium text-muted-foreground">Телефон</label>
                   <Input placeholder="+998 ..." value={profileForm.phone} onChange={(e) => onDraftFieldChange("phone", e.target.value)} />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">City</label>
+                  <label className="text-xs font-medium text-muted-foreground">Город</label>
                   <Input value={profileForm.city} onChange={(e) => onDraftFieldChange("city", e.target.value)} />
                 </div>
                 <div className="space-y-1">
@@ -281,17 +494,17 @@ export function ProfileClient() {
                 </div>
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">About</label>
-                <Textarea value={profileForm.about} onChange={(e) => onDraftFieldChange("about", e.target.value)} placeholder="Short bio, interests, preferred brands..." />
+                <label className="text-xs font-medium text-muted-foreground">О себе</label>
+                <Textarea value={profileForm.about} onChange={(e) => onDraftFieldChange("about", e.target.value)} placeholder="Кратко о себе, интересах и любимых брендах..." />
               </div>
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="text-xs text-muted-foreground">Changes are saved to your account via API. Local backup is kept in this browser.</p>
+                <p className="text-xs text-muted-foreground">Изменения сохраняются через API, а локальная копия профиля хранится в этом браузере.</p>
                 <div className="flex gap-2">
                   <Button variant="ghost" size="sm" onClick={resetProfileForm} disabled={!hasDraftChanges || updateProfile.isPending}>
-                    Reset
+                    Сбросить
                   </Button>
                   <Button size="sm" className="gap-2" onClick={saveServerProfile} disabled={!hasDraftChanges || updateProfile.isPending}>
-                    <Save className="h-4 w-4" /> {updateProfile.isPending ? "Saving..." : "Save"}
+                    <Save className="h-4 w-4" /> {updateProfile.isPending ? "Сохраняем..." : "Сохранить"}
                   </Button>
                 </div>
               </div>
@@ -301,42 +514,42 @@ export function ProfileClient() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-primary" /> Preferences
+                <Sparkles className="h-4 w-4 text-primary" /> Настройки
               </CardTitle>
-              <Button variant="ghost" size="sm" onClick={resetPreferences}>
-                Reset
+              <Button variant="ghost" size="sm" onClick={onResetPreferences}>
+                Сбросить
               </Button>
             </CardHeader>
             <CardContent className="space-y-4">
               <PreferenceRow
-                title="Price drop alerts"
-                description="Notify when tracked products get cheaper."
+                title="Алерты снижения цены"
+                description="Показывать сигналы, когда отслеживаемые товары дешевеют."
                 checked={preferences.price_drop_alerts}
-                onChange={(checked) => setPreference("price_drop_alerts", checked)}
+                onChange={(checked) => onPreferenceChange("price_drop_alerts", checked)}
               />
               <PreferenceRow
-                title="Back in stock alerts"
-                description="Notify when unavailable products return to stock."
+                title="Алерты наличия"
+                description="Сообщать, когда товар снова доступен в наличии."
                 checked={preferences.stock_alerts}
-                onChange={(checked) => setPreference("stock_alerts", checked)}
+                onChange={(checked) => onPreferenceChange("stock_alerts", checked)}
               />
               <PreferenceRow
-                title="Weekly digest"
-                description="Receive a weekly summary of catalog changes."
+                title="Еженедельная сводка"
+                description="Показывать еженедельный обзор обновлений каталога."
                 checked={preferences.weekly_digest}
-                onChange={(checked) => setPreference("weekly_digest", checked)}
+                onChange={(checked) => onPreferenceChange("weekly_digest", checked)}
               />
               <PreferenceRow
-                title="Public profile"
-                description="Allow sharing your public profile card."
+                title="Публичный профиль"
+                description="Разрешить публикацию карточки профиля."
                 checked={preferences.public_profile}
-                onChange={(checked) => setPreference("public_profile", checked)}
+                onChange={(checked) => onPreferenceChange("public_profile", checked)}
               />
               <PreferenceRow
-                title="Compact cards"
-                description="Use tighter spacing in account widgets."
+                title="Компактный вид"
+                description="Использовать более плотный интерфейс в кабинете."
                 checked={preferences.compact_view}
-                onChange={(checked) => setPreference("compact_view", checked)}
+                onChange={(checked) => onPreferenceChange("compact_view", checked)}
               />
             </CardContent>
           </Card>
@@ -345,25 +558,25 @@ export function ProfileClient() {
         <div className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Account snapshot</CardTitle>
+              <CardTitle>Сводка аккаунта</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <StatRow label="Email" value={me.data.email} />
-              <StatRow label="Full name" value={me.data.full_name || "-"} />
-              <StatRow label="Favorites" value={String(favoritesCount)} />
-              <StatRow label="Recent views" value={String(recentCount)} />
-              <StatRow label="Server profile updated" value={formatDateTime(profileQuery.data?.updated_at ?? undefined)} />
-              <StatRow label="Local backup updated" value={formatDateTime(storedDraft.updated_at)} />
-              <StatRow label="Last viewed item" value={latestViewed ? formatDateTime(latestViewed.viewedAt) : "No activity"} />
+              <StatRow label="Полное имя" value={me.data.full_name || "-"} />
+              <StatRow label="Избранное" value={String(favoritesCount)} />
+              <StatRow label="Недавние просмотры" value={String(recentCount)} />
+              <StatRow label="Профиль на сервере обновлён" value={formatDateTime(profileQuery.data?.updated_at ?? undefined)} />
+              <StatRow label="Локальная копия обновлена" value={formatDateTime(storedDraft.updated_at)} />
+              <StatRow label="Последний просмотр" value={latestViewed ? formatDateTime(latestViewed.viewedAt) : "Нет активности"} />
               <div className="grid grid-cols-2 gap-2 pt-2">
                 <Link href="/favorites">
                   <Button variant="outline" className="w-full justify-center">
-                    Favorites
+                    Избранное
                   </Button>
                 </Link>
                 <Link href="/recently-viewed">
                   <Button variant="outline" className="w-full justify-center">
-                    Recently viewed
+                    Просмотры
                   </Button>
                 </Link>
               </div>
@@ -373,15 +586,15 @@ export function ProfileClient() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="flex items-center gap-2">
-                <History className="h-4 w-4 text-primary" /> Recent activity
+                <History className="h-4 w-4 text-primary" /> Недавняя активность
               </CardTitle>
-              <Button variant="ghost" size="sm" className="gap-1" onClick={clearRecent} disabled={!recentItems.length}>
-                <Trash2 className="h-4 w-4" /> Clear
+              <Button variant="ghost" size="sm" className="gap-1" onClick={onClearRecent} disabled={!recentItems.length}>
+                <Trash2 className="h-4 w-4" /> Очистить
               </Button>
             </CardHeader>
             <CardContent>
               {recentPreview.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No recent activity yet.</p>
+                <p className="text-sm text-muted-foreground">Активности пока нет.</p>
               ) : (
                 <div className="space-y-3">
                   {recentPreview.map((item) => (
@@ -403,17 +616,17 @@ export function ProfileClient() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <ShieldCheck className="h-4 w-4 text-primary" /> Security
+                <ShieldCheck className="h-4 w-4 text-primary" /> Безопасность
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex items-center justify-between gap-2 rounded-xl border border-border p-3">
                 <div>
-                  <p className="text-sm font-medium">Account UUID</p>
+                  <p className="text-sm font-medium">ID аккаунта</p>
                   <p className="text-xs text-muted-foreground">{me.data.id}</p>
                 </div>
-                <Button variant="ghost" size="sm" className="gap-1" onClick={() => (me.data ? copyValue(String(me.data.id), "Account UUID") : undefined)}>
-                  <Copy className="h-4 w-4" /> Copy
+                <Button variant="ghost" size="sm" className="gap-1" onClick={() => (me.data ? copyValue(String(me.data.id), "ID аккаунта") : undefined)}>
+                  <Copy className="h-4 w-4" /> Копировать
                 </Button>
               </div>
               <div className="flex items-center justify-between gap-2 rounded-xl border border-border p-3">
@@ -422,13 +635,132 @@ export function ProfileClient() {
                   <p className="text-xs text-muted-foreground">{me.data.email}</p>
                 </div>
                 <Button variant="ghost" size="sm" className="gap-1" onClick={() => (me.data ? copyValue(me.data.email, "Email") : undefined)}>
-                  <Mail className="h-4 w-4" /> Copy
+                  <Mail className="h-4 w-4" /> Копировать
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Planned advanced security features (password rotation, active sessions, 2FA) are prepared in{" "}
-                <code>docs/PROFILE_FUTURE_FEATURES.md</code>.
+                В API уже доступны смена пароля, управление сессиями и 2FA. Для UI-расширения можно использовать <code>docs/PROFILE_FUTURE_FEATURES.md</code>.
               </p>
+              <div className="rounded-xl border border-border p-3 space-y-3">
+                <p className="text-sm font-medium">Change Password</p>
+                <Input
+                  type="password"
+                  placeholder="Current password"
+                  value={currentPassword}
+                  onChange={(event) => setCurrentPassword(event.target.value)}
+                />
+                <Input
+                  type="password"
+                  placeholder="New password"
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                />
+                <Input
+                  type="password"
+                  placeholder="Confirm new password"
+                  value={confirmNewPassword}
+                  onChange={(event) => setConfirmNewPassword(event.target.value)}
+                />
+                <div className="flex items-center justify-between gap-2 rounded-lg border border-border/70 p-2">
+                  <span className="text-xs text-muted-foreground">Revoke other sessions after password change</span>
+                  <Switch checked={revokeOtherSessionsOnPasswordChange} onCheckedChange={setRevokeOtherSessionsOnPasswordChange} />
+                </div>
+                <Button
+                  size="sm"
+                  onClick={onChangePassword}
+                  disabled={changePasswordMutation.isPending || !currentPassword || !newPassword || !confirmNewPassword}
+                >
+                  {changePasswordMutation.isPending ? "Updating..." : "Update Password"}
+                </Button>
+              </div>
+
+              <div className="rounded-xl border border-border p-3 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium">Two-Factor Authentication (2FA)</p>
+                  <Badge className={twoFactorEnabled ? "bg-emerald-600 text-white" : "bg-secondary text-foreground"}>
+                    {twoFactorEnabled ? "Enabled" : "Disabled"}
+                  </Badge>
+                </div>
+                {!twoFactorEnabled ? (
+                  <Button size="sm" onClick={onStartTwoFactorSetup} disabled={setupTwoFactorMutation.isPending}>
+                    {setupTwoFactorMutation.isPending ? "Preparing..." : "Enable 2FA"}
+                  </Button>
+                ) : (
+                  <Button variant="outline" size="sm" onClick={onDisableTwoFactor} disabled={disableTwoFactorMutation.isPending}>
+                    {disableTwoFactorMutation.isPending ? "Disabling..." : "Disable 2FA"}
+                  </Button>
+                )}
+                {twoFactorSetupPayload ? (
+                  <div className="space-y-2 rounded-lg border border-border/70 p-2">
+                    <p className="text-xs text-muted-foreground">Scan QR in authenticator app, then enter code.</p>
+                    <div className="rounded-md bg-white p-2" dangerouslySetInnerHTML={{ __html: twoFactorSetupPayload.qr_svg }} />
+                    <Input
+                      placeholder="One-time code"
+                      inputMode="numeric"
+                      value={twoFactorCode}
+                      onChange={(event) => setTwoFactorCode(event.target.value)}
+                    />
+                    <Button size="sm" onClick={onVerifyTwoFactorSetup} disabled={verifyTwoFactorMutation.isPending || !twoFactorCode.trim()}>
+                      {verifyTwoFactorMutation.isPending ? "Verifying..." : "Verify and Enable"}
+                    </Button>
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground">Recovery codes (save these):</p>
+                      <div className="grid grid-cols-2 gap-1 text-xs">
+                        {twoFactorSetupPayload.recovery_codes.map((code) => (
+                          <code key={code} className="rounded bg-secondary px-2 py-1">
+                            {code}
+                          </code>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="rounded-xl border border-border p-3 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium">Active Sessions</p>
+                  <Button variant="outline" size="sm" onClick={onRevokeOtherSessions} disabled={revokeOtherSessionsMutation.isPending}>
+                    {revokeOtherSessionsMutation.isPending ? "Revoking..." : "Revoke Others"}
+                  </Button>
+                </div>
+                {sessionsQuery.isLoading ? (
+                  <p className="text-xs text-muted-foreground">Loading sessions...</p>
+                ) : sessionsQuery.data && sessionsQuery.data.length ? (
+                  <div className="space-y-2">
+                    {sessionsQuery.data.map((session) => (
+                      <div key={session.id} className="rounded-lg border border-border/70 p-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <p className="text-xs font-medium">{session.device}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {session.ip_address} | {session.location}
+                            </p>
+                            <p className="text-[11px] text-muted-foreground">
+                              Last seen: {formatDateTime(session.last_seen_at)}
+                              {session.is_current ? " (current)" : ""}
+                            </p>
+                          </div>
+                          {!session.is_current ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => onRevokeSession(session.id)}
+                              disabled={revokeSessionMutation.isPending}
+                            >
+                              Revoke
+                            </Button>
+                          ) : (
+                            <Badge>Current</Badge>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">No active sessions found.</p>
+                )}
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -463,204 +795,58 @@ function StatRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-2 border-b border-border/70 pb-2 last:border-none last:pb-0">
       <span className="text-sm text-muted-foreground">{label}</span>
-      <span className="text-sm font-medium text-right">{value}</span>
+      <span className="text-right text-sm font-medium">{value}</span>
     </div>
   );
 }
-
-export function FavoritesClient() {
-  const favorites = useFavorites();
-  const toggleFavorite = useToggleFavorite();
-  const compareItems = useCompareStore((s) => s.items);
-  const toggleCompare = useCompareStore((s) => s.toggle);
-  const compareSet = useMemo(() => new Set(compareItems.map((item) => item.id)), [compareItems]);
-  const compareFull = compareItems.length >= COMPARE_LIMIT;
-  const referenceCompareCategory = useMemo(() => getReferenceCategory(compareItems.map((item) => item.category)), [compareItems]);
-  const favoriteIds = useMemo(() => (favorites.data ?? []).map((item) => item.product_id), [favorites.data]);
-  const productQueries = useQueries({
-    queries: favoriteIds.map((productId) => ({
-      queryKey: ["catalog", "product", productId],
-      queryFn: () => catalogApi.getProduct(productId),
-      staleTime: 60_000
-    }))
-  });
-
-  const favoriteQueryItems = useMemo(
-    () =>
-      productQueries.flatMap((query, index) => {
-        const id = favoriteIds[index];
-        if (typeof id !== "string") return [];
-        return [{ id, data: query.data, error: query.error }] as const;
-      }),
-    [favoriteIds, productQueries]
-  );
-  const products = useMemo(
-    () =>
-      favoriteQueryItems.flatMap((item) => {
-        if (!item.data) return [];
-        return [{ id: item.id, data: item.data }];
-      }),
-    [favoriteQueryItems]
-  );
-  const unresolvedIds = useMemo(
-    () =>
-      favoriteQueryItems
-        .filter((item) => !item.data && !item.error)
-        .map((item) => item.id),
-    [favoriteQueryItems]
-  );
-  const failedIds = useMemo(
-    () =>
-      favoriteQueryItems
-        .filter((item) => !item.data && item.error)
-        .map((item) => item.id),
-    [favoriteQueryItems]
-  );
-  const isLoadingProducts = productQueries.some((query) => query.isLoading || query.isFetching);
-
-  if (favorites.isLoading) {
-    return (
-      <div className="container space-y-4 py-6">
-        <h1 className="text-2xl font-semibold">Favorites</h1>
-        <Skeleton className="h-24 w-full" />
-        <Skeleton className="h-24 w-full" />
-      </div>
-    );
-  }
-
-  return (
-    <div className="container py-6">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-semibold">Favorites</h1>
-        <Badge>{favoriteIds.length} saved</Badge>
-      </div>
-      {(favorites.data?.length ?? 0) === 0 ? (
-        <EmptyState title="Favorites are empty" message="Save products to compare them later." />
-      ) : (
-        <>
-          {isLoadingProducts && !products.length ? <p className="mb-3 text-sm text-muted-foreground">Loading favorite products...</p> : null}
-          <div className="space-y-3">
-            {products.map(({ id, data }) => {
-              const minPrice = data.offers_by_store.reduce((acc, store) => Math.min(acc, store.minimal_price), Number.POSITIVE_INFINITY);
-              const offersCount = data.offers_by_store.reduce((acc, store) => acc + store.offers_count, 0);
-              const productSlug = `${id}-${slugify(data.title)}`;
-              const inCompare = compareSet.has(id);
-              const categoryMismatch = Boolean(referenceCompareCategory && normalizeCategory(data.category) && normalizeCategory(data.category) !== referenceCompareCategory);
-              const compareDisabled = !inCompare && (compareFull || categoryMismatch);
-              const compareDisabledReason = compareFull ? `Limit is ${COMPARE_LIMIT} products` : categoryMismatch ? "Compare works only within one category" : undefined;
-              return (
-                <Card key={id}>
-                  <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
-                    <div className="space-y-1">
-                      <Link href={`/product/${productSlug}`} className="text-sm font-semibold text-primary hover:underline">
-                        {data.title}
-                      </Link>
-                      <p className="text-xs text-muted-foreground">
-                        {data.brand ? `${data.brand} · ` : ""}
-                        {data.category}
-                      </p>
-                      <div className="flex flex-wrap items-center gap-2">
-                        {Number.isFinite(minPrice) ? <Badge className="bg-secondary/80">{formatPrice(minPrice)}</Badge> : null}
-                        <Badge>{data.offers_by_store.length} stores</Badge>
-                        <Badge>{offersCount} offers</Badge>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Link href={`/product/${productSlug}`}>
-                        <Button variant="outline" size="sm">
-                          Open product
-                        </Button>
-                      </Link>
-                      <Button
-                        variant={inCompare ? "default" : "outline"}
-                        size="sm"
-                        onClick={() =>
-                          toggleCompare({
-                            id,
-                            title: data.title,
-                            slug: productSlug,
-                            category: data.category
-                          })
-                        }
-                        disabled={compareDisabled}
-                        title={compareDisabled ? compareDisabledReason : undefined}
-                      >
-                        {inCompare ? "Compared" : "Compare"}
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => toggleFavorite.mutate(id)} disabled={toggleFavorite.isPending}>
-                        Remove
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-            {failedIds.map((id) => (
-              <Card key={id}>
-                <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
-                  <p className="text-sm text-muted-foreground">Product #{id} is unavailable.</p>
-                  <Button variant="ghost" size="sm" onClick={() => toggleFavorite.mutate(id)} disabled={toggleFavorite.isPending}>
-                    Remove
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
-            {unresolvedIds.map((id) => (
-              <Card key={id}>
-                <CardContent className="p-4">
-                  <p className="text-sm text-muted-foreground">Loading product #{id}...</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-const slugify = (text: string) =>
-  text
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, "")
-    .trim()
-    .replace(/\s+/g, "-");
-
-const normalizeCategory = (value: unknown) => {
-  if (typeof value !== "string") return undefined;
-  const normalized = value.trim().toLowerCase();
-  return normalized || undefined;
-};
-
-const getReferenceCategory = (categories: Array<string | undefined>) => {
-  for (const category of categories) {
-    const normalized = normalizeCategory(category);
-    if (normalized) return normalized;
-  }
-  return undefined;
-};
 
 export function RecentlyViewedClient() {
-  const { items, clear } = useRecentlyViewedStore();
+  const me = useAuthMe();
+  const items = useRecentlyViewedStore((s) => s.items);
+  const clear = useRecentlyViewedStore((s) => s.clear);
+  const mergeRemote = useRecentlyViewedStore((s) => s.mergeRemote);
+  const remoteRecentlyViewed = useQuery({
+    queryKey: ["user", "recently-viewed"],
+    enabled: Boolean(me.data?.id),
+    queryFn: async () => {
+      const { data } = await userApi.recentlyViewed();
+      return data;
+    }
+  });
+
+  useEffect(() => {
+    if (!remoteRecentlyViewed.data?.length) return;
+    mergeRemote(remoteRecentlyViewed.data);
+  }, [mergeRemote, remoteRecentlyViewed.data]);
+
+  const clearAll = () => {
+    clear();
+    if (me.data?.id) {
+      void userApi.clearRecentlyViewed().catch(() => undefined);
+    }
+  };
 
   return (
-    <div className="container py-6">
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Recently viewed</h1>
-        <Button variant="ghost" onClick={clear}>
-          Clear
+    <div className="container space-y-4 py-6">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="font-heading text-2xl font-extrabold">Недавно просмотренные</h1>
+        <Button variant="ghost" onClick={clearAll} disabled={items.length === 0}>
+          Очистить
         </Button>
       </div>
+
       {items.length === 0 ? (
-        <EmptyState title="No recent views" message="Your visited products will appear here." />
+        <EmptyState title="Пока нет просмотров" message="Откройте товар из каталога, и он появится в этом списке." />
       ) : (
-        <div className="space-y-3">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {items.map((item) => (
             <Card key={item.id}>
-              <CardContent className="p-4">
-                <Link href={`/product/${item.slug}`} className="text-sm font-medium">
+              <CardContent className="space-y-2 p-4">
+                <Link href={`/product/${item.slug}`} className="line-clamp-2 text-sm font-semibold text-primary hover:underline">
                   {item.title}
                 </Link>
+                <p className="text-xs text-muted-foreground">Просмотрено: {formatDateTime(item.viewedAt)}</p>
+                {item.minPrice != null ? <Badge className="bg-secondary/80">{formatPrice(item.minPrice)}</Badge> : null}
               </CardContent>
             </Card>
           ))}

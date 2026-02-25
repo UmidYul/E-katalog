@@ -1,4 +1,4 @@
-FROM node:20-alpine AS deps
+﻿FROM node:20-alpine AS deps
 WORKDIR /app
 COPY frontend/package*.json ./
 RUN npm ci
@@ -10,7 +10,7 @@ COPY frontend .
 ARG NEXT_PUBLIC_APP_URL=http://localhost
 ARG NEXT_PUBLIC_API_ORIGIN=
 ARG NEXT_PUBLIC_API_PREFIX=/api/v1
-ARG NEXT_PUBLIC_SITE_NAME=ZincMarket
+ARG NEXT_PUBLIC_SITE_NAME=E-katalog
 ARG API_INTERNAL_ORIGIN=http://api:8000
 ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
 ENV NEXT_PUBLIC_API_ORIGIN=$NEXT_PUBLIC_API_ORIGIN
@@ -25,7 +25,7 @@ WORKDIR /app
 ARG NEXT_PUBLIC_APP_URL=http://localhost
 ARG NEXT_PUBLIC_API_ORIGIN=
 ARG NEXT_PUBLIC_API_PREFIX=/api/v1
-ARG NEXT_PUBLIC_SITE_NAME=ZincMarket
+ARG NEXT_PUBLIC_SITE_NAME=E-katalog
 ARG API_INTERNAL_ORIGIN=http://api:8000
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -39,3 +39,4 @@ COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/.next/standalone ./
 EXPOSE 3000
 CMD ["node", "server.js"]
+

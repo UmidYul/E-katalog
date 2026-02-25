@@ -356,6 +356,26 @@ class CatalogDataQualityReport(CatalogUuidMixin, Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class AdminAlertEvent(CatalogUuidMixin, Base):
+    __tablename__ = "admin_alert_events"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    code: Mapped[str] = mapped_column(String(96), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    source: Mapped[str] = mapped_column(String(64), nullable=False)
+    severity: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="open", server_default="open")
+    metric_value: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False, default=0, server_default="0")
+    threshold_value: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False, default=0, server_default="0")
+    context: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 Index("ix_catalog_categories_parent_id", CatalogCategory.parent_id)
 Index("ix_catalog_categories_lft_rgt", CatalogCategory.lft, CatalogCategory.rgt)
 Index("ix_catalog_brands_normalized_name", CatalogBrand.normalized_name)
@@ -398,6 +418,9 @@ Index("ix_catalog_ai_jobs_status_stage", CatalogAIEnrichmentJob.status, CatalogA
 Index("ix_catalog_ai_jobs_product_id", CatalogAIEnrichmentJob.product_id)
 Index("ix_catalog_quality_reports_created_at", CatalogDataQualityReport.created_at.desc())
 Index("ix_catalog_quality_reports_status_created", CatalogDataQualityReport.status, CatalogDataQualityReport.created_at.desc())
+Index("ix_admin_alert_events_created_at", AdminAlertEvent.created_at.desc())
+Index("ix_admin_alert_events_status_severity_created", AdminAlertEvent.status, AdminAlertEvent.severity, AdminAlertEvent.created_at.desc())
+Index("ix_admin_alert_events_source_code", AdminAlertEvent.source, AdminAlertEvent.code)
 Index("ix_catalog_crawl_jobs_store_started", CatalogCrawlJob.store_id, CatalogCrawlJob.started_at.desc())
 Index("ix_catalog_crawl_job_items_job_status", CatalogCrawlJobItem.crawl_job_id, CatalogCrawlJobItem.status)
 

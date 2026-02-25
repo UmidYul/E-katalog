@@ -1,6 +1,6 @@
-import { FavoritesClient } from "@/features/user/account-pages";
+import { FavoritesWatchlistClient } from "@/features/user/favorites-watchlist-client";
 
 export default function FavoritesPage() {
-  return <FavoritesClient />;
+  return <FavoritesWatchlistClient />;
 }
 

@@ -19,6 +19,13 @@ const PRICE_MAX = 100_000_000;
 const DEFAULT_SORT: FilterState["sort"] = "popular";
 const EMPTY_FILTERS: FilterState = { sort: DEFAULT_SORT, brands: [], stores: [], sellers: [] };
 const mergeUnique = (values: string[]) => Array.from(new Set(values));
+const sortLabelMap: Record<FilterState["sort"], string> = {
+  popular: "Популярные",
+  relevance: "Релевантные",
+  price_asc: "Цена: по возрастанию",
+  price_desc: "Цена: по убыванию",
+  newest: "Сначала новые"
+};
 
 const toQueryString = (filters: FilterState & { cursor?: string; page?: number }) => {
   const params = new URLSearchParams();
@@ -146,6 +153,20 @@ export function CatalogClientPage({
     return Array.from(pages).sort((a, b) => a - b);
   }, [canGoPrevPage, currentPage, hasNextPage]);
 
+  const activeFilterChips = useMemo(() => {
+    const chips: string[] = [];
+    if (filters.q?.trim()) chips.push(`Поиск: ${filters.q.trim()}`);
+    if (filters.sort !== DEFAULT_SORT) chips.push(`Сортировка: ${sortLabelMap[filters.sort]}`);
+    if (filters.brands.length) chips.push(`Бренды: ${filters.brands.length}`);
+    if (filters.stores.length) chips.push(`Магазины: ${filters.stores.length}`);
+    if (filters.sellers.length) chips.push(`Продавцы: ${filters.sellers.length}`);
+    if (filters.minPrice !== undefined || filters.maxPrice !== undefined) chips.push("Цена: задан диапазон");
+    if (filters.maxDeliveryDays !== undefined) chips.push(`Доставка: до ${filters.maxDeliveryDays} дн.`);
+    const attrsCount = Object.values(filters.attrs ?? {}).reduce((acc, values) => acc + values.length, 0);
+    if (attrsCount) chips.push(`Характеристики: ${attrsCount}`);
+    return chips.slice(0, 8);
+  }, [filters]);
+
   const onFiltersChange = (next: FilterState) => {
     const payload: FilterState = {
       ...next,
@@ -181,12 +202,12 @@ export function CatalogClientPage({
   };
 
   if (products.error) {
-    return <ErrorState title="Could not load catalog" message="Check connection and retry." />;
+    return <ErrorState title="Не удалось загрузить каталог" message="Проверьте соединение и попробуйте ещё раз." />;
   }
 
   return (
     <div className="container space-y-6 py-6">
-      <SectionHeading title={pageTitle ?? "Catalog"} description="Compare prices across trusted stores in seconds." />
+      <SectionHeading title={pageTitle ?? "Каталог"} description="Сравнивайте цены и предложения по проверенным магазинам." />
       <div className="grid gap-6 lg:grid-cols-[300px_minmax(0,1fr)] lg:items-start">
         <CatalogFilters
           brands={brands.data ?? []}
@@ -198,26 +219,35 @@ export function CatalogClientPage({
         />
 
         <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card/80 p-3 shadow-soft">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge>{products.data?.items.length ?? 0} on this page</Badge>
-              <Badge>Page {currentPage}</Badge>
-              {activeFilterCount ? <Badge className="bg-primary text-primary-foreground">{activeFilterCount} active filters</Badge> : null}
-              {products.isFetching && !products.isLoading ? <p className="text-xs text-muted-foreground">Updating results...</p> : null}
+          <div className="space-y-3 rounded-2xl border border-border bg-card/90 p-3 shadow-soft">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge>{products.data?.items.length ?? 0} на этой странице</Badge>
+                <Badge>Страница {currentPage}</Badge>
+                {activeFilterCount ? <Badge className="border-primary/40 bg-primary/15 text-primary">{activeFilterCount} активных фильтров</Badge> : null}
+                {products.isFetching && !products.isLoading ? <p className="text-xs text-muted-foreground">Обновляем результаты...</p> : null}
+              </div>
+              {activeFilterCount ? (
+                <Button variant="ghost" size="sm" disabled={products.isFetching} onClick={clearFilters}>
+                  Сбросить фильтры
+                </Button>
+              ) : null}
             </div>
-            {activeFilterCount ? (
-              <Button variant="ghost" size="sm" disabled={products.isFetching} onClick={clearFilters}>
-                Clear filters
-              </Button>
+            {activeFilterChips.length ? (
+              <div className="flex flex-wrap gap-2">
+                {activeFilterChips.map((chip) => (
+                  <Badge key={chip}>{chip}</Badge>
+                ))}
+              </div>
             ) : null}
           </div>
           <CatalogGrid loading={products.isLoading} items={products.data?.items ?? []} />
           {showPagination ? (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card p-3">
-              <p className="text-sm text-muted-foreground">Page {currentPage}</p>
+              <p className="text-sm text-muted-foreground">Страница {currentPage}</p>
               <div className="flex flex-wrap items-center gap-2">
                 <Button variant="outline" size="sm" disabled={!canGoPrevPage || products.isFetching} onClick={() => goToPage(currentPage - 1)}>
-                  Prev
+                  Назад
                 </Button>
                 {pageButtons.map((page) => (
                   <Button
@@ -231,7 +261,7 @@ export function CatalogClientPage({
                   </Button>
                 ))}
                 <Button variant="outline" size="sm" disabled={!hasNextPage || products.isFetching} onClick={() => goToPage(currentPage + 1)}>
-                  Next
+                  Вперёд
                 </Button>
               </div>
             </div>

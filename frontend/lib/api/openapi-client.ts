@@ -14,16 +14,29 @@ import type {
   SortOption
 } from "@/types/domain";
 import type {
+  AdminAlertEvent,
+  AdminAlertsAnalytics,
   AdminCategory,
+  AdminCatalogQualityAnalytics,
   AdminFeedbackQueueResponse,
   AdminMetrics,
+  AdminModerationAnalytics,
   AdminOrder,
+  AdminOperationsAnalytics,
+  AdminOverviewAnalytics,
   AdminProduct,
   AdminQualityNoOfferItem,
+  AdminRevenueAnalytics,
   AdminScrapeSource,
   AdminSettings,
   AdminStore,
   AdminUser,
+  AdminUsersAnalytics,
+  AnalyticsGranularity,
+  AnalyticsPeriod,
+  AlertSource,
+  AlertStatus,
+  Severity,
 } from "@/types/admin";
 
 export type CatalogQuery = {
@@ -93,11 +106,71 @@ export const catalogApi = {
   }
 };
 
+export type AuthUser = {
+  id: string;
+  email: string;
+  full_name: string;
+  role: string;
+  twofa_enabled?: boolean;
+};
+
+export type TwoFactorChallenge = {
+  requires_2fa: true;
+  challenge_token: string;
+  expires_in: number;
+};
+
+export type LoginResponse = AuthUser | TwoFactorChallenge;
+
+export type AuthSession = {
+  id: string;
+  device: string;
+  ip_address: string;
+  location: string;
+  created_at: string;
+  last_seen_at: string;
+  is_current: boolean;
+};
+
+export type ChangePasswordPayload = {
+  current_password: string;
+  new_password: string;
+  revoke_other_sessions?: boolean;
+};
+
+export type TwoFactorSetupResponse = {
+  secret: string;
+  qr_svg: string;
+  recovery_codes: string[];
+  otpauth_url: string;
+};
+
+export type TwoFactorVerifyPayload = {
+  code?: string;
+  recovery_code?: string;
+  challenge_token?: string;
+};
+
+export type OAuthProviderInfo = {
+  provider: string;
+  enabled: boolean;
+  authorization_endpoint: string;
+};
+
 export const authApi = {
-  login: (payload: { email: string; password: string }) => apiClient.post("/auth/login", payload),
-  register: (payload: { email: string; password: string; full_name: string }) => apiClient.post("/auth/register", payload),
+  login: (payload: { email: string; password: string; two_factor_code?: string; recovery_code?: string }) =>
+    apiClient.post<LoginResponse>("/auth/login", payload),
+  register: (payload: { email: string; password: string; full_name: string }) => apiClient.post<AuthUser>("/auth/register", payload),
   logout: () => apiClient.post("/auth/logout"),
-  me: () => apiClient.get<{ id: string; email: string; full_name: string; role: string }>("/auth/me")
+  me: () => apiClient.get<AuthUser>("/auth/me"),
+  changePassword: (payload: ChangePasswordPayload) => apiClient.post<{ ok: boolean; revoked_sessions: number }>("/auth/change-password", payload),
+  sessions: () => apiClient.get<AuthSession[]>("/auth/sessions"),
+  revokeSession: (sessionId: string) => apiClient.delete<{ ok: boolean }>(`/auth/sessions/${sessionId}`),
+  revokeOtherSessions: () => apiClient.delete<{ ok: boolean; revoked: number }>("/auth/sessions"),
+  twoFactorSetup: () => apiClient.post<TwoFactorSetupResponse>("/auth/2fa/setup"),
+  twoFactorVerify: (payload: TwoFactorVerifyPayload) => apiClient.post<AuthUser | { ok: boolean; enabled: boolean }>("/auth/2fa/verify", payload),
+  twoFactorDisable: () => apiClient.delete<{ ok: boolean; enabled: boolean }>("/auth/2fa"),
+  oauthProviders: () => apiClient.get<{ providers: OAuthProviderInfo[] }>("/auth/oauth/providers")
 };
 
 export type UserProfile = {
@@ -120,11 +193,51 @@ export type UserProfilePatch = {
   about?: string;
 };
 
+export type NotificationPreferences = {
+  price_drop_alerts: boolean;
+  stock_alerts: boolean;
+  weekly_digest: boolean;
+  marketing_emails: boolean;
+  public_profile: boolean;
+  compact_view: boolean;
+  channels: {
+    email: boolean;
+    telegram: boolean;
+  };
+};
+
+export type NotificationPreferencesPatch = {
+  price_drop_alerts?: boolean;
+  stock_alerts?: boolean;
+  weekly_digest?: boolean;
+  marketing_emails?: boolean;
+  public_profile?: boolean;
+  compact_view?: boolean;
+  channels?: {
+    email?: boolean;
+    telegram?: boolean;
+  };
+};
+
+export type RecentlyViewedItem = {
+  id: string;
+  slug: string;
+  title: string;
+  min_price?: number | null;
+  viewed_at: string;
+};
+
 export const userApi = {
   favorites: () => apiClient.get<Array<{ product_id: string }>>("/users/favorites"),
   toggleFavorite: (productId: string) => apiClient.post(`/users/favorites/${productId}`),
   profile: () => apiClient.get<UserProfile>("/users/me/profile"),
-  updateProfile: (payload: UserProfilePatch) => apiClient.patch<UserProfile>("/users/me/profile", payload)
+  updateProfile: (payload: UserProfilePatch) => apiClient.patch<UserProfile>("/users/me/profile", payload),
+  notificationPreferences: () => apiClient.get<NotificationPreferences>("/users/me/notification-preferences"),
+  updateNotificationPreferences: (payload: NotificationPreferencesPatch) =>
+    apiClient.patch<NotificationPreferences>("/users/me/notification-preferences", payload),
+  recentlyViewed: () => apiClient.get<RecentlyViewedItem[]>("/users/me/recently-viewed"),
+  pushRecentlyViewed: (productId: string) => apiClient.post<RecentlyViewedItem>("/users/me/recently-viewed", { product_id: productId }),
+  clearRecentlyViewed: () => apiClient.delete<{ ok: boolean }>("/users/me/recently-viewed")
 };
 
 export const productFeedbackApi = {
@@ -218,6 +331,30 @@ export const adminApi = {
   updateOrderStatus: (id: string, status: AdminOrder["status"]) => apiClient.patch<AdminOrder>(`/admin/orders/${id}`, { status }),
 
   analytics: (period: "7d" | "30d" | "90d" | "365d" = "30d") => apiClient.get<AdminMetrics>("/admin/analytics", { params: { period } }),
+  analyticsOverview: (period: AnalyticsPeriod = "30d") =>
+    apiClient.get<AdminOverviewAnalytics>("/admin/analytics/overview", { params: { period } }),
+  analyticsRevenue: (period: AnalyticsPeriod = "30d", granularity: AnalyticsGranularity = "day") =>
+    apiClient.get<AdminRevenueAnalytics>("/admin/analytics/revenue", { params: { period, granularity } }),
+  analyticsCatalogQuality: (period: AnalyticsPeriod = "30d") =>
+    apiClient.get<AdminCatalogQualityAnalytics>("/admin/analytics/catalog-quality", { params: { period } }),
+  analyticsOperations: (period: AnalyticsPeriod = "30d") =>
+    apiClient.get<AdminOperationsAnalytics>("/admin/analytics/operations", { params: { period } }),
+  analyticsModeration: (period: AnalyticsPeriod = "30d") =>
+    apiClient.get<AdminModerationAnalytics>("/admin/analytics/moderation", { params: { period } }),
+  analyticsUsers: (period: AnalyticsPeriod = "30d") =>
+    apiClient.get<AdminUsersAnalytics>("/admin/analytics/users", { params: { period } }),
+  analyticsAlerts: (query: {
+    status?: AlertStatus;
+    severity?: Severity;
+    source?: AlertSource;
+    code?: string;
+    limit?: number;
+    offset?: number;
+    refresh?: boolean;
+  }) => apiClient.get<AdminAlertsAnalytics>("/admin/analytics/alerts", { params: query }),
+  ackAnalyticsAlert: (id: string) => apiClient.patch<AdminAlertEvent>(`/admin/analytics/alerts/${id}/ack`),
+  resolveAnalyticsAlert: (id: string) => apiClient.patch<AdminAlertEvent>(`/admin/analytics/alerts/${id}/resolve`),
+  runAnalyticsAlertEvaluation: () => apiClient.post<{ task_id: string; queued: string }>("/admin/analytics/alerts/evaluate"),
   feedbackQueue: (query: { status?: "all" | "published" | "pending" | "rejected"; kind?: "all" | "review" | "question"; limit?: number; offset?: number }) =>
     apiClient.get<AdminFeedbackQueueResponse>("/products/moderation/queue", { params: query }),
   moderateReview: (reviewId: string, payload: { status: "published" | "pending" | "rejected" }) =>

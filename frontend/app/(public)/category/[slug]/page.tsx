@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { env } from "@/config/env";
@@ -43,7 +43,7 @@ const resolveVirtualCategory = (slug: string, categories: Category[], brands: Br
       categoryId: undefined,
       brandId: brand?.id,
       presetQuery: brand ? undefined : fallbackQuery,
-      title: `Brand - ${brandLabel}`,
+      title: `Бренд: ${brandLabel}`
     };
   }
 
@@ -57,23 +57,53 @@ const resolveVirtualCategory = (slug: string, categories: Category[], brands: Br
     categoryId: baseCategory.id,
     brandId: brand?.id,
     presetQuery: brand ? undefined : fallbackQuery,
-    title: `${baseCategory.name} - ${brandLabel}`,
+    title: `${baseCategory.name} - ${brandLabel}`
   };
 };
 
+async function loadCategoryIndex(): Promise<{ categories: Category[]; brands: Brand[] }> {
+  try {
+    const [categories, brands] = await Promise.all([serverGet<Category[]>("/categories"), serverGet<Brand[]>("/brands")]);
+    return {
+      categories: Array.isArray(categories) ? categories : [],
+      brands: Array.isArray(brands) ? brands : []
+    };
+  } catch {
+    return { categories: [], brands: [] };
+  }
+}
+
 export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
+  const { categories, brands } = await loadCategoryIndex();
+  const canonical = `${env.appUrl}/category/${params.slug}`;
+
+  const category = categories.find((item) => item.slug === params.slug);
+  if (category) {
+    return {
+      title: `${category.name} - цены и предложения`,
+      description: `Сравнение цен и магазинов по категории ${category.name}. Выберите лучший вариант покупки.`,
+      alternates: { canonical }
+    };
+  }
+
+  const virtual = resolveVirtualCategory(params.slug, categories, brands);
+  if (virtual) {
+    return {
+      title: `${virtual.title} - цены и предложения`,
+      description: `Сравнение цен и магазинов по подборке ${virtual.title}.`,
+      alternates: { canonical }
+    };
+  }
+
   return {
-    title: `Category: ${params.slug}`,
-    alternates: { canonical: `${env.appUrl}/category/${params.slug}` }
+    title: `Категория: ${params.slug}`,
+    alternates: { canonical }
   };
 }
 
 export default async function CategoryPage({ params }: { params: { slug: string } }) {
-  let categories: Category[] = [];
-  let brands: Brand[] = [];
-  try {
-    [categories, brands] = await Promise.all([serverGet<Category[]>("/categories"), serverGet<Brand[]>("/brands")]);
-  } catch {
+  const { categories, brands } = await loadCategoryIndex();
+  if (!categories.length && !brands.length) {
     notFound();
   }
 
@@ -96,4 +126,3 @@ export default async function CategoryPage({ params }: { params: { slug: string 
     />
   );
 }
-

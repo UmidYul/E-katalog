@@ -8,6 +8,24 @@ This file tracks profile capabilities that are designed but not yet implementabl
   - `GET /api/v1/users/me/profile`
   - `PATCH /api/v1/users/me/profile`
 - Profile fields now persist server-side in the current auth storage (Redis).
+- On February 25, 2026, security and sync features were implemented:
+  - `POST /api/v1/auth/change-password`
+  - `GET /api/v1/auth/sessions`
+  - `DELETE /api/v1/auth/sessions/{session_id}`
+  - `DELETE /api/v1/auth/sessions`
+  - `POST /api/v1/auth/2fa/setup`
+  - `POST /api/v1/auth/2fa/verify`
+  - `DELETE /api/v1/auth/2fa`
+  - `GET /api/v1/users/me/notification-preferences`
+  - `PATCH /api/v1/users/me/notification-preferences`
+  - `GET /api/v1/users/me/recently-viewed`
+  - `POST /api/v1/users/me/recently-viewed`
+  - `DELETE /api/v1/users/me/recently-viewed`
+- Social login was added for common end-user providers:
+  - `GET /api/v1/auth/oauth/providers`
+  - `GET /api/v1/auth/oauth/google`
+  - `GET /api/v1/auth/oauth/facebook`
+  - `GET /api/v1/auth/oauth/{provider}/callback`
 
 ## 2) Password Change and Session Management
 

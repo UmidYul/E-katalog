@@ -73,6 +73,8 @@ celery_app.conf.update(
         "app.tasks.maintenance_tasks.rotate_price_history_partitions": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.maintenance_tasks.generate_catalog_quality_report": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.maintenance_tasks.enqueue_catalog_quality_reports": {"queue": "maintenance", "routing_key": "maintenance"},
+        "app.tasks.maintenance_tasks.evaluate_admin_alert_events": {"queue": "maintenance", "routing_key": "maintenance"},
+        "app.tasks.maintenance_tasks.enqueue_admin_alert_evaluation": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.maintenance_tasks.enqueue_full_catalog_rebuild": {"queue": "maintenance", "routing_key": "maintenance"},
     },
     beat_schedule={
@@ -129,6 +131,11 @@ celery_app.conf.update(
         "auto-deactivate-no-offer-products-every-6h": {
             "task": "app.tasks.maintenance_tasks.enqueue_auto_deactivate_no_offer_products",
             "schedule": crontab(minute=20, hour="*/6"),
+            "options": {"queue": "maintenance", "routing_key": "maintenance"},
+        },
+        "admin-alert-evaluation-every-5m": {
+            "task": "app.tasks.maintenance_tasks.enqueue_admin_alert_evaluation",
+            "schedule": crontab(minute="*/5"),
             "options": {"queue": "maintenance", "routing_key": "maintenance"},
         },
         "full-catalog-rebuild-daily-0315": {

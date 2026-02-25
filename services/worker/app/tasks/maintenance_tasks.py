@@ -4,10 +4,12 @@ import asyncio
 import json
 import uuid
 from datetime import UTC, datetime
+from statistics import median
 from typing import Any
 
 from celery import chain
 import httpx
+from redis.asyncio import Redis
 from sqlalchemy import text
 
 from app.platform.services.pipeline_offsets import ensure_offsets_table
@@ -43,6 +45,30 @@ def _status_rank(value: str) -> int:
     normalized = str(value or "").strip().lower()
     rank_map = {"ok": 0, "warning": 1, "critical": 2}
     return rank_map.get(normalized, 0)
+
+
+def _alert_severity(value: float, *, warn: float, critical: float) -> str | None:
+    if value >= critical:
+        return "critical"
+    if value >= warn:
+        return "warning"
+    return None
+
+
+def _parse_iso_datetime(value: Any) -> datetime | None:
+    if not value:
+        return None
+    text_value = str(value).strip()
+    if not text_value:
+        return None
+    normalized = text_value.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 async def _fetch_quality_metrics(session) -> dict[str, int]:
@@ -435,6 +461,318 @@ async def _generate_catalog_quality_report() -> dict:
 @celery_app.task(bind=True)
 def enqueue_catalog_quality_reports(self) -> str:
     return generate_catalog_quality_report.delay().id
+
+
+async def _collect_order_alert_metrics(redis: Redis) -> dict[str, float]:
+    raw_rows = await redis.lrange("admin:orders", 0, -1)
+    total_orders = 0
+    cancelled_orders = 0
+    for raw in raw_rows:
+        if not raw:
+            continue
+        try:
+            row = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        total_orders += 1
+        if str(row.get("status", "")).strip().lower() == "cancelled":
+            cancelled_orders += 1
+    cancel_rate = (float(cancelled_orders) / float(total_orders)) if total_orders > 0 else 0.0
+    return {
+        "total_orders": float(total_orders),
+        "cancelled_orders": float(cancelled_orders),
+        "cancel_rate": cancel_rate,
+    }
+
+
+async def _collect_moderation_alert_metrics(redis: Redis) -> dict[str, float]:
+    pending_total = 0
+    moderation_minutes: list[float] = []
+
+    async def collect(pattern: str) -> None:
+        nonlocal pending_total
+        async for key in redis.scan_iter(match=pattern):
+            if key.count(":") != 2:
+                continue
+            if await redis.type(key) != "hash":
+                continue
+            payload = await redis.hgetall(key)
+            if not payload:
+                continue
+            status = str(payload.get("status", "published")).strip().lower()
+            if status == "pending":
+                pending_total += 1
+
+            created_at = _parse_iso_datetime(payload.get("created_at"))
+            moderated_at = _parse_iso_datetime(payload.get("moderated_at"))
+            if created_at and moderated_at and moderated_at >= created_at:
+                moderation_minutes.append((moderated_at - created_at).total_seconds() / 60.0)
+
+    await collect("feedback:review:rev_*")
+    await collect("feedback:question:q_*")
+
+    median_minutes = float(median(moderation_minutes)) if moderation_minutes else 0.0
+    return {
+        "pending_total": float(pending_total),
+        "median_moderation_minutes": median_minutes,
+    }
+
+
+async def _build_admin_alert_candidates(session, redis: Redis) -> list[dict[str, Any]]:
+    latest_quality = (
+        await session.execute(
+            text(
+                """
+                select summary
+                from catalog_data_quality_reports
+                order by created_at desc, id desc
+                limit 1
+                """
+            )
+        )
+    ).mappings().first()
+    quality_summary = latest_quality.get("summary") if latest_quality and isinstance(latest_quality.get("summary"), dict) else {}
+    quality_without_offers_ratio = float(quality_summary.get("active_without_valid_offers_ratio") or 0.0)
+    quality_search_mismatch_ratio = float(quality_summary.get("search_mismatch_ratio") or 0.0)
+
+    operations_row = (
+        await session.execute(
+            text(
+                """
+                select
+                    count(*)::int as total_runs,
+                    count(*) filter (
+                        where lower(status) in ('failed', 'failure', 'error', 'cancelled')
+                    )::int as failed_runs
+                from catalog_crawl_jobs
+                where started_at >= now() - interval '24 hours'
+                """
+            )
+        )
+    ).mappings().one()
+    total_runs = int(operations_row.get("total_runs") or 0)
+    failed_runs = int(operations_row.get("failed_runs") or 0)
+    failed_rate = (float(failed_runs) / float(total_runs)) if total_runs > 0 else 0.0
+
+    order_metrics = await _collect_order_alert_metrics(redis)
+    moderation_metrics = await _collect_moderation_alert_metrics(redis)
+
+    rules = [
+        {
+            "code": "catalog_quality.active_without_valid_offers_ratio",
+            "title": "Высокая доля товаров без валидных офферов",
+            "source": "catalog_quality",
+            "metric_value": quality_without_offers_ratio,
+            "warn_threshold": float(settings.admin_alert_quality_warn_ratio),
+            "critical_threshold": float(settings.admin_alert_quality_critical_ratio),
+            "context": {"metric": "active_without_valid_offers_ratio"},
+        },
+        {
+            "code": "catalog_quality.search_mismatch_ratio",
+            "title": "Высокий search mismatch в каталоге",
+            "source": "catalog_quality",
+            "metric_value": quality_search_mismatch_ratio,
+            "warn_threshold": float(settings.admin_alert_search_mismatch_warn_ratio),
+            "critical_threshold": float(settings.admin_alert_search_mismatch_critical_ratio),
+            "context": {"metric": "search_mismatch_ratio"},
+        },
+        {
+            "code": "moderation.pending_total",
+            "title": "Очередь модерации растет",
+            "source": "moderation",
+            "metric_value": float(moderation_metrics["pending_total"]),
+            "warn_threshold": float(settings.admin_alert_moderation_pending_warn),
+            "critical_threshold": float(settings.admin_alert_moderation_pending_critical),
+            "context": {"metric": "pending_total"},
+        },
+        {
+            "code": "orders.cancel_rate",
+            "title": "Высокая доля отмен заказов",
+            "source": "revenue",
+            "metric_value": float(order_metrics["cancel_rate"]),
+            "warn_threshold": float(settings.admin_alert_order_cancel_rate_warn),
+            "critical_threshold": float(settings.admin_alert_order_cancel_rate_critical),
+            "context": {
+                "metric": "cancel_rate",
+                "total_orders": int(order_metrics["total_orders"]),
+                "cancelled_orders": int(order_metrics["cancelled_orders"]),
+            },
+        },
+        {
+            "code": "operations.failed_task_rate_24h",
+            "title": "Повышенная доля неуспешных операций",
+            "source": "operations",
+            "metric_value": failed_rate,
+            "warn_threshold": float(settings.admin_alert_operation_failed_rate_warn),
+            "critical_threshold": float(settings.admin_alert_operation_failed_rate_critical),
+            "context": {
+                "metric": "failed_task_rate_24h",
+                "total_runs": total_runs,
+                "failed_runs": failed_runs,
+            },
+        },
+    ]
+
+    candidates: list[dict[str, Any]] = []
+    for rule in rules:
+        severity = _alert_severity(
+            float(rule["metric_value"]),
+            warn=float(rule["warn_threshold"]),
+            critical=float(rule["critical_threshold"]),
+        )
+        candidates.append(
+            {
+                "code": str(rule["code"]),
+                "title": str(rule["title"]),
+                "source": str(rule["source"]),
+                "severity": severity,
+                "metric_value": float(rule["metric_value"]),
+                "threshold_value": float(rule["critical_threshold"] if severity == "critical" else rule["warn_threshold"]),
+                "context": {
+                    **(rule.get("context") if isinstance(rule.get("context"), dict) else {}),
+                    "warn_threshold": float(rule["warn_threshold"]),
+                    "critical_threshold": float(rule["critical_threshold"]),
+                },
+            }
+        )
+    return candidates
+
+
+async def _upsert_admin_alert_events(session, candidates: list[dict[str, Any]]) -> dict[str, int]:
+    opened = 0
+    resolved = 0
+    updated = 0
+
+    for candidate in candidates:
+        code = str(candidate["code"])
+        current = (
+            await session.execute(
+                text(
+                    """
+                    select id, uuid, status
+                    from admin_alert_events
+                    where code = :code
+                      and status in ('open', 'ack')
+                    order by created_at desc, id desc
+                    limit 1
+                    """
+                ),
+                {"code": code},
+            )
+        ).mappings().first()
+
+        severity = candidate.get("severity")
+        if severity is None:
+            if current:
+                await session.execute(
+                    text(
+                        """
+                        update admin_alert_events
+                        set status = 'resolved',
+                            resolved_at = now(),
+                            updated_at = now()
+                        where id = :id
+                        """
+                    ),
+                    {"id": int(current["id"])},
+                )
+                resolved += 1
+            continue
+
+        payload = {
+            "title": str(candidate["title"]),
+            "source": str(candidate["source"]),
+            "severity": str(severity),
+            "metric_value": float(candidate["metric_value"]),
+            "threshold_value": float(candidate["threshold_value"]),
+            "context": json.dumps(candidate.get("context") or {}, ensure_ascii=False),
+        }
+
+        if current:
+            await session.execute(
+                text(
+                    """
+                    update admin_alert_events
+                    set title = :title,
+                        source = :source,
+                        severity = :severity,
+                        status = 'open',
+                        metric_value = :metric_value,
+                        threshold_value = :threshold_value,
+                        context = cast(:context as jsonb),
+                        acknowledged_at = null,
+                        resolved_at = null,
+                        updated_at = now()
+                    where id = :id
+                    """
+                ),
+                {"id": int(current["id"]), **payload},
+            )
+            updated += 1
+            continue
+
+        await session.execute(
+            text(
+                """
+                insert into admin_alert_events (
+                    code,
+                    title,
+                    source,
+                    severity,
+                    status,
+                    metric_value,
+                    threshold_value,
+                    context
+                )
+                values (
+                    :code,
+                    :title,
+                    :source,
+                    :severity,
+                    'open',
+                    :metric_value,
+                    :threshold_value,
+                    cast(:context as jsonb)
+                )
+                """
+            ),
+            {"code": code, **payload},
+        )
+        opened += 1
+
+    return {"opened": opened, "updated": updated, "resolved": resolved}
+
+
+async def _evaluate_admin_alert_events() -> dict[str, Any]:
+    if not settings.admin_alerts_enabled:
+        return {"status": "disabled", "at": datetime.now(UTC).isoformat()}
+
+    redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    async with AsyncSessionLocal() as session:
+        candidates = await _build_admin_alert_candidates(session, redis)
+        changes = await _upsert_admin_alert_events(session, candidates)
+        await session.commit()
+    if hasattr(redis, "aclose"):
+        await redis.aclose()
+    else:
+        await redis.close()
+    logger.info("admin_alert_events_evaluated", **changes)
+    return {
+        "status": "ok",
+        "candidates": len(candidates),
+        **changes,
+        "at": datetime.now(UTC).isoformat(),
+    }
+
+
+@celery_app.task(bind=True)
+def evaluate_admin_alert_events(self) -> dict[str, Any]:
+    return asyncio.run(_evaluate_admin_alert_events())
+
+
+@celery_app.task(bind=True)
+def enqueue_admin_alert_evaluation(self) -> str:
+    return evaluate_admin_alert_events.delay().id
 
 
 async def _select_no_offer_deactivation_candidates(

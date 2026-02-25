@@ -9,14 +9,14 @@ import { cn } from "@/lib/utils/cn";
 import { useUiStore } from "@/store/ui.store";
 
 const nav = [
-  { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
-  { href: "/dashboard/users", label: "Users", icon: Users },
-  { href: "/dashboard/products", label: "Products", icon: Package },
-  { href: "/dashboard/categories", label: "Categories", icon: Boxes },
-  { href: "/dashboard/orders", label: "Orders", icon: ShoppingCart },
-  { href: "/dashboard/feedback", label: "Feedback", icon: MessageSquare },
-  { href: "/dashboard/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/dashboard/settings", label: "Settings", icon: Settings },
+  { href: "/dashboard", label: "Хаб", icon: LayoutDashboard },
+  { href: "/dashboard/users", label: "Пользователи", icon: Users },
+  { href: "/dashboard/products", label: "Товары", icon: Package },
+  { href: "/dashboard/categories", label: "Категории", icon: Boxes },
+  { href: "/dashboard/orders", label: "Заказы", icon: ShoppingCart },
+  { href: "/dashboard/feedback", label: "Модерация", icon: MessageSquare },
+  { href: "/dashboard/analytics", label: "Аналитика 360", icon: BarChart3 },
+  { href: "/dashboard/settings", label: "Настройки", icon: Settings },
 ];
 
 export function AdminSidebar() {
@@ -30,7 +30,7 @@ export function AdminSidebar() {
       className="sticky top-0 hidden h-screen shrink-0 border-r border-border bg-card/90 p-4 backdrop-blur lg:block"
     >
       <div className={cn("mb-6 rounded-2xl border border-border bg-background p-4", !open && "p-3")}>
-        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{open ? "Admin Panel" : "AP"}</p>
+        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{open ? "E-katalog Admin" : "EA"}</p>
       </div>
       <nav className="space-y-2">
         {nav.map((item) => {

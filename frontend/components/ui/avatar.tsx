@@ -1,8 +1,10 @@
+import Image from "next/image";
+
 import { cn } from "@/lib/utils/cn";
 
 export function Avatar({ name, src, className }: { name: string; src?: string | null; className?: string }) {
   if (src) {
-    return <img src={src} alt={name} className={cn("h-9 w-9 rounded-xl object-cover", className)} />;
+    return <Image src={src} alt={name} width={36} height={36} className={cn("h-9 w-9 rounded-xl object-cover", className)} />;
   }
   const initials = name
     .split(" ")

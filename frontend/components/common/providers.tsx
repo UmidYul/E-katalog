@@ -5,6 +5,7 @@ import { ThemeProvider } from "next-themes";
 import { ReactNode, useEffect, useState } from "react";
 
 import { useCompareStore } from "@/store/compare.store";
+import { usePriceAlertsStore } from "@/store/priceAlerts.store";
 import { useProfileStore } from "@/store/profile.store";
 import { useRecentlyViewedStore } from "@/store/recentlyViewed.store";
 
@@ -13,6 +14,7 @@ function PersistStoresHydrator() {
     void useCompareStore.persist.rehydrate();
     void useRecentlyViewedStore.persist.rehydrate();
     void useProfileStore.persist.rehydrate();
+    void usePriceAlertsStore.persist.rehydrate();
   }, []);
 
   return null;

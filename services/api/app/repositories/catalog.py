@@ -1159,6 +1159,67 @@ def _build_gallery_images(
     return [str(item["url"]) for item in prepared[: max(1, min(limit, 50))]]
 
 
+def _needs_catalog_image_fallback(url: str | None) -> bool:
+    value = str(url or "").strip()
+    if not value:
+        return True
+    if not _has_known_image_extension(value):
+        return True
+    return _looks_like_low_quality_image(value)
+
+
+def _select_catalog_card_image(
+    primary_image: str | None,
+    *,
+    fallback_candidates: list[dict[str, object]] | None = None,
+    target_color: str | None = None,
+) -> str | None:
+    prepared: list[dict[str, object]] = []
+    seen_urls: set[str] = set()
+    order = 0
+
+    def push(
+        value: object,
+        *,
+        source_priority: int,
+        source_title: str | None = None,
+        source_color: str | None = None,
+    ) -> None:
+        nonlocal order
+        url = str(value or "").strip()
+        if not url or url in seen_urls:
+            return
+        seen_urls.add(url)
+        prepared.append(
+            {
+                "url": url,
+                "source_priority": source_priority,
+                "source_title": source_title,
+                "source_color": source_color,
+                "order": order,
+            }
+        )
+        order += 1
+
+    if fallback_candidates:
+        for candidate in fallback_candidates:
+            push(
+                candidate.get("url"),
+                source_priority=int(candidate.get("source_priority") or 1),
+                source_title=str(candidate.get("source_title") or "").strip() or None,
+                source_color=str(candidate.get("source_color") or "").strip() or None,
+            )
+
+    push(primary_image, source_priority=2)
+    if not prepared:
+        return None
+
+    resolved = _build_gallery_images(prepared, target_color=target_color, limit=1)
+    if resolved:
+        return resolved[0]
+    return str(primary_image or "").strip() or None
+
+
 class CatalogRepository:
     def __init__(self, session: AsyncSession, *, cursor_secret: str) -> None:
         self.session = session
@@ -1378,7 +1439,7 @@ class CatalogRepository:
             )
         ).one_or_none()
         if seed_row is None:
-            return product_id
+            return None
 
         seed_specs = seed_row.specs if isinstance(seed_row.specs, dict) else {}
         seed_model_signature = _extract_model_signature(str(seed_row.normalized_title or ""))
@@ -1427,7 +1488,7 @@ class CatalogRepository:
             )
         ).mappings().all()
         if not candidates:
-            return product_id
+            return None
 
         for candidate in candidates:
             candidate_title = str(candidate.get("normalized_title") or "")
@@ -1455,7 +1516,7 @@ class CatalogRepository:
             if candidate_id is not None:
                 return int(candidate_id)
 
-        return product_id
+        return None
 
     async def get_product(self, product_ref: str | int, *, allow_numeric: bool = False) -> dict | None:
         product_id = await self.resolve_entity_ref("product", product_ref, allow_numeric=allow_numeric)
@@ -1948,6 +2009,99 @@ class CatalogRepository:
                 by_product[product_id] = merged
         return by_product
 
+    async def _load_store_image_candidates_for_products(
+        self,
+        product_ids: list[int],
+        *,
+        per_product_limit: int = 8,
+    ) -> dict[int, list[dict[str, object]]]:
+        if not product_ids:
+            return {}
+        unique_ids = sorted({int(product_id) for product_id in product_ids if int(product_id) > 0})
+        if not unique_ids:
+            return {}
+
+        rows = (
+            await self.session.execute(
+                text(
+                    """
+                    with ranked_images as (
+                        select
+                            canonical_product_id,
+                            image_url,
+                            case
+                                when jsonb_typeof(metadata->'images') = 'array' then metadata->'images'
+                                else '[]'::jsonb
+                            end as images,
+                            coalesce(title_clean, title_raw) as source_title,
+                            coalesce(
+                                metadata->>'color',
+                                case
+                                    when jsonb_typeof(metadata->'specifications') = 'object' then metadata->'specifications'->>'color'
+                                    else null
+                                end,
+                                case
+                                    when jsonb_typeof(metadata->'specs') = 'object' then metadata->'specs'->>'color'
+                                    else null
+                                end
+                            ) as source_color,
+                            row_number() over (
+                                partition by canonical_product_id
+                                order by last_seen_at desc nulls last, id desc
+                            ) as row_rank
+                        from catalog_store_products
+                        where canonical_product_id = any(cast(:product_ids as bigint[]))
+                    )
+                    select
+                        canonical_product_id,
+                        image_url,
+                        images,
+                        source_title,
+                        source_color
+                    from ranked_images
+                    where row_rank <= :per_product_limit
+                    order by canonical_product_id asc, row_rank asc
+                    """
+                ),
+                {
+                    "product_ids": unique_ids,
+                    "per_product_limit": max(1, min(int(per_product_limit), 12)),
+                },
+            )
+        ).all()
+
+        by_product: dict[int, list[dict[str, object]]] = {}
+        seen_urls: dict[int, set[str]] = {}
+
+        for row in rows:
+            product_id = int(row.canonical_product_id)
+            source_title = str(row.source_title or "").strip() or None
+            source_color = str(row.source_color or "").strip() or None
+
+            bucket = by_product.setdefault(product_id, [])
+            seen_bucket = seen_urls.setdefault(product_id, set())
+
+            def append_candidate(value: object, *, source_priority: int) -> None:
+                url = str(value or "").strip()
+                if not url or url in seen_bucket:
+                    return
+                seen_bucket.add(url)
+                bucket.append(
+                    {
+                        "url": url,
+                        "source_priority": source_priority,
+                        "source_title": source_title,
+                        "source_color": source_color,
+                    }
+                )
+
+            raw_images = row.images if isinstance(row.images, list) else []
+            for image in raw_images:
+                append_candidate(image, source_priority=0)
+            append_candidate(row.image_url, source_priority=1)
+
+        return by_product
+
     async def get_offers(
         self,
         product_id: int,
@@ -2169,29 +2323,44 @@ class CatalogRepository:
         rows = (await self.session.execute(stmt.limit(limit + 1))).all()
         has_next = len(rows) > limit
         rows = rows[:limit]
-        fallback_specs_map = await self._load_store_specs_for_products([int(row.id) for row in rows])
+        product_ids = [int(row.id) for row in rows]
+        fallback_specs_map = await self._load_store_specs_for_products(product_ids)
+        fallback_image_ids = [int(row.id) for row in rows if _needs_catalog_image_fallback(str(row.main_image or ""))]
+        fallback_images_map = await self._load_store_image_candidates_for_products(fallback_image_ids)
 
-        items = [
-            {
-                "id": r.product_uuid,
-                "normalized_title": format_product_title(
-                    r.normalized_title,
-                    brand_name=r.brand_name,
-                    specs=_merge_specs_maps(
-                        r.specs if isinstance(r.specs, dict) else {},
-                        fallback_specs_map.get(int(r.id)),
+        items: list[dict[str, object]] = []
+        for r in rows:
+            product_id = int(r.id)
+            merged_specs = _merge_specs_maps(
+                r.specs if isinstance(r.specs, dict) else {},
+                fallback_specs_map.get(product_id),
+            )
+            preferred_color = _extract_official_color_name(str(merged_specs.get("color") or "")) or _format_color_label(
+                str(merged_specs.get("color") or "")
+            )
+            image_url = _select_catalog_card_image(
+                r.main_image,
+                fallback_candidates=fallback_images_map.get(product_id),
+                target_color=preferred_color,
+            )
+
+            items.append(
+                {
+                    "id": r.product_uuid,
+                    "normalized_title": format_product_title(
+                        r.normalized_title,
+                        brand_name=r.brand_name,
+                        specs=merged_specs,
                     ),
-                ),
-                "image_url": r.main_image,
-                "brand": {"id": r.brand_uuid, "name": r.brand_name} if r.brand_id else None,
-                "category": {"id": r.category_uuid, "name": r.category_name},
-                "min_price": float(r.min_price) if r.min_price is not None else None,
-                "max_price": float(r.max_price) if r.max_price is not None else None,
-                "store_count": r.store_count,
-                "score": float(r.rank or 0),
-            }
-            for r in rows
-        ]
+                    "image_url": image_url,
+                    "brand": {"id": r.brand_uuid, "name": r.brand_name} if r.brand_id else None,
+                    "category": {"id": r.category_uuid, "name": r.category_name},
+                    "min_price": float(r.min_price) if r.min_price is not None else None,
+                    "max_price": float(r.max_price) if r.max_price is not None else None,
+                    "store_count": r.store_count,
+                    "score": float(r.rank or 0),
+                }
+            )
 
         next_cursor = None
         if has_next and rows:

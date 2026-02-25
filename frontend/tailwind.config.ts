@@ -24,6 +24,22 @@ const config: Config = {
         ring: "hsl(var(--ring))",
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
+        accent: {
+          DEFAULT: "hsl(var(--accent))",
+          foreground: "hsl(var(--accent-foreground))"
+        },
+        success: {
+          DEFAULT: "hsl(var(--success))",
+          foreground: "hsl(var(--success-foreground))"
+        },
+        warning: {
+          DEFAULT: "hsl(var(--warning))",
+          foreground: "hsl(var(--warning-foreground))"
+        },
+        destructive: {
+          DEFAULT: "hsl(var(--destructive))",
+          foreground: "hsl(var(--destructive-foreground))"
+        },
         primary: {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))"
@@ -46,10 +62,11 @@ const config: Config = {
         "2xl": "1.25rem"
       },
       boxShadow: {
-        soft: "0 10px 30px -12px rgba(2, 8, 23, 0.18)"
+        soft: "0 18px 34px -22px rgba(7, 18, 38, 0.42)"
       },
       fontFamily: {
-        sans: ["Inter", "system-ui", "sans-serif"]
+        sans: ["Source Sans 3", "Segoe UI", "system-ui", "sans-serif"],
+        heading: ["Manrope", "Segoe UI", "system-ui", "sans-serif"]
       }
     }
   },

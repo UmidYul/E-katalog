@@ -56,6 +56,17 @@ class Settings(BaseSettings):
     quality_report_auto_deactivate_no_offer_limit: int = 500
     quality_report_alert_webhook_url: str | None = None
     quality_report_alert_min_status: Literal["warning", "critical"] = "critical"
+    admin_alerts_enabled: bool = True
+    admin_alert_quality_warn_ratio: float = 0.20
+    admin_alert_quality_critical_ratio: float = 0.40
+    admin_alert_search_mismatch_warn_ratio: float = 0.03
+    admin_alert_search_mismatch_critical_ratio: float = 0.10
+    admin_alert_moderation_pending_warn: int = 200
+    admin_alert_moderation_pending_critical: int = 500
+    admin_alert_order_cancel_rate_warn: float = 0.08
+    admin_alert_order_cancel_rate_critical: float = 0.15
+    admin_alert_operation_failed_rate_warn: float = 0.10
+    admin_alert_operation_failed_rate_critical: float = 0.20
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000
@@ -66,6 +77,12 @@ class Settings(BaseSettings):
     admin_password: str = "Admin12345"
     admin_full_name: str = "Platform Admin"
     admin_role: Literal["admin", "moderator"] = "admin"
+    next_public_app_url: str = "http://localhost"
+    oauth_totp_issuer: str = "ZincMarket"
+    oauth_google_client_id: str | None = None
+    oauth_google_client_secret: str | None = None
+    oauth_facebook_client_id: str | None = None
+    oauth_facebook_client_secret: str | None = None
 
     user_agents: list[str] = Field(
         default_factory=lambda: [

@@ -46,7 +46,12 @@ export const useProductPriceHistory = (id: string, days: number) =>
   useQuery({
     queryKey: catalogKeys.priceHistory(id, days),
     queryFn: () => catalogApi.getProductPriceHistory(id, days),
-    enabled: Boolean(id)
+    enabled: Boolean(id),
+    staleTime: 2 * 60_000,
+    placeholderData: (previousData, previousQuery) => {
+      const previousId = previousQuery?.queryKey?.[2];
+      return previousId === id ? previousData : undefined;
+    }
   });
 
 export const useCategories = () =>

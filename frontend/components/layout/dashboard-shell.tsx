@@ -8,21 +8,23 @@ import { AdminSidebar } from "@/components/layout/admin-sidebar";
 import { AdminTopbar } from "@/components/layout/admin-topbar";
 
 const titles: Record<string, { title: string; subtitle: string }> = {
-  "/dashboard": { title: "Overview", subtitle: "Marketplace operational snapshot" },
-  "/dashboard/users": { title: "Users", subtitle: "Search, moderate and manage accounts" },
-  "/dashboard/products": { title: "Products", subtitle: "Canonical products and store offers" },
-  "/dashboard/categories": { title: "Categories", subtitle: "Catalog taxonomy and nesting" },
-  "/dashboard/orders": { title: "Orders", subtitle: "Order flow and status management" },
-  "/dashboard/feedback": { title: "Feedback", subtitle: "Moderation queue for reviews and questions" },
-  "/dashboard/analytics": { title: "Analytics", subtitle: "KPIs, trends and activity" },
-  "/dashboard/settings": { title: "Settings", subtitle: "Platform-wide configuration" },
+  "/dashboard": { title: "Executive Hub", subtitle: "Ключевые KPI, риски и приоритеты платформы" },
+  "/dashboard/users": { title: "Пользователи", subtitle: "Аккаунты, роли и активность" },
+  "/dashboard/products": { title: "Товары", subtitle: "Канонические товары и офферы магазинов" },
+  "/dashboard/categories": { title: "Категории", subtitle: "Таксономия каталога и структура" },
+  "/dashboard/orders": { title: "Заказы", subtitle: "Поток заказов и статусы" },
+  "/dashboard/feedback": { title: "Модерация", subtitle: "Очередь отзывов и вопросов" },
+  "/dashboard/analytics": { title: "Аналитика 360", subtitle: "Revenue, Quality, Operations, Moderation, Users" },
+  "/dashboard/settings": { title: "Настройки", subtitle: "Параметры платформы и источников" },
 };
 
 export function DashboardShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const header = useMemo(() => {
     const found = Object.keys(titles).find((route) => pathname === route || pathname.startsWith(`${route}/`));
-    return found ? titles[found] ?? { title: "Dashboard", subtitle: "Admin workspace" } : { title: "Dashboard", subtitle: "Admin workspace" };
+    return found
+      ? titles[found] ?? { title: "Админка", subtitle: "Рабочее пространство платформы" }
+      : { title: "Админка", subtitle: "Рабочее пространство платформы" };
   }, [pathname]);
 
   return (

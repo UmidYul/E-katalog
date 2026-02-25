@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types tests/price-alerts.signal.test.ts tests/price-alerts.store.test.ts tests/admin-analytics.utils.test.ts",
     "openapi:generate": "openapi-typescript $NEXT_PUBLIC_API_ORIGIN/openapi.json -o lib/api/openapi.ts"
   },
   "dependencies": {
@@ -27,6 +28,7 @@
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-hook-form": "^7.54.2",
+    "recharts": "^2.15.4",
     "tailwind-merge": "^3.0.1",
     "zod": "^3.24.2",
     "zustand": "^5.0.3"

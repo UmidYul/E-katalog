@@ -126,3 +126,26 @@ export type ProductQuestion = {
   answers: ProductAnswer[];
 };
 
+export type WatchlistFilter = "all" | "drop" | "target_hit";
+
+export type PriceAlertMeta = {
+  product_id: string;
+  alerts_enabled: boolean;
+  baseline_price: number | null;
+  target_price: number | null;
+  last_seen_price: number | null;
+  last_notified_at: string | null;
+  updated_at: string;
+};
+
+export type PriceAlertSignal = {
+  product_id: string;
+  current_price: number | null;
+  baseline_price: number | null;
+  target_price: number | null;
+  drop_amount: number;
+  drop_pct: number;
+  is_drop: boolean;
+  is_target_hit: boolean;
+};
+

@@ -38,14 +38,12 @@ class ScraperService:
             try:
                 links = await self._parser.discover_product_links(category_url)
             except UpstreamRateLimitedError as exc:
-                logger.error(
-                    "upstream_rate_limited_stop_scrape",
+                logger.warning(
+                    "upstream_rate_limited_skip_category",
                     category_url=category_url,
-                    cooldown_seconds=settings.rate_limit_cooldown_seconds,
                     error=str(exc),
                 )
-                await asyncio.sleep(settings.rate_limit_cooldown_seconds)
-                break
+                continue
             except Exception as exc:  # noqa: BLE001
                 logger.error("category_discovery_failed", category_url=category_url, error=str(exc))
                 continue
@@ -53,22 +51,23 @@ class ScraperService:
                 remaining = max(0, product_limit - processed)
                 links = links[:remaining]
             logger.info("category_links_discovered", category_url=category_url, count=len(links))
+            category_rate_limited = False
             for link in links:
                 if await self._parse_and_upsert(link, shop):
-                    logger.error(
-                        "upstream_rate_limited_stop_scrape",
+                    logger.warning(
+                        "upstream_rate_limited_skip_remaining_category",
                         product_url=link,
-                        cooldown_seconds=settings.rate_limit_cooldown_seconds,
                         error="cloudflare_1015",
                     )
-                    await asyncio.sleep(settings.rate_limit_cooldown_seconds)
-                    await self._session.commit()
-                    return
+                    category_rate_limited = True
+                    break
                 processed += 1
                 if self._inter_request_delay_seconds > 0:
                     await asyncio.sleep(self._inter_request_delay_seconds)
                 if product_limit and processed >= product_limit:
                     break
+            if category_rate_limited:
+                continue
 
         await self._session.commit()
 

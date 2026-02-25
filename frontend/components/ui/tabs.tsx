@@ -22,10 +22,10 @@ export function Tabs({ defaultValue, children, className }: { defaultValue: stri
 }
 
 export function TabsList({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn("inline-flex rounded-2xl bg-secondary p-1", className)}>{children}</div>;
+  return <div className={cn("inline-flex rounded-2xl border border-border/70 bg-secondary/80 p-1", className)}>{children}</div>;
 }
 
-export function TabsTrigger({ value, children }: { value: string; children: ReactNode }) {
+export function TabsTrigger({ value, children, className }: { value: string; children: ReactNode; className?: string }) {
   const ctx = useContext(TabsContext);
   if (!ctx) return null;
   const active = ctx.value === value;
@@ -33,7 +33,11 @@ export function TabsTrigger({ value, children }: { value: string; children: Reac
     <button
       type="button"
       onClick={() => ctx.setValue(value)}
-      className={cn("rounded-xl px-3 py-1.5 text-sm transition", active ? "bg-background shadow-soft" : "text-muted-foreground")}
+      className={cn(
+        "rounded-xl px-3 py-1.5 text-sm font-medium transition-colors",
+        active ? "bg-background text-foreground shadow-soft" : "text-muted-foreground hover:text-foreground",
+        className
+      )}
     >
       {children}
     </button>

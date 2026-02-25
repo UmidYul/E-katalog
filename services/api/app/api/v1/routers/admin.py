@@ -6,8 +6,9 @@ import io
 import json
 import re
 import secrets
+from collections import defaultdict
 from decimal import Decimal, InvalidOperation
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from urllib.parse import urljoin
 from uuid import uuid4
@@ -26,6 +27,7 @@ from app.repositories.catalog import CatalogRepository
 from app.services.worker_client import enqueue_dedupe_batches
 from app.services.worker_client import enqueue_embedding_batches
 from app.services.worker_client import enqueue_catalog_quality_report
+from app.services.worker_client import enqueue_admin_alert_evaluation
 from app.services.worker_client import enqueue_full_crawl
 from app.services.worker_client import enqueue_full_catalog_rebuild
 from app.services.worker_client import enqueue_ingested_products_pipeline
@@ -46,6 +48,142 @@ router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(requir
 
 VALID_USER_ROLES = {"user", "moderator", "seller_support", "admin"}
 UUID_REF_PATTERN = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+ANALYTICS_PERIOD_DAYS = {"7d": 7, "30d": 30, "90d": 90, "365d": 365}
+ANALYTICS_GRANULARITIES = {"day", "week"}
+ALERT_EVENT_STATUSES = {"open", "ack", "resolved"}
+ALERT_EVENT_SOURCES = {"revenue", "catalog_quality", "operations", "moderation", "users"}
+ALERT_EVENT_SEVERITIES = {"info", "warning", "critical"}
+
+
+def _to_float(value: Any, default: float = 0.0) -> float:
+    if value is None:
+        return default
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _to_int(value: Any, default: int = 0) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    try:
+        return int(float(str(value)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _parse_iso_datetime(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    text_value = str(value).strip()
+    if not text_value:
+        return None
+    normalized = text_value.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _period_to_days(period: str) -> int:
+    key = str(period or "30d").strip().lower()
+    days = ANALYTICS_PERIOD_DAYS.get(key)
+    if days is None:
+        raise HTTPException(status_code=422, detail="period must be one of: 7d, 30d, 90d, 365d")
+    return days
+
+
+def _normalize_granularity(granularity: str | None) -> str:
+    key = str(granularity or "day").strip().lower()
+    if key not in ANALYTICS_GRANULARITIES:
+        raise HTTPException(status_code=422, detail="granularity must be one of: day, week")
+    return key
+
+
+def _bucket_start(value: datetime, granularity: str) -> datetime:
+    normalized = value.astimezone(UTC)
+    if granularity == "week":
+        weekday = normalized.weekday()
+        start = normalized - timedelta(days=weekday)
+        return datetime(start.year, start.month, start.day, tzinfo=UTC)
+    return datetime(normalized.year, normalized.month, normalized.day, tzinfo=UTC)
+
+
+def _init_series(range_start: datetime, range_end: datetime, granularity: str) -> list[datetime]:
+    points: list[datetime] = []
+    cursor = _bucket_start(range_start, granularity)
+    step = timedelta(days=7 if granularity == "week" else 1)
+    while cursor <= range_end:
+        points.append(cursor)
+        cursor += step
+    return points
+
+
+def _series_ts(value: datetime) -> str:
+    return value.astimezone(UTC).date().isoformat()
+
+
+def _severity_by_threshold(value: float, *, warn: float, critical: float) -> str | None:
+    if value >= critical:
+        return "critical"
+    if value >= warn:
+        return "warning"
+    return None
+
+
+def _serialize_alert_event_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": row.get("id"),
+        "code": row.get("code"),
+        "title": row.get("title"),
+        "source": row.get("source"),
+        "severity": row.get("severity"),
+        "status": row.get("status"),
+        "metric_value": _to_float(row.get("metric_value")),
+        "threshold_value": _to_float(row.get("threshold_value")),
+        "context": row.get("context") if isinstance(row.get("context"), dict) else {},
+        "created_at": _serialize_datetime_value(row.get("created_at")),
+        "acknowledged_at": _serialize_datetime_value(row.get("acknowledged_at")),
+        "resolved_at": _serialize_datetime_value(row.get("resolved_at")),
+    }
+
+
+def _admin_analytics_cache_key(endpoint: str, payload: dict[str, Any]) -> str:
+    fingerprint = _hash(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str))
+    return f"admin:analytics:v1:{endpoint}:{fingerprint}"
+
+
+async def _get_cached_admin_analytics(redis: Redis, key: str) -> dict[str, Any] | None:
+    raw = await redis.get(key)
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+async def _set_cached_admin_analytics(redis: Redis, key: str, payload: dict[str, Any], ttl_seconds: int = 60) -> None:
+    await redis.set(key, json.dumps(payload, ensure_ascii=False, default=str), ex=max(10, int(ttl_seconds)))
+
+
+async def _invalidate_admin_analytics_cache(redis: Redis) -> None:
+    keys = [key async for key in redis.scan_iter(match="admin:analytics:v1:*")]
+    if keys:
+        await redis.delete(*keys)
 
 
 class PaginatedOut(BaseModel):
@@ -974,6 +1112,637 @@ async def _fetch_export_rows(db: AsyncSession, *, limit: int) -> list[dict[str, 
     return [dict(row) for row in rows]
 
 
+def _median(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    sorted_values = sorted(values)
+    center = len(sorted_values) // 2
+    if len(sorted_values) % 2:
+        return float(sorted_values[center])
+    return float((sorted_values[center - 1] + sorted_values[center]) / 2)
+
+
+async def _load_orders_snapshot(redis: Redis) -> list[dict[str, Any]]:
+    orders = await list_orders(page=1, limit=500, redis=redis)
+    return orders.get("items", []) if isinstance(orders, dict) else []
+
+
+async def _load_users_snapshot(redis: Redis) -> list[dict[str, Any]]:
+    users: list[dict[str, Any]] = []
+    async for key in redis.scan_iter(match="auth:user:*"):
+        if key.count(":") != 2:
+            continue
+        if await redis.type(key) != "hash":
+            continue
+        payload = await redis.hgetall(key)
+        if not payload:
+            continue
+        user_uuid = await _ensure_user_uuid(redis, user_key=key, payload=payload)
+        users.append(
+            {
+                "id": user_uuid,
+                "email": payload.get("email"),
+                "full_name": payload.get("full_name", ""),
+                "role": payload.get("role", "user"),
+                "is_active": payload.get("is_active", "true") == "true",
+                "created_at": payload.get("created_at"),
+                "last_seen_at": payload.get("last_seen_at"),
+            }
+        )
+    return users
+
+
+async def _load_feedback_snapshot(redis: Redis) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+
+    async def collect(kind: str, pattern: str) -> None:
+        async for key in redis.scan_iter(match=pattern):
+            if key.count(":") != 2:
+                continue
+            if await redis.type(key) != "hash":
+                continue
+            payload = await redis.hgetall(key)
+            if not payload:
+                continue
+            items.append(
+                {
+                    "kind": kind,
+                    "id": payload.get("id"),
+                    "status": str(payload.get("status", "pending")).strip().lower(),
+                    "created_at": payload.get("created_at"),
+                    "updated_at": payload.get("updated_at"),
+                    "moderated_at": payload.get("moderated_at"),
+                }
+            )
+
+    await collect("review", "feedback:review:rev_*")
+    await collect("question", "feedback:question:q_*")
+    return items
+
+
+def _build_orders_status_counts(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    counters: dict[str, int] = {}
+    for row in orders:
+        status = str(row.get("status", "unknown")).strip().lower() or "unknown"
+        counters[status] = counters.get(status, 0) + 1
+    return [{"status": status, "count": count} for status, count in sorted(counters.items(), key=lambda item: item[0])]
+
+
+def _build_revenue_series(
+    orders: list[dict[str, Any]],
+    *,
+    range_start: datetime,
+    range_end: datetime,
+    granularity: str,
+) -> list[dict[str, Any]]:
+    points = _init_series(range_start, range_end, granularity)
+    buckets: dict[str, dict[str, float]] = {
+        _series_ts(point): {"revenue": 0.0, "orders": 0.0}
+        for point in points
+    }
+    for row in orders:
+        created_at = _parse_iso_datetime(row.get("created_at"))
+        if not created_at or created_at < range_start:
+            continue
+        bucket = _bucket_start(created_at, granularity)
+        ts = _series_ts(bucket)
+        if ts not in buckets:
+            buckets[ts] = {"revenue": 0.0, "orders": 0.0}
+        buckets[ts]["orders"] += 1
+        buckets[ts]["revenue"] += _to_float(row.get("total_amount"))
+
+    series: list[dict[str, Any]] = []
+    for ts in sorted(buckets.keys()):
+        orders_value = int(buckets[ts]["orders"])
+        revenue_value = float(buckets[ts]["revenue"])
+        aov = (revenue_value / orders_value) if orders_value > 0 else 0.0
+        series.append(
+            {
+                "ts": ts,
+                "revenue": revenue_value,
+                "orders": orders_value,
+                "aov": aov,
+                "value": revenue_value,
+            }
+        )
+    return series
+
+
+def _build_moderation_series(
+    items: list[dict[str, Any]],
+    *,
+    range_start: datetime,
+    range_end: datetime,
+    granularity: str,
+) -> list[dict[str, Any]]:
+    points = _init_series(range_start, range_end, granularity)
+    buckets: dict[str, dict[str, int]] = {
+        _series_ts(point): {"pending": 0, "published": 0, "rejected": 0}
+        for point in points
+    }
+
+    for item in items:
+        status = str(item.get("status", "pending")).strip().lower()
+        if status not in {"pending", "published", "rejected"}:
+            continue
+        reference = _parse_iso_datetime(item.get("updated_at")) or _parse_iso_datetime(item.get("created_at"))
+        if not reference or reference < range_start:
+            continue
+        ts = _series_ts(_bucket_start(reference, granularity))
+        if ts not in buckets:
+            buckets[ts] = {"pending": 0, "published": 0, "rejected": 0}
+        buckets[ts][status] += 1
+
+    return [
+        {"ts": ts, "pending": values["pending"], "published": values["published"], "rejected": values["rejected"]}
+        for ts, values in sorted(buckets.items(), key=lambda item: item[0])
+    ]
+
+
+def _build_user_series(
+    users: list[dict[str, Any]],
+    *,
+    range_start: datetime,
+    range_end: datetime,
+    granularity: str,
+) -> list[dict[str, Any]]:
+    points = _init_series(range_start, range_end, granularity)
+    buckets: dict[str, int] = {_series_ts(point): 0 for point in points}
+    for user in users:
+        created_at = _parse_iso_datetime(user.get("created_at"))
+        if not created_at or created_at < range_start:
+            continue
+        ts = _series_ts(_bucket_start(created_at, granularity))
+        buckets[ts] = buckets.get(ts, 0) + 1
+    return [{"ts": ts, "value": count} for ts, count in sorted(buckets.items(), key=lambda item: item[0])]
+
+
+async def _query_quality_series(db: AsyncSession, *, since: datetime) -> list[dict[str, Any]]:
+    rows = (
+        await db.execute(
+            text(
+                """
+                select created_at, summary
+                from catalog_data_quality_reports
+                where created_at >= :since
+                order by created_at asc, id asc
+                """
+            ),
+            {"since": since},
+        )
+    ).mappings().all()
+    points: list[dict[str, Any]] = []
+    for row in rows:
+        summary = row.get("summary") if isinstance(row.get("summary"), dict) else {}
+        created_at = _parse_iso_datetime(row.get("created_at"))
+        if not created_at:
+            continue
+        points.append(
+            {
+                "ts": _series_ts(created_at),
+                "active_without_valid_offers_ratio": _to_float(summary.get("active_without_valid_offers_ratio")),
+                "search_mismatch_ratio": _to_float(summary.get("search_mismatch_ratio")),
+                "low_quality_image_ratio": _to_float(summary.get("low_quality_image_ratio")),
+            }
+        )
+    return points
+
+
+async def _query_latest_quality_report(db: AsyncSession) -> dict[str, Any] | None:
+    row = (
+        await db.execute(
+            text(
+                """
+                select uuid as id, status, summary, checks, created_at
+                from catalog_data_quality_reports
+                order by created_at desc, id desc
+                limit 1
+                """
+            )
+        )
+    ).mappings().first()
+    return _serialize_quality_report_row(dict(row)) if row else None
+
+
+async def _query_top_revenue_entities(db: AsyncSession, *, since: datetime, dimension: str, limit: int = 8) -> list[dict[str, Any]]:
+    if dimension == "store":
+        query = """
+            select s.uuid as id, s.name as name, sum(o.price_amount)::double precision as revenue_proxy, count(*)::int as offers
+            from catalog_offers o
+            join catalog_stores s on s.id = o.store_id
+            where o.scraped_at >= :since and o.is_valid = true and o.in_stock = true
+            group by s.id, s.uuid, s.name
+            order by revenue_proxy desc nulls last
+            limit :limit
+        """
+    elif dimension == "category":
+        query = """
+            select
+                c.uuid as id,
+                coalesce(c.name_uz, c.name_ru, c.name_en, c.slug) as name,
+                sum(o.price_amount)::double precision as revenue_proxy,
+                count(*)::int as offers
+            from catalog_offers o
+            join catalog_canonical_products cp on cp.id = o.canonical_product_id
+            join catalog_categories c on c.id = cp.category_id
+            where o.scraped_at >= :since and o.is_valid = true and o.in_stock = true
+            group by c.id, c.uuid, c.name_ru, c.name_uz, c.name_en, c.slug
+            order by revenue_proxy desc nulls last
+            limit :limit
+        """
+    else:
+        query = """
+            select b.uuid as id, b.name as name, sum(o.price_amount)::double precision as revenue_proxy, count(*)::int as offers
+            from catalog_offers o
+            join catalog_canonical_products cp on cp.id = o.canonical_product_id
+            join catalog_brands b on b.id = cp.brand_id
+            where o.scraped_at >= :since and o.is_valid = true and o.in_stock = true
+            group by b.id, b.uuid, b.name
+            order by revenue_proxy desc nulls last
+            limit :limit
+        """
+    rows = (await db.execute(text(query), {"since": since, "limit": max(1, limit)})).mappings().all()
+    return [
+        {
+            "id": row.get("id"),
+            "name": row.get("name"),
+            "revenue_proxy": _to_float(row.get("revenue_proxy")),
+            "offers": _to_int(row.get("offers")),
+        }
+        for row in rows
+    ]
+
+
+async def _query_quality_no_offer_breakdown(db: AsyncSession, *, limit: int = 8) -> list[dict[str, Any]]:
+    rows = (
+        await db.execute(
+            text(
+                """
+                with offer_stats as (
+                    select
+                        cp.id,
+                        cp.category_id,
+                        count(distinct case when o.is_valid = true and o.in_stock = true then o.store_id end) as valid_store_count
+                    from catalog_canonical_products cp
+                    left join catalog_offers o on o.canonical_product_id = cp.id
+                    where cp.is_active = true
+                    group by cp.id, cp.category_id
+                )
+                select
+                    c.uuid as category_id,
+                    coalesce(c.name_uz, c.name_ru, c.name_en, c.slug) as category_name,
+                    count(*)::int as products
+                from offer_stats s
+                join catalog_categories c on c.id = s.category_id
+                where s.valid_store_count = 0
+                group by c.id, c.uuid, c.name_ru, c.name_uz, c.name_en, c.slug
+                order by products desc, category_name asc
+                limit :limit
+                """
+            ),
+            {"limit": max(1, limit)},
+        )
+    ).mappings().all()
+    return [
+        {"category_id": row.get("category_id"), "category_name": row.get("category_name"), "products": _to_int(row.get("products"))}
+        for row in rows
+    ]
+
+
+async def _query_operations_metrics(db: AsyncSession, *, since: datetime) -> dict[str, Any]:
+    status_rows = (
+        await db.execute(
+            text(
+                """
+                select lower(status) as status, count(*)::int as total
+                from catalog_crawl_jobs
+                where started_at >= :since
+                group by lower(status)
+                order by total desc, status asc
+                """
+            ),
+            {"since": since},
+        )
+    ).mappings().all()
+    status_breakdown = [{"status": row.get("status") or "unknown", "count": _to_int(row.get("total"))} for row in status_rows]
+    total_runs = sum(item["count"] for item in status_breakdown)
+    failed_runs = sum(item["count"] for item in status_breakdown if item["status"] in {"failed", "failure", "error", "cancelled"})
+    success_rate = (float(max(total_runs - failed_runs, 0)) / float(total_runs)) if total_runs > 0 else 1.0
+    failed_rate = (float(failed_runs) / float(total_runs)) if total_runs > 0 else 0.0
+
+    duration_rows = (
+        await db.execute(
+            text(
+                """
+                select
+                    date_trunc('day', started_at) as bucket,
+                    avg(extract(epoch from (coalesce(finished_at, now()) - started_at)))::double precision as avg_duration_sec
+                from catalog_crawl_jobs
+                where started_at >= :since
+                group by bucket
+                order by bucket asc
+                """
+            ),
+            {"since": since},
+        )
+    ).mappings().all()
+    duration_series = [
+        {"ts": _series_ts(_parse_iso_datetime(row.get("bucket")) or since), "avg_duration_sec": _to_float(row.get("avg_duration_sec"))}
+        for row in duration_rows
+    ]
+
+    queue_row = (
+        await db.execute(
+            text(
+                """
+                select
+                    count(*) filter (where is_active = true)::int as active_sources,
+                    count(*)::int as total_sources
+                from catalog_scrape_sources
+                """
+            )
+        )
+    ).mappings().one()
+
+    return {
+        "summary": {
+            "runs_total": total_runs,
+            "failed_runs": failed_runs,
+            "success_rate": success_rate,
+            "failed_task_rate_24h": failed_rate,
+            "active_sources": _to_int(queue_row.get("active_sources")),
+            "total_sources": _to_int(queue_row.get("total_sources")),
+        },
+        "status_breakdown": status_breakdown,
+        "duration_series": duration_series,
+    }
+
+
+async def _evaluate_and_store_alert_events(
+    *,
+    db: AsyncSession,
+    redis: Redis,
+    quality_risk_ratio: float,
+    search_mismatch_ratio: float,
+    pending_total: int,
+    cancel_rate: float,
+    failed_task_rate_24h: float,
+) -> dict[str, int]:
+    rules = [
+        {
+            "code": "catalog_quality.active_without_valid_offers_ratio",
+            "title": "Высокая доля товаров без валидных офферов",
+            "source": "catalog_quality",
+            "metric_value": float(quality_risk_ratio),
+            "warn_threshold": float(settings.admin_alert_quality_warn_ratio),
+            "critical_threshold": float(settings.admin_alert_quality_critical_ratio),
+        },
+        {
+            "code": "catalog_quality.search_mismatch_ratio",
+            "title": "Высокий search mismatch в каталоге",
+            "source": "catalog_quality",
+            "metric_value": float(search_mismatch_ratio),
+            "warn_threshold": float(settings.admin_alert_search_mismatch_warn_ratio),
+            "critical_threshold": float(settings.admin_alert_search_mismatch_critical_ratio),
+        },
+        {
+            "code": "moderation.pending_total",
+            "title": "Очередь модерации растет",
+            "source": "moderation",
+            "metric_value": float(pending_total),
+            "warn_threshold": float(settings.admin_alert_moderation_pending_warn),
+            "critical_threshold": float(settings.admin_alert_moderation_pending_critical),
+        },
+        {
+            "code": "orders.cancel_rate",
+            "title": "Высокая доля отмен заказов",
+            "source": "revenue",
+            "metric_value": float(cancel_rate),
+            "warn_threshold": float(settings.admin_alert_order_cancel_rate_warn),
+            "critical_threshold": float(settings.admin_alert_order_cancel_rate_critical),
+        },
+        {
+            "code": "operations.failed_task_rate_24h",
+            "title": "Повышенная доля неуспешных операций",
+            "source": "operations",
+            "metric_value": float(failed_task_rate_24h),
+            "warn_threshold": float(settings.admin_alert_operation_failed_rate_warn),
+            "critical_threshold": float(settings.admin_alert_operation_failed_rate_critical),
+        },
+    ]
+
+    opened = 0
+    resolved = 0
+    updated = 0
+
+    for rule in rules:
+        severity = _severity_by_threshold(
+            float(rule["metric_value"]),
+            warn=float(rule["warn_threshold"]),
+            critical=float(rule["critical_threshold"]),
+        )
+        current = (
+            await db.execute(
+                text(
+                    """
+                    select id
+                    from admin_alert_events
+                    where code = :code
+                      and status in ('open', 'ack')
+                    order by created_at desc, id desc
+                    limit 1
+                    """
+                ),
+                {"code": str(rule["code"])},
+            )
+        ).mappings().first()
+
+        if severity is None:
+            if current:
+                await db.execute(
+                    text(
+                        """
+                        update admin_alert_events
+                        set status = 'resolved',
+                            resolved_at = now(),
+                            updated_at = now()
+                        where id = :id
+                        """
+                    ),
+                    {"id": _to_int(current.get("id"))},
+                )
+                resolved += 1
+            continue
+
+        payload = {
+            "title": str(rule["title"]),
+            "source": str(rule["source"]),
+            "severity": str(severity),
+            "metric_value": float(rule["metric_value"]),
+            "threshold_value": float(rule["critical_threshold"] if severity == "critical" else rule["warn_threshold"]),
+            "context": json.dumps(
+                {
+                    "warn_threshold": float(rule["warn_threshold"]),
+                    "critical_threshold": float(rule["critical_threshold"]),
+                    "metric_value": float(rule["metric_value"]),
+                },
+                ensure_ascii=False,
+            ),
+        }
+
+        if current:
+            await db.execute(
+                text(
+                    """
+                    update admin_alert_events
+                    set title = :title,
+                        source = :source,
+                        severity = :severity,
+                        status = 'open',
+                        metric_value = :metric_value,
+                        threshold_value = :threshold_value,
+                        context = cast(:context as jsonb),
+                        acknowledged_at = null,
+                        resolved_at = null,
+                        updated_at = now()
+                    where id = :id
+                    """
+                ),
+                {"id": _to_int(current.get("id")), **payload},
+            )
+            updated += 1
+            continue
+
+        await db.execute(
+            text(
+                """
+                insert into admin_alert_events (
+                    code,
+                    title,
+                    source,
+                    severity,
+                    status,
+                    metric_value,
+                    threshold_value,
+                    context
+                )
+                values (
+                    :code,
+                    :title,
+                    :source,
+                    :severity,
+                    'open',
+                    :metric_value,
+                    :threshold_value,
+                    cast(:context as jsonb)
+                )
+                """
+            ),
+            {"code": str(rule["code"]), **payload},
+        )
+        opened += 1
+
+    await db.commit()
+    if opened or updated or resolved:
+        await _invalidate_admin_analytics_cache(redis)
+    return {"opened": opened, "updated": updated, "resolved": resolved}
+
+
+async def _query_alert_events(
+    *,
+    db: AsyncSession,
+    status: str = "open",
+    severity: str | None = None,
+    source: str | None = None,
+    code: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any]:
+    where_parts = ["1=1"]
+    params: dict[str, Any] = {"limit": max(1, min(limit, 200)), "offset": max(0, offset)}
+    if status in ALERT_EVENT_STATUSES:
+        where_parts.append("status = :status")
+        params["status"] = status
+    if severity and severity in ALERT_EVENT_SEVERITIES:
+        where_parts.append("severity = :severity")
+        params["severity"] = severity
+    if source and source in ALERT_EVENT_SOURCES:
+        where_parts.append("source = :source")
+        params["source"] = source
+    if code:
+        where_parts.append("code = :code")
+        params["code"] = code
+
+    where_sql = " and ".join(where_parts)
+    total = _to_int(
+        (
+            await db.execute(
+                text(f"select count(*)::int as c from admin_alert_events where {where_sql}"),
+                params,
+            )
+        ).scalar_one()
+    )
+    rows = (
+        await db.execute(
+            text(
+                f"""
+                select
+                    uuid as id,
+                    code,
+                    title,
+                    source,
+                    severity,
+                    status,
+                    metric_value,
+                    threshold_value,
+                    context,
+                    created_at,
+                    acknowledged_at,
+                    resolved_at
+                from admin_alert_events
+                where {where_sql}
+                order by created_at desc, id desc
+                limit :limit
+                offset :offset
+                """
+            ),
+            params,
+        )
+    ).mappings().all()
+    return {
+        "items": [_serialize_alert_event_row(dict(row)) for row in rows],
+        "total": total,
+        "limit": params["limit"],
+        "offset": params["offset"],
+    }
+
+
+async def _collect_alert_input_metrics(*, db: AsyncSession, redis: Redis) -> dict[str, Any]:
+    latest_quality = await _query_latest_quality_report(db)
+    quality_summary = latest_quality.get("summary", {}) if isinstance(latest_quality, dict) else {}
+    quality_risk_ratio = _to_float(quality_summary.get("active_without_valid_offers_ratio"))
+    search_mismatch_ratio = _to_float(quality_summary.get("search_mismatch_ratio"))
+
+    orders = await _load_orders_snapshot(redis)
+    cancelled_orders = sum(1 for row in orders if str(row.get("status", "")).strip().lower() == "cancelled")
+    total_orders = len(orders)
+    cancel_rate = (float(cancelled_orders) / float(total_orders)) if total_orders > 0 else 0.0
+
+    feedback_items = await _load_feedback_snapshot(redis)
+    pending_total = sum(1 for item in feedback_items if str(item.get("status", "")).strip().lower() == "pending")
+
+    operations = await _query_operations_metrics(db, since=datetime.now(UTC) - timedelta(hours=24))
+    failed_task_rate_24h = _to_float(operations["summary"].get("failed_task_rate_24h"))
+
+    return {
+        "quality_risk_ratio": quality_risk_ratio,
+        "search_mismatch_ratio": search_mismatch_ratio,
+        "pending_total": pending_total,
+        "cancel_rate": cancel_rate,
+        "failed_task_rate_24h": failed_task_rate_24h,
+    }
+
+
 @router.get("/users", response_model=PaginatedOut)
 async def list_users(
     q: str | None = Query(default=None),
@@ -1782,6 +2551,473 @@ async def analytics(period: str = Query(default="30d"), db: AsyncSession = Depen
             {"id": secrets.token_hex(4), "title": f"Period: {period}", "timestamp": datetime.now(UTC).isoformat()},
         ],
     }
+
+
+@router.get("/analytics/overview")
+async def analytics_overview(
+    period: str = Query(default="30d"),
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),
+) -> dict[str, Any]:
+    days = _period_to_days(period)
+    cache_key = _admin_analytics_cache_key("overview", {"period": period})
+    cached = await _get_cached_admin_analytics(redis, cache_key)
+    if cached is not None:
+        return cached
+
+    now = datetime.now(UTC)
+    since = now - timedelta(days=days)
+    orders = await _load_orders_snapshot(redis)
+    period_orders = [row for row in orders if (_parse_iso_datetime(row.get("created_at")) or now) >= since]
+    orders_count = len(period_orders)
+    revenue = sum(_to_float(row.get("total_amount")) for row in period_orders)
+    aov = (revenue / orders_count) if orders_count > 0 else 0.0
+
+    revenue_series_raw = _build_revenue_series(period_orders, range_start=since, range_end=now, granularity="day")
+    quality_series = await _query_quality_series(db, since=since)
+    if not quality_series:
+        quality_series = [
+            {
+                "ts": _series_ts(point),
+                "active_without_valid_offers_ratio": 0.0,
+                "search_mismatch_ratio": 0.0,
+                "low_quality_image_ratio": 0.0,
+            }
+            for point in _init_series(since, now, "day")
+        ]
+
+    feedback_items = await _load_feedback_snapshot(redis)
+    moderation_pending = sum(1 for item in feedback_items if str(item.get("status", "")).strip().lower() == "pending")
+    moderation_series = _build_moderation_series(feedback_items, range_start=since, range_end=now, granularity="day")
+
+    active_products = _to_int(
+        (
+            await db.execute(
+                text("select count(*)::int as c from catalog_canonical_products where is_active = true")
+            )
+        ).scalar_one()
+    )
+
+    alert_inputs = await _collect_alert_input_metrics(db=db, redis=redis)
+    if settings.admin_alerts_enabled:
+        await _evaluate_and_store_alert_events(db=db, redis=redis, **alert_inputs)
+    alerts_preview = (await _query_alert_events(db=db, status="open", limit=5, offset=0)).get("items", [])
+
+    payload = {
+        "period": period,
+        "range": {"from": since.isoformat(), "to": now.isoformat(), "days": days},
+        "kpis": {
+            "revenue": revenue,
+            "orders": orders_count,
+            "aov": aov,
+            "active_products": active_products,
+            "quality_risk_ratio": _to_float(alert_inputs["quality_risk_ratio"]),
+            "moderation_pending": moderation_pending,
+        },
+        "revenue_series": [{"ts": row["ts"], "value": _to_float(row["revenue"])} for row in revenue_series_raw],
+        "orders_by_status": _build_orders_status_counts(period_orders),
+        "quality_series": quality_series,
+        "moderation_series": moderation_series,
+        "alerts_preview": alerts_preview,
+        "generated_at": now.isoformat(),
+    }
+    await _set_cached_admin_analytics(redis, cache_key, payload, ttl_seconds=60)
+    return payload
+
+
+@router.get("/analytics/revenue")
+async def analytics_revenue(
+    period: str = Query(default="30d"),
+    granularity: str = Query(default="day"),
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),
+) -> dict[str, Any]:
+    days = _period_to_days(period)
+    normalized_granularity = _normalize_granularity(granularity)
+    cache_key = _admin_analytics_cache_key(
+        "revenue",
+        {"period": period, "granularity": normalized_granularity},
+    )
+    cached = await _get_cached_admin_analytics(redis, cache_key)
+    if cached is not None:
+        return cached
+
+    now = datetime.now(UTC)
+    since = now - timedelta(days=days)
+    orders = await _load_orders_snapshot(redis)
+    period_orders = [row for row in orders if (_parse_iso_datetime(row.get("created_at")) or now) >= since]
+    total_orders = len(period_orders)
+    revenue = sum(_to_float(row.get("total_amount")) for row in period_orders)
+    cancelled_orders = sum(1 for row in period_orders if str(row.get("status", "")).strip().lower() == "cancelled")
+    cancel_rate = (float(cancelled_orders) / float(total_orders)) if total_orders > 0 else 0.0
+
+    payload = {
+        "period": period,
+        "granularity": normalized_granularity,
+        "range": {"from": since.isoformat(), "to": now.isoformat(), "days": days},
+        "summary": {
+            "revenue": revenue,
+            "orders": total_orders,
+            "aov": (revenue / total_orders) if total_orders > 0 else 0.0,
+            "cancel_rate": cancel_rate,
+            "cancelled_orders": cancelled_orders,
+        },
+        "series": _build_revenue_series(
+            period_orders,
+            range_start=since,
+            range_end=now,
+            granularity=normalized_granularity,
+        ),
+        "orders_by_status": _build_orders_status_counts(period_orders),
+        "top_stores": await _query_top_revenue_entities(db, since=since, dimension="store"),
+        "top_categories": await _query_top_revenue_entities(db, since=since, dimension="category"),
+        "top_brands": await _query_top_revenue_entities(db, since=since, dimension="brand"),
+        "generated_at": now.isoformat(),
+    }
+    await _set_cached_admin_analytics(redis, cache_key, payload, ttl_seconds=60)
+    return payload
+
+
+@router.get("/analytics/catalog-quality")
+async def analytics_catalog_quality(
+    period: str = Query(default="30d"),
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),
+) -> dict[str, Any]:
+    days = _period_to_days(period)
+    cache_key = _admin_analytics_cache_key("catalog-quality", {"period": period})
+    cached = await _get_cached_admin_analytics(redis, cache_key)
+    if cached is not None:
+        return cached
+
+    now = datetime.now(UTC)
+    since = now - timedelta(days=days)
+    latest_report = await _query_latest_quality_report(db)
+    summary = latest_report.get("summary", {}) if isinstance(latest_report, dict) else {}
+    timeline = await _query_quality_series(db, since=since)
+    no_offer_breakdown = await _query_quality_no_offer_breakdown(db, limit=8)
+    no_offer_items = (
+        await list_quality_products_without_valid_offers(limit=6, offset=0, active_only=True, db=db)
+    ).get("items", [])
+
+    payload = {
+        "period": period,
+        "range": {"from": since.isoformat(), "to": now.isoformat(), "days": days},
+        "latest_report": latest_report,
+        "summary": {
+            "active_without_valid_offers_ratio": _to_float(summary.get("active_without_valid_offers_ratio")),
+            "search_mismatch_ratio": _to_float(summary.get("search_mismatch_ratio")),
+            "stale_offer_ratio": _to_float(summary.get("stale_offer_ratio")),
+            "low_quality_image_ratio": _to_float(summary.get("low_quality_image_ratio")),
+            "active_without_valid_offers": _to_int(summary.get("active_without_valid_offers")),
+            "search_mismatch_products": _to_int(summary.get("search_mismatch_products")),
+            "stale_valid_offers": _to_int(summary.get("stale_valid_offers")),
+            "low_quality_main_image_products": _to_int(summary.get("low_quality_main_image_products")),
+        },
+        "timeline": timeline,
+        "no_valid_offer_breakdown": no_offer_breakdown,
+        "problem_products": no_offer_items,
+        "generated_at": now.isoformat(),
+    }
+    await _set_cached_admin_analytics(redis, cache_key, payload, ttl_seconds=60)
+    return payload
+
+
+@router.get("/analytics/operations")
+async def analytics_operations(
+    period: str = Query(default="30d"),
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),
+) -> dict[str, Any]:
+    days = _period_to_days(period)
+    cache_key = _admin_analytics_cache_key("operations", {"period": period})
+    cached = await _get_cached_admin_analytics(redis, cache_key)
+    if cached is not None:
+        return cached
+
+    now = datetime.now(UTC)
+    since = now - timedelta(days=days)
+    metrics = await _query_operations_metrics(db, since=since)
+    latest_quality = await _query_latest_quality_report(db)
+
+    payload = {
+        "period": period,
+        "range": {"from": since.isoformat(), "to": now.isoformat(), "days": days},
+        "summary": metrics.get("summary", {}),
+        "status_breakdown": metrics.get("status_breakdown", []),
+        "duration_series": metrics.get("duration_series", []),
+        "latest_quality_status": latest_quality.get("status") if isinstance(latest_quality, dict) else None,
+        "pipeline_actions": [
+            {"task": "scrape", "label": "Run scrape"},
+            {"task": "embedding", "label": "Rebuild embeddings"},
+            {"task": "dedupe", "label": "Run dedupe"},
+            {"task": "reindex", "label": "Reindex search"},
+            {"task": "quality", "label": "Run quality check"},
+            {"task": "catalog", "label": "Run catalog rebuild"},
+        ],
+        "generated_at": now.isoformat(),
+    }
+    await _set_cached_admin_analytics(redis, cache_key, payload, ttl_seconds=60)
+    return payload
+
+
+@router.get("/analytics/moderation")
+async def analytics_moderation(
+    period: str = Query(default="30d"),
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),
+) -> dict[str, Any]:
+    _ = db
+    days = _period_to_days(period)
+    cache_key = _admin_analytics_cache_key("moderation", {"period": period})
+    cached = await _get_cached_admin_analytics(redis, cache_key)
+    if cached is not None:
+        return cached
+
+    now = datetime.now(UTC)
+    since = now - timedelta(days=days)
+    items = await _load_feedback_snapshot(redis)
+    status_counts = {"published": 0, "pending": 0, "rejected": 0}
+    kind_counts = {"review": 0, "question": 0}
+    durations: list[float] = []
+    throughput_24h = 0
+    limit_24h = now - timedelta(hours=24)
+
+    for item in items:
+        kind = str(item.get("kind", "review")).strip().lower()
+        if kind in kind_counts:
+            kind_counts[kind] += 1
+        status = str(item.get("status", "pending")).strip().lower()
+        if status in status_counts:
+            status_counts[status] += 1
+        updated_at = _parse_iso_datetime(item.get("updated_at"))
+        if updated_at and updated_at >= limit_24h and status in {"published", "rejected"}:
+            throughput_24h += 1
+        created_at = _parse_iso_datetime(item.get("created_at"))
+        moderated_at = _parse_iso_datetime(item.get("moderated_at"))
+        if created_at and moderated_at and moderated_at >= created_at:
+            durations.append((moderated_at - created_at).total_seconds() / 60.0)
+
+    publish_reject_ratio = (
+        float(status_counts["published"]) / float(status_counts["rejected"])
+        if status_counts["rejected"] > 0
+        else float(status_counts["published"])
+    )
+
+    payload = {
+        "period": period,
+        "range": {"from": since.isoformat(), "to": now.isoformat(), "days": days},
+        "summary": {
+            "total": len(items),
+            "pending": status_counts["pending"],
+            "published": status_counts["published"],
+            "rejected": status_counts["rejected"],
+            "throughput_24h": throughput_24h,
+            "median_moderation_minutes": _median(durations),
+            "publish_reject_ratio": publish_reject_ratio,
+        },
+        "kind_counts": kind_counts,
+        "status_counts": status_counts,
+        "series": _build_moderation_series(items, range_start=since, range_end=now, granularity="day"),
+        "generated_at": now.isoformat(),
+    }
+    await _set_cached_admin_analytics(redis, cache_key, payload, ttl_seconds=60)
+    return payload
+
+
+@router.get("/analytics/users")
+async def analytics_users(
+    period: str = Query(default="30d"),
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),
+) -> dict[str, Any]:
+    _ = db
+    days = _period_to_days(period)
+    cache_key = _admin_analytics_cache_key("users", {"period": period})
+    cached = await _get_cached_admin_analytics(redis, cache_key)
+    if cached is not None:
+        return cached
+
+    now = datetime.now(UTC)
+    since = now - timedelta(days=days)
+    users = await _load_users_snapshot(redis)
+
+    new_users = 0
+    active_users_30d = 0
+    role_counts: dict[str, int] = defaultdict(int)
+    activity_points = _init_series(since, now, "day")
+    activity_buckets: dict[str, int] = {_series_ts(point): 0 for point in activity_points}
+    activity_cutoff = now - timedelta(days=30)
+
+    for user in users:
+        role = str(user.get("role", "user")).strip().lower() or "user"
+        role_counts[role] += 1
+        created_at = _parse_iso_datetime(user.get("created_at"))
+        if created_at and created_at >= since:
+            new_users += 1
+        last_seen_at = _parse_iso_datetime(user.get("last_seen_at"))
+        if last_seen_at and last_seen_at >= activity_cutoff:
+            active_users_30d += 1
+        if last_seen_at and last_seen_at >= since:
+            ts = _series_ts(_bucket_start(last_seen_at, "day"))
+            activity_buckets[ts] = activity_buckets.get(ts, 0) + 1
+
+    payload = {
+        "period": period,
+        "range": {"from": since.isoformat(), "to": now.isoformat(), "days": days},
+        "summary": {
+            "total_users": len(users),
+            "new_users": new_users,
+            "active_users_30d": active_users_30d,
+            "inactive_users_30d": max(len(users) - active_users_30d, 0),
+        },
+        "role_distribution": [{"role": role, "count": count} for role, count in sorted(role_counts.items(), key=lambda item: item[0])],
+        "created_series": _build_user_series(users, range_start=since, range_end=now, granularity="day"),
+        "activity_series": [{"ts": ts, "value": count} for ts, count in sorted(activity_buckets.items(), key=lambda item: item[0])],
+        "generated_at": now.isoformat(),
+    }
+    await _set_cached_admin_analytics(redis, cache_key, payload, ttl_seconds=60)
+    return payload
+
+
+@router.get("/analytics/alerts")
+async def analytics_alerts(
+    status: str = Query(default="open", pattern="^(open|ack|resolved)$"),
+    severity: str | None = Query(default=None, pattern="^(info|warning|critical)$"),
+    source: str | None = Query(default=None, pattern="^(revenue|catalog_quality|operations|moderation|users)$"),
+    code: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    refresh: bool = Query(default=True),
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),
+) -> dict[str, Any]:
+    cache_key = _admin_analytics_cache_key(
+        "alerts",
+        {
+            "status": status,
+            "severity": severity,
+            "source": source,
+            "code": code,
+            "limit": limit,
+            "offset": offset,
+            "refresh": refresh,
+        },
+    )
+    cached = await _get_cached_admin_analytics(redis, cache_key)
+    if cached is not None:
+        return cached
+
+    changes = {"opened": 0, "updated": 0, "resolved": 0}
+    if refresh and settings.admin_alerts_enabled:
+        inputs = await _collect_alert_input_metrics(db=db, redis=redis)
+        changes = await _evaluate_and_store_alert_events(db=db, redis=redis, **inputs)
+
+    result = await _query_alert_events(
+        db=db,
+        status=status,
+        severity=severity,
+        source=source,
+        code=code,
+        limit=limit,
+        offset=offset,
+    )
+    payload = {
+        **result,
+        "changes": changes,
+        "generated_at": datetime.now(UTC).isoformat(),
+    }
+    await _set_cached_admin_analytics(redis, cache_key, payload, ttl_seconds=60)
+    return payload
+
+
+@router.patch("/analytics/alerts/{alert_id}/ack")
+async def acknowledge_alert_event(
+    alert_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),
+) -> dict[str, Any]:
+    normalized = _normalize_uuid_ref(alert_id, field_name="alert_id")
+    row = (
+        await db.execute(
+            text(
+                """
+                update admin_alert_events
+                set status = 'ack',
+                    acknowledged_at = now(),
+                    updated_at = now()
+                where uuid = cast(:uuid as uuid)
+                returning
+                    uuid as id,
+                    code,
+                    title,
+                    source,
+                    severity,
+                    status,
+                    metric_value,
+                    threshold_value,
+                    context,
+                    created_at,
+                    acknowledged_at,
+                    resolved_at
+                """
+            ),
+            {"uuid": normalized},
+        )
+    ).mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="alert event not found")
+    await db.commit()
+    await _invalidate_admin_analytics_cache(redis)
+    return _serialize_alert_event_row(dict(row))
+
+
+@router.patch("/analytics/alerts/{alert_id}/resolve")
+async def resolve_alert_event(
+    alert_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),
+) -> dict[str, Any]:
+    normalized = _normalize_uuid_ref(alert_id, field_name="alert_id")
+    row = (
+        await db.execute(
+            text(
+                """
+                update admin_alert_events
+                set status = 'resolved',
+                    resolved_at = now(),
+                    updated_at = now()
+                where uuid = cast(:uuid as uuid)
+                returning
+                    uuid as id,
+                    code,
+                    title,
+                    source,
+                    severity,
+                    status,
+                    metric_value,
+                    threshold_value,
+                    context,
+                    created_at,
+                    acknowledged_at,
+                    resolved_at
+                """
+            ),
+            {"uuid": normalized},
+        )
+    ).mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="alert event not found")
+    await db.commit()
+    await _invalidate_admin_analytics_cache(redis)
+    return _serialize_alert_event_row(dict(row))
+
+
+@router.post("/analytics/alerts/evaluate")
+async def enqueue_alert_evaluation(redis: Redis = Depends(get_redis)) -> dict[str, Any]:
+    task_id = enqueue_admin_alert_evaluation()
+    await _invalidate_admin_analytics_cache(redis)
+    return {"task_id": task_id, "queued": "maintenance"}
 
 
 @router.get("/settings")

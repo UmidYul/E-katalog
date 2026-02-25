@@ -19,7 +19,7 @@ const parseProductRef = (slug: string) => {
 export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
   const productRef = parseProductRef(params.slug);
   if (!productRef) {
-    return { title: "Product" };
+    return { title: "Товар" };
   }
 
   try {
@@ -33,13 +33,18 @@ export async function generateMetadata({ params }: { params: { slug: string } })
       alternates: { canonical: `${env.appUrl}/product/${params.slug}` }
     };
   } catch {
-    return { title: "Product" };
+    return { title: "Товар" };
   }
 }
 
-export default function ProductPage({ params }: { params: { slug: string } }) {
+export default async function ProductPage({ params }: { params: { slug: string } }) {
   const productRef = parseProductRef(params.slug);
   if (!productRef) {
+    notFound();
+  }
+  try {
+    await serverGet<{ id: string }>(`/products/${productRef}`);
+  } catch {
     notFound();
   }
   return <ProductClientPage productId={productRef} slug={params.slug} />;

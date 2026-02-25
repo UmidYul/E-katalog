@@ -12,8 +12,8 @@ import type { OffersByStore } from "@/types/domain";
 
 const formatScrapedAt = (value: string) => {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Unknown time";
-  return `${date.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+  if (Number.isNaN(date.getTime())) return "Неизвестно";
+  return new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(date);
 };
 
 export function OfferTable({ offersByStore }: { offersByStore: OffersByStore[] }) {
@@ -34,27 +34,27 @@ export function OfferTable({ offersByStore }: { offersByStore: OffersByStore[] }
   return (
     <Card>
       <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <CardTitle>Price comparison by store</CardTitle>
+        <CardTitle>Сравнение цен по магазинам</CardTitle>
         <div className="flex items-center gap-2">
           <Select value={sortBy} onValueChange={(value) => setSortBy(value as "price" | "seller_rating" | "delivery")}>
-            <div className="w-[180px]">
+            <div className="w-[220px]">
               <SelectTrigger>
-              <SelectValue />
+                <SelectValue />
               </SelectTrigger>
             </div>
             <SelectContent>
-              <SelectItem value="price">Sort by price</SelectItem>
-              <SelectItem value="seller_rating">Sort by sellers count</SelectItem>
-              <SelectItem value="delivery">Sort by delivery</SelectItem>
+              <SelectItem value="price">Сначала по цене</SelectItem>
+              <SelectItem value="seller_rating">По числу предложений</SelectItem>
+              <SelectItem value="delivery">По скорости доставки</SelectItem>
             </SelectContent>
           </Select>
           <Button
             variant="ghost"
             size="sm"
             className="gap-2"
-            onClick={() => navigator.share?.({ url: window.location.href, title: "Product offers" })}
+            onClick={() => navigator.share?.({ url: window.location.href, title: "Предложения по товару" })}
           >
-            <Share2 className="h-4 w-4" /> Share
+            <Share2 className="h-4 w-4" /> Поделиться
           </Button>
         </div>
       </CardHeader>
@@ -67,26 +67,24 @@ export function OfferTable({ offersByStore }: { offersByStore: OffersByStore[] }
             </div>
             <div className="space-y-2">
               {storeBlock.offers.map((offer) => (
-                <div key={offer.id} className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-3">
+                <div key={offer.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border px-3 py-3">
                   <div>
                     <p className="font-medium">{offer.seller_name}</p>
-                    <p className="text-xs text-muted-foreground">Updated {formatScrapedAt(offer.scraped_at)}</p>
+                    <p className="text-xs text-muted-foreground">Обновлено: {formatScrapedAt(offer.scraped_at)}</p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Badge className={offer.in_stock ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}>
-                      {offer.in_stock ? "In stock" : "Out of stock"}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge className={offer.in_stock ? "border-success/40 bg-success/15 text-success" : "border-destructive/40 bg-destructive/15 text-destructive"}>
+                      {offer.in_stock ? "В наличии" : "Нет в наличии"}
                     </Badge>
-                    {offer.delivery_days !== null && offer.delivery_days !== undefined ? (
-                      <Badge>{offer.delivery_days}d</Badge>
-                    ) : null}
+                    {offer.delivery_days !== null && offer.delivery_days !== undefined ? <Badge>{offer.delivery_days} дн.</Badge> : null}
                     <span className="text-base font-semibold text-primary">{formatPrice(offer.price_amount, offer.currency)}</span>
                     <a
                       href={offer.link}
                       target="_blank"
                       rel="noreferrer"
-                      className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-xs font-medium transition-colors hover:bg-secondary"
+                      className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-xs font-semibold transition-colors hover:bg-secondary"
                     >
-                      Buy <ExternalLink className="h-3.5 w-3.5" />
+                      Купить <ExternalLink className="h-3.5 w-3.5" />
                     </a>
                   </div>
                 </div>

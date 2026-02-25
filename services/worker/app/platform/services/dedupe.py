@@ -27,6 +27,39 @@ _SIM_TOKENS_PATTERN = re.compile(
     flags=re.IGNORECASE,
 )
 _STORAGE_VALUE_PATTERN = re.compile(r"\b(64|128|256|512|1024)\b")
+_COLOR_KEY_CANDIDATES = ("color", "colour")
+
+
+def _normalize_color(raw_value: str | None) -> str | None:
+    if not raw_value:
+        return None
+    text = normalize_title(str(raw_value)).strip().lower()
+    if not text:
+        return None
+    compact = re.sub(r"[^a-z0-9]+", " ", text).strip()
+    if not compact:
+        return None
+
+    if re.search(r"\b(black|midnight|graphite)\b", compact):
+        return "black"
+    if re.search(r"\b(white|starlight)\b", compact):
+        return "white"
+    if re.search(r"\b(silver|gray|grey)\b", compact):
+        return "silver_gray"
+    if re.search(r"\b(blue|navy)\b", compact):
+        return "blue"
+    if re.search(r"\b(green)\b", compact):
+        return "green"
+    if re.search(r"\b(red)\b", compact):
+        return "red"
+    if re.search(r"\b(purple|violet|lavender)\b", compact):
+        return "purple"
+    if re.search(r"\b(pink)\b", compact):
+        return "pink"
+    if re.search(r"\b(gold|yellow)\b", compact):
+        return "gold_yellow"
+
+    return compact
 
 
 def _title_without_sim_tokens(value: str) -> str:
@@ -45,6 +78,17 @@ def _storage_from_specs(specs: dict | None) -> str | None:
         match = _STORAGE_VALUE_PATTERN.search(str(raw_value))
         if match:
             return match.group(1)
+    return None
+
+
+def _color_from_specs(specs: dict | None) -> str | None:
+    if not isinstance(specs, dict):
+        return None
+    for key in _COLOR_KEY_CANDIDATES:
+        raw_value = specs.get(key)
+        normalized = _normalize_color(str(raw_value) if raw_value is not None else None)
+        if normalized:
+            return normalized
     return None
 
 
@@ -67,7 +111,10 @@ def _structural_key(product: CatalogCanonicalProduct) -> str | None:
         brand = f"brand#{product.brand_id}"
     if brand == "unknown":
         return None
-    return f"{brand}|{model}|{storage}"
+    color = _color_from_specs(product.specs if isinstance(product.specs, dict) else None)
+    if color is None:
+        return None
+    return f"{brand}|{model}|{storage}|{color}"
 
 
 def _spec_overlap_score(specs_a: dict, specs_b: dict) -> float:
@@ -103,7 +150,7 @@ def _pair_score(a: CatalogCanonicalProduct, b: CatalogCanonicalProduct) -> tuple
     left_key = _structural_key(a)
     right_key = _structural_key(b)
     if left_key and right_key and left_key == right_key:
-        # Strong duplicate signal for canonical products: same brand/model/storage key.
+        # Strong duplicate signal for canonical products: same brand/model/storage/color key.
         score = max(score, 0.97)
         reason = "same_structural_key"
 

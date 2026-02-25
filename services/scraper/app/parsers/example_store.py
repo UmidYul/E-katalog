@@ -28,12 +28,19 @@ class ExampleStoreParser(StoreParser):
         self._product_cache: dict[str, ParsedProduct] = {}
 
     async def discover_product_links(self, category_url: str) -> list[str]:
-        response = await self._http.get(category_url)
-        self._cache_products_from_texnomart_jsonld(response.text, category_url)
-        links = self._extract_product_links(response.text, category_url)
-        if links:
-            logger.info("category_links_extracted_http", category_url=category_url, count=len(links))
-            return links
+        try:
+            response = await self._http.get(category_url)
+            self._cache_products_from_texnomart_jsonld(response.text, category_url)
+            links = self._extract_product_links(response.text, category_url)
+            if links:
+                logger.info("category_links_extracted_http", category_url=category_url, count=len(links))
+                return links
+        except UpstreamRateLimitedError as exc:
+            logger.warning(
+                "category_links_http_rate_limited_fallback_playwright",
+                category_url=category_url,
+                error=str(exc),
+            )
 
         # Dynamic storefront fallback when initial HTML has no product anchors.
         graphql_product_ids: set[str] = set()

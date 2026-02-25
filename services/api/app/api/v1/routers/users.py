@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Path
@@ -14,6 +15,8 @@ from app.repositories.catalog import CatalogRepository
 
 router = APIRouter(prefix="/users", tags=["users"])
 UUID_REF_PATTERN = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+RECENTLY_VIEWED_LIMIT = 30
+NOTIFICATION_PREFERENCES_FIELD = "notification_preferences"
 
 
 class FavoriteItem(BaseModel):
@@ -38,6 +41,48 @@ class UserProfilePatch(BaseModel):
     city: str | None = Field(default=None, max_length=120)
     telegram: str | None = Field(default=None, max_length=64)
     about: str | None = Field(default=None, max_length=600)
+
+
+class NotificationChannels(BaseModel):
+    email: bool = True
+    telegram: bool = False
+
+
+class NotificationChannelsPatch(BaseModel):
+    email: bool | None = None
+    telegram: bool | None = None
+
+
+class NotificationPreferences(BaseModel):
+    price_drop_alerts: bool = True
+    stock_alerts: bool = True
+    weekly_digest: bool = False
+    marketing_emails: bool = False
+    public_profile: bool = False
+    compact_view: bool = False
+    channels: NotificationChannels = Field(default_factory=NotificationChannels)
+
+
+class NotificationPreferencesPatch(BaseModel):
+    price_drop_alerts: bool | None = None
+    stock_alerts: bool | None = None
+    weekly_digest: bool | None = None
+    marketing_emails: bool | None = None
+    public_profile: bool | None = None
+    compact_view: bool | None = None
+    channels: NotificationChannelsPatch | None = None
+
+
+class RecentlyViewedItem(BaseModel):
+    id: str
+    slug: str
+    title: str
+    min_price: float | None = None
+    viewed_at: str
+
+
+class RecentlyViewedUpsert(BaseModel):
+    product_id: str = Field(pattern=UUID_REF_PATTERN)
 
 
 def _clean_optional_text(value: str | None, *, max_length: int) -> str | None:
@@ -87,6 +132,92 @@ def _current_user_internal_id(current_user: dict) -> int:
         return int(fallback)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=401, detail="invalid user session") from exc
+
+
+def _default_notification_preferences() -> dict:
+    return {
+        "price_drop_alerts": True,
+        "stock_alerts": True,
+        "weekly_digest": False,
+        "marketing_emails": False,
+        "public_profile": False,
+        "compact_view": False,
+        "channels": {"email": True, "telegram": False},
+    }
+
+
+def _normalize_notification_preferences(payload: dict | None) -> NotificationPreferences:
+    source = _default_notification_preferences()
+    if payload:
+        for field in ("price_drop_alerts", "stock_alerts", "weekly_digest", "marketing_emails", "public_profile", "compact_view"):
+            if field in payload:
+                source[field] = bool(payload[field])
+        channels_payload = payload.get("channels")
+        if isinstance(channels_payload, dict):
+            source["channels"]["email"] = bool(channels_payload.get("email", source["channels"]["email"]))
+            source["channels"]["telegram"] = bool(channels_payload.get("telegram", source["channels"]["telegram"]))
+    return NotificationPreferences.model_validate(source)
+
+
+def _merge_notification_preferences(current: NotificationPreferences, patch: NotificationPreferencesPatch) -> NotificationPreferences:
+    data = current.model_dump()
+    for field in ("price_drop_alerts", "stock_alerts", "weekly_digest", "marketing_emails", "public_profile", "compact_view"):
+        incoming = getattr(patch, field)
+        if incoming is not None:
+            data[field] = incoming
+
+    channels = dict(data.get("channels") or {"email": True, "telegram": False})
+    if patch.channels is not None:
+        if patch.channels.email is not None:
+            channels["email"] = patch.channels.email
+        if patch.channels.telegram is not None:
+            channels["telegram"] = patch.channels.telegram
+    data["channels"] = channels
+    return NotificationPreferences.model_validate(data)
+
+
+def _recently_viewed_key(user_id: int) -> str:
+    return f"auth:recently-viewed:{user_id}"
+
+
+def _extract_min_price(product: dict) -> float | None:
+    offers_by_store = product.get("offers_by_store")
+    if not isinstance(offers_by_store, list):
+        return None
+    prices: list[float] = []
+    for block in offers_by_store:
+        if not isinstance(block, dict):
+            continue
+        value = block.get("minimal_price")
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            continue
+        if numeric > 0:
+            prices.append(numeric)
+    return min(prices) if prices else None
+
+
+async def _load_recently_viewed(redis: Redis, user_id: int) -> list[RecentlyViewedItem]:
+    rows = await redis.lrange(_recently_viewed_key(user_id), 0, RECENTLY_VIEWED_LIMIT - 1)
+    items: list[RecentlyViewedItem] = []
+    for row in rows:
+        try:
+            payload = json.loads(row)
+            items.append(RecentlyViewedItem.model_validate(payload))
+        except Exception:
+            continue
+    return items
+
+
+async def _persist_recently_viewed(redis: Redis, user_id: int, items: list[RecentlyViewedItem]) -> None:
+    key = _recently_viewed_key(user_id)
+    pipe = redis.pipeline()
+    pipe.delete(key)
+    serialized = [json.dumps(item.model_dump(), separators=(",", ":")) for item in items[:RECENTLY_VIEWED_LIMIT]]
+    if serialized:
+        pipe.rpush(key, *serialized)
+    await pipe.execute()
 
 
 @router.get("/me/profile", response_model=UserProfileOut)
@@ -175,3 +306,91 @@ async def toggle_favorite(
 
     await redis.sadd(key, canonical_product_id)
     return {"ok": True, "favorited": True}
+
+
+@router.get("/me/notification-preferences", response_model=NotificationPreferences)
+async def get_notification_preferences(current_user: dict = Depends(get_current_user), redis: Redis = Depends(get_redis)):
+    user_id = _current_user_internal_id(current_user)
+    payload = await _load_user_payload(redis, user_id)
+    raw = str(payload.get(NOTIFICATION_PREFERENCES_FIELD, "")).strip()
+    decoded: dict | None = None
+    if raw:
+        try:
+            loaded = json.loads(raw)
+            if isinstance(loaded, dict):
+                decoded = loaded
+        except json.JSONDecodeError:
+            decoded = None
+    normalized = _normalize_notification_preferences(decoded)
+    if not raw:
+        await redis.hset(f"auth:user:{user_id}", mapping={NOTIFICATION_PREFERENCES_FIELD: json.dumps(normalized.model_dump())})
+    return normalized
+
+
+@router.patch("/me/notification-preferences", response_model=NotificationPreferences)
+async def patch_notification_preferences(
+    patch: NotificationPreferencesPatch,
+    current_user: dict = Depends(get_current_user),
+    redis: Redis = Depends(get_redis),
+):
+    user_id = _current_user_internal_id(current_user)
+    payload = await _load_user_payload(redis, user_id)
+    raw = str(payload.get(NOTIFICATION_PREFERENCES_FIELD, "")).strip()
+    decoded: dict | None = None
+    if raw:
+        try:
+            loaded = json.loads(raw)
+            if isinstance(loaded, dict):
+                decoded = loaded
+        except json.JSONDecodeError:
+            decoded = None
+    current_preferences = _normalize_notification_preferences(decoded)
+    next_preferences = _merge_notification_preferences(current_preferences, patch)
+    await redis.hset(
+        f"auth:user:{user_id}",
+        mapping={
+            NOTIFICATION_PREFERENCES_FIELD: json.dumps(next_preferences.model_dump()),
+            "updated_at": datetime.now(UTC).isoformat(),
+        },
+    )
+    return next_preferences
+
+
+@router.get("/me/recently-viewed", response_model=list[RecentlyViewedItem])
+async def get_recently_viewed(current_user: dict = Depends(get_current_user), redis: Redis = Depends(get_redis)):
+    user_id = _current_user_internal_id(current_user)
+    return await _load_recently_viewed(redis, user_id)
+
+
+@router.post("/me/recently-viewed", response_model=RecentlyViewedItem)
+async def push_recently_viewed(
+    payload: RecentlyViewedUpsert,
+    current_user: dict = Depends(get_current_user),
+    redis: Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db_session),
+):
+    user_id = _current_user_internal_id(current_user)
+    repo = CatalogRepository(db, cursor_secret=settings.cursor_secret)
+    product = await repo.get_product(payload.product_id)
+    if product is None:
+        raise HTTPException(status_code=404, detail="product not found")
+
+    next_item = RecentlyViewedItem(
+        id=str(product["id"]),
+        slug=str(product.get("slug") or product["id"]),
+        title=str(product.get("title") or ""),
+        min_price=_extract_min_price(product),
+        viewed_at=datetime.now(UTC).isoformat(),
+    )
+
+    existing = await _load_recently_viewed(redis, user_id)
+    updated = [next_item, *[item for item in existing if item.id != next_item.id]]
+    await _persist_recently_viewed(redis, user_id, updated)
+    return next_item
+
+
+@router.delete("/me/recently-viewed")
+async def clear_recently_viewed(current_user: dict = Depends(get_current_user), redis: Redis = Depends(get_redis)):
+    user_id = _current_user_internal_id(current_user)
+    await redis.delete(_recently_viewed_key(user_id))
+    return {"ok": True}

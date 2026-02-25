@@ -71,3 +71,11 @@ def enqueue_test_quality_alert() -> str:
         queue="maintenance",
         routing_key="maintenance",
     )
+
+
+def enqueue_admin_alert_evaluation() -> str:
+    return _send(
+        "app.tasks.maintenance_tasks.enqueue_admin_alert_evaluation",
+        queue="maintenance",
+        routing_key="maintenance",
+    )

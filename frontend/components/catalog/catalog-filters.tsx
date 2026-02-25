@@ -75,7 +75,7 @@ export function CatalogFilters({
 
   const priceLabel = useMemo(() => {
     const [from, to] = priceRange;
-    if (from <= PRICE_MIN && to >= PRICE_MAX) return "Any price";
+    if (from <= PRICE_MIN && to >= PRICE_MAX) return "Любая цена";
     return `${numberFormatter.format(from)} - ${numberFormatter.format(to)} UZS`;
   }, [priceRange]);
 
@@ -96,28 +96,28 @@ export function CatalogFilters({
   const panel = (
     <div className="space-y-4">
       <div className="space-y-2">
-        <label className="text-sm font-medium">Search</label>
-        <Input value={value.q ?? ""} onChange={(e) => onChange({ ...value, q: e.target.value || undefined })} placeholder="Search models..." />
+        <label className="text-sm font-medium">Поиск</label>
+        <Input value={value.q ?? ""} onChange={(e) => onChange({ ...value, q: e.target.value || undefined })} placeholder="Название модели..." />
       </div>
 
       <div className="space-y-2">
-        <label className="text-sm font-medium">Sort</label>
+        <label className="text-sm font-medium">Сортировка</label>
         <Select value={value.sort} onValueChange={(next) => onChange({ ...value, sort: next as FilterState["sort"] })}>
           <SelectTrigger>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="popular">Popular</SelectItem>
-            <SelectItem value="relevance">Relevance</SelectItem>
-            <SelectItem value="price_asc">Price low-high</SelectItem>
-            <SelectItem value="price_desc">Price high-low</SelectItem>
-            <SelectItem value="newest">Newest</SelectItem>
+            <SelectItem value="popular">Популярные</SelectItem>
+            <SelectItem value="relevance">Релевантные</SelectItem>
+            <SelectItem value="price_asc">Цена: по возрастанию</SelectItem>
+            <SelectItem value="price_desc">Цена: по убыванию</SelectItem>
+            <SelectItem value="newest">Сначала новые</SelectItem>
           </SelectContent>
         </Select>
       </div>
 
       <div className="space-y-2">
-        <label className="text-sm font-medium">Price Range</label>
+        <label className="text-sm font-medium">Диапазон цен</label>
         <Slider
           value={priceRange}
           min={PRICE_MIN}
@@ -139,12 +139,12 @@ export function CatalogFilters({
       </div>
 
       <div className="space-y-2">
-        <label className="text-sm font-medium">Brands</label>
+        <label className="text-sm font-medium">Бренды</label>
         <div className="max-h-52 space-y-2 overflow-y-auto pr-1">
           {brands.map((brand) => {
             const active = value.brands.includes(brand.id);
             return (
-              <label key={brand.id} className="flex cursor-pointer items-center gap-2 text-sm">
+              <label key={brand.id} className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
                 <input
                   type="checkbox"
                   checked={active}
@@ -162,12 +162,12 @@ export function CatalogFilters({
 
       {!!stores?.length && (
         <div className="space-y-2">
-          <label className="text-sm font-medium">Stores</label>
+          <label className="text-sm font-medium">Магазины</label>
           <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
             {stores.map((store) => {
               const active = value.stores.includes(store.id);
               return (
-                <label key={store.id} className="flex cursor-pointer items-center gap-2 text-sm">
+                <label key={store.id} className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
                   <input
                     type="checkbox"
                     checked={active}
@@ -186,12 +186,12 @@ export function CatalogFilters({
 
       {!!sellers?.length && (
         <div className="space-y-2">
-          <label className="text-sm font-medium">Sellers</label>
+          <label className="text-sm font-medium">Продавцы</label>
           <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
             {sellers.slice(0, 20).map((seller) => {
               const active = value.sellers.includes(seller.id);
               return (
-                <label key={seller.id} className="flex cursor-pointer items-center gap-2 text-sm">
+                <label key={seller.id} className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
                   <input
                     type="checkbox"
                     checked={active}
@@ -209,14 +209,14 @@ export function CatalogFilters({
       )}
 
       <div className="space-y-2">
-        <label className="text-sm font-medium">Max Delivery Days</label>
+        <label className="text-sm font-medium">Макс. дней доставки</label>
         <Input
           type="number"
           min={0}
           max={30}
           value={value.maxDeliveryDays ?? ""}
           onChange={(e) => onChange({ ...value, maxDeliveryDays: e.target.value ? Number(e.target.value) : undefined })}
-          placeholder="Any"
+          placeholder="Без ограничения"
         />
       </div>
 
@@ -227,7 +227,7 @@ export function CatalogFilters({
             {attribute.values.map((option) => {
               const selected = value.attrs?.[attribute.key]?.includes(option.value) ?? false;
               return (
-                <label key={option.value} className="flex cursor-pointer items-center gap-2 text-sm">
+                <label key={option.value} className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
                   <input
                     type="checkbox"
                     checked={selected}
@@ -262,11 +262,11 @@ export function CatalogFilters({
         <div className="overflow-hidden rounded-2xl border border-border bg-card">
           <div className="flex items-center justify-between gap-2 border-b border-border p-4">
             <div>
-              <p className="text-sm font-semibold">Filters</p>
-              <p className="text-xs text-muted-foreground">{hasActiveFilters ? `${activeFilterCount} active` : "No active filters"}</p>
+              <p className="text-sm font-semibold">Фильтры</p>
+              <p className="text-xs text-muted-foreground">{hasActiveFilters ? `Активных: ${activeFilterCount}` : "Активных фильтров нет"}</p>
             </div>
             <Button variant="ghost" size="sm" disabled={!hasActiveFilters} onClick={resetFilters}>
-              Reset
+              Сбросить
             </Button>
           </div>
           <div className="max-h-[calc(100vh-6.5rem)] overflow-y-auto p-4">{panel}</div>
@@ -276,18 +276,18 @@ export function CatalogFilters({
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
           <SheetTrigger asChild>
             <Button variant="outline" className="w-full justify-center gap-2">
-              <SlidersHorizontal className="h-4 w-4" /> Filters{hasActiveFilters ? ` (${activeFilterCount})` : ""}
+              <SlidersHorizontal className="h-4 w-4" /> Фильтры{hasActiveFilters ? ` (${activeFilterCount})` : ""}
             </Button>
           </SheetTrigger>
           <SheetContent className="p-0">
             <div className="flex h-full flex-col">
               <div className="flex items-center justify-between gap-2 border-b border-border px-5 py-4 pr-14">
                 <div>
-                  <p className="text-sm font-semibold">Filters</p>
-                  <p className="text-xs text-muted-foreground">{hasActiveFilters ? `${activeFilterCount} active` : "No active filters"}</p>
+                  <p className="text-sm font-semibold">Фильтры</p>
+                  <p className="text-xs text-muted-foreground">{hasActiveFilters ? `Активных: ${activeFilterCount}` : "Активных фильтров нет"}</p>
                 </div>
                 <Button variant="ghost" size="sm" disabled={!hasActiveFilters} onClick={resetFilters}>
-                  Reset
+                  Сбросить
                 </Button>
               </div>
               <div className="flex-1 overflow-y-auto p-5 pt-4">{panel}</div>

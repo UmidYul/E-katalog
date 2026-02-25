@@ -35,7 +35,7 @@ const emptyDraft: LocalProfileDraft = {
   about: ""
 };
 
-const defaultPreferences: ProfilePreferences = {
+export const defaultProfilePreferences: ProfilePreferences = {
   price_drop_alerts: true,
   stock_alerts: true,
   weekly_digest: false,
@@ -47,11 +47,11 @@ export const useProfileStore = create<ProfileStore>()(
   persist(
     (set) => ({
       draft: emptyDraft,
-      preferences: defaultPreferences,
+      preferences: defaultProfilePreferences,
       saveDraft: (payload) => set({ draft: { ...payload, updated_at: new Date().toISOString() } }),
       resetDraft: () => set({ draft: emptyDraft }),
       setPreference: (key, value) => set((state) => ({ preferences: { ...state.preferences, [key]: value } })),
-      resetPreferences: () => set({ preferences: defaultPreferences })
+      resetPreferences: () => set({ preferences: defaultProfilePreferences })
     }),
     {
       name: "profile-store-v1",

@@ -32,7 +32,10 @@ export const useLogin = () => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: authApi.login,
-    onSuccess: async () => {
+    onSuccess: async (response) => {
+      if (response.data && typeof response.data === "object" && "requires_2fa" in response.data && response.data.requires_2fa === true) {
+        return;
+      }
       await queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
     }
   });

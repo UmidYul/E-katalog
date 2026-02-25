@@ -17,7 +17,7 @@ import { COMPARE_LIMIT, useCompareStore } from "@/store/compare.store";
 
 const normalizeValue = (value: unknown): string => {
   if (value === null || value === undefined || value === "") return "-";
-  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "boolean") return value ? "Да" : "Нет";
   if (typeof value === "number") return Number.isFinite(value) ? String(value) : "-";
   if (typeof value === "string") return value.trim() || "-";
   return JSON.stringify(value);
@@ -89,15 +89,9 @@ const scoreWifiStandard = (value: unknown): number | null => {
 };
 
 const parseComparableScore = (specKey: string, value: unknown): number | null => {
-  if (specKey === "network_standard" || specKey === "network") {
-    return scoreNetworkStandard(value);
-  }
-  if (specKey === "wifi_standard") {
-    return scoreWifiStandard(value);
-  }
-  if (specKey === "sim_count" || specKey === "sim_type" || specKey === "device_type") {
-    return null;
-  }
+  if (specKey === "network_standard" || specKey === "network") return scoreNetworkStandard(value);
+  if (specKey === "wifi_standard") return scoreWifiStandard(value);
+  if (specKey === "sim_count" || specKey === "sim_type" || specKey === "device_type") return null;
   return parseNumeric(value);
 };
 
@@ -127,8 +121,8 @@ const getBestCellIndexes = (specKey: string, values: unknown[]) => {
 
 const formatDateTime = (value: string) => {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Unknown time";
-  return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(date);
+  if (Number.isNaN(date.getTime())) return "Неизвестно";
+  return new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(date);
 };
 
 const formatCategory = (value?: string) => {
@@ -154,9 +148,7 @@ const renderCellValue = (rowKey: string, value: unknown) => {
     const numeric = parseNumeric(value);
     if (numeric !== null) return `${formatInteger(numeric)} UZS`;
   }
-  if (rowKey.includes("color") && typeof value === "string") {
-    return formatColorValue(value);
-  }
+  if (rowKey.includes("color") && typeof value === "string") return formatColorValue(value);
   return normalizeValue(value);
 };
 
@@ -218,16 +210,16 @@ export function CompareClientPage() {
   if (compareItems.length === 0) {
     return (
       <div className="container space-y-3 py-6">
-        <EmptyState title="Comparison is empty" message="Add products from catalog or product page to start comparing." />
+        <EmptyState title="Сравнение пока пустое" message="Добавьте товары из каталога или карточки товара, чтобы начать сравнение." />
         <Link href="/catalog">
-          <Button>Go to catalog</Button>
+          <Button>Перейти в каталог</Button>
         </Link>
         {history.length ? (
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>Recent comparisons</CardTitle>
+              <CardTitle>Недавние сравнения</CardTitle>
               <Button variant="ghost" size="sm" onClick={clearHistory}>
-                Clear history
+                Очистить историю
               </Button>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -236,12 +228,12 @@ export function CompareClientPage() {
                   <div>
                     <p className="line-clamp-1 text-sm font-medium">{entry.items.map((item) => item.title).join(" vs ")}</p>
                     <p className="text-xs text-muted-foreground">
-                      {formatDateTime(entry.createdAt)} | {entry.items.length} products
+                      {formatDateTime(entry.createdAt)} | {entry.items.length} товаров
                       {entry.category ? ` | ${formatCategory(entry.category)}` : ""}
                     </p>
                   </div>
                   <Button size="sm" variant="outline" onClick={() => restoreSnapshot(entry.id)}>
-                    Restore
+                    Восстановить
                   </Button>
                 </div>
               ))}
@@ -260,28 +252,28 @@ export function CompareClientPage() {
       <div className="container space-y-4 py-6">
         <Card>
           <CardHeader>
-            <CardTitle>Comparison needs at least 2 products</CardTitle>
+            <CardTitle>Для сравнения нужно минимум 2 товара</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <p className="text-sm text-muted-foreground">You currently selected one product. Add one more to see a full comparison matrix.</p>
+            <p className="text-sm text-muted-foreground">Сейчас выбран только один товар. Добавьте ещё один, чтобы увидеть полную матрицу сравнения.</p>
             <div className="flex flex-wrap gap-2">
               <Link href={`/product/${onlyItem.slug}`}>
-                <Button variant="outline">Open selected product</Button>
+                <Button variant="outline">Открыть выбранный товар</Button>
               </Link>
               <Link href="/catalog">
-                <Button>Add one more product</Button>
+                <Button>Добавить ещё товар</Button>
               </Link>
               <Button variant="ghost" onClick={clear}>
-                Clear
+                Очистить
               </Button>
             </div>
             {history.length ? (
               <div className="space-y-2 border-t border-border pt-3">
-                <p className="text-xs text-muted-foreground">Recent comparisons:</p>
+                <p className="text-xs text-muted-foreground">Недавние сравнения:</p>
                 <div className="flex flex-wrap gap-2">
                   {history.slice(0, 4).map((entry) => (
                     <Button key={entry.id} size="sm" variant="outline" onClick={() => restoreSnapshot(entry.id)}>
-                      Restore {entry.items.length} items
+                      Восстановить {entry.items.length}
                     </Button>
                   ))}
                 </div>
@@ -296,7 +288,7 @@ export function CompareClientPage() {
   if (compareQuery.error) {
     return (
       <div className="container py-6">
-        <ErrorState title="Could not build comparison" message="Try removing unavailable products and retry." />
+        <ErrorState title="Не удалось построить сравнение" message="Попробуйте убрать недоступные товары и повторите." />
       </div>
     );
   }
@@ -308,23 +300,31 @@ export function CompareClientPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-semibold">Comparison</h1>
-            <Badge>{compareItems.length}/{COMPARE_LIMIT} selected</Badge>
+            <h1 className="font-heading text-2xl font-extrabold">Сравнение</h1>
+            <Badge>
+              {compareItems.length}/{COMPARE_LIMIT} выбрано
+            </Badge>
             {categoryScope ? <Badge className="bg-secondary/80">{formatCategory(categoryScope)}</Badge> : null}
-            {compareQuery.isFetching ? <Badge className="bg-secondary/80">Updating...</Badge> : null}
+            {compareQuery.isFetching ? <Badge className="bg-secondary/80">Обновляем...</Badge> : null}
           </div>
-          <p className="text-xs text-muted-foreground">Compare works within one category. Best-value highlighting is heuristic for numeric specs.</p>
+          <p className="text-xs text-muted-foreground">Сравнение работает в рамках одной категории. Заголовки и первая колонка закреплены для удобного чтения.</p>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-1 text-success">
+              <span className="h-2 w-2 rounded-full bg-success" /> Лучшее значение
+            </span>
+            <span>Подсветка лучшего значения рассчитывается по эвристике.</span>
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant={onlyDiff ? "default" : "outline"} size="sm" onClick={() => setOnlyDiff((prev) => !prev)}>
-            {onlyDiff ? "Showing differences" : "Show only differences"}
+            {onlyDiff ? "Показаны отличия" : "Показать только отличия"}
           </Button>
           <Button variant="ghost" size="sm" onClick={clear}>
-            Clear all
+            Очистить всё
           </Button>
           {history.length ? (
             <Button variant="ghost" size="sm" onClick={clearHistory}>
-              Clear history
+              Очистить историю
             </Button>
           ) : null}
         </div>
@@ -352,11 +352,11 @@ export function CompareClientPage() {
               <div className="flex gap-2">
                 <Link href={`/product/${item.slug}`}>
                   <Button size="sm" variant="outline">
-                    Open
+                    Открыть
                   </Button>
                 </Link>
                 <Button size="sm" variant="ghost" onClick={() => remove(item.id)}>
-                  Remove
+                  Убрать
                 </Button>
               </div>
             </CardContent>
@@ -365,21 +365,21 @@ export function CompareClientPage() {
       </div>
 
       <Card className="overflow-hidden">
-        <CardContent className="overflow-x-auto p-0">
+        <CardContent className="max-h-[70vh] overflow-auto p-0">
           {compareQuery.isLoading ? (
-            <div className="p-4 text-sm text-muted-foreground">Loading comparison matrix...</div>
+            <div className="p-4 text-sm text-muted-foreground">Загружаем матрицу сравнения...</div>
           ) : (
             <table className="min-w-[760px] w-full border-collapse">
               <thead>
                 <tr className="border-b border-border bg-card">
-                  <th className="sticky left-0 z-10 min-w-56 bg-card px-4 py-3 text-left text-sm font-semibold">Характеристика</th>
+                  <th className="sticky left-0 top-0 z-30 min-w-56 bg-card px-4 py-3 text-left text-sm font-semibold">Характеристика</th>
                   {columns.map((item) => {
                     const local = productMetaById.get(item.id);
                     const title = local?.title || item.normalized_title;
                     const slug = local?.slug || `${item.id}-${slugify(item.normalized_title)}`;
                     const image = isImageUrl(item.main_image) ? item.main_image : null;
                     return (
-                      <th key={item.id} className="min-w-56 px-4 py-3 text-left text-sm font-semibold">
+                      <th key={item.id} className="sticky top-0 z-20 min-w-56 bg-card px-4 py-3 text-left text-sm font-semibold">
                         <div className="space-y-2">
                           {image ? (
                             <Link href={`/product/${slug}`} className="block">
@@ -400,7 +400,7 @@ export function CompareClientPage() {
               <tbody>
                 {rows.length === 0 ? (
                   <tr>
-                    <td className="sticky left-0 z-10 bg-card px-4 py-3 text-sm text-muted-foreground">No differences found</td>
+                    <td className="sticky left-0 z-10 bg-card px-4 py-3 text-sm text-muted-foreground">Отличий не найдено</td>
                     {columns.map((item) => (
                       <td key={item.id} className="px-4 py-3 text-sm text-muted-foreground">
                         -
@@ -408,16 +408,13 @@ export function CompareClientPage() {
                     ))}
                   </tr>
                 ) : (
-                  rows.map((row) => (
-                    <tr key={row.key} className="border-t border-border">
+                  rows.map((row, rowIndex) => (
+                    <tr key={row.key} className={cn("border-t border-border", rowIndex % 2 === 1 && "bg-secondary/15")}>
                       <td className="sticky left-0 z-10 bg-card px-4 py-3 text-sm font-medium">{row.label}</td>
                       {row.values.map((value, index) => (
                         <td
                           key={`${row.key}:${columns[index]?.id ?? index}`}
-                          className={cn(
-                            "px-4 py-3 text-sm text-muted-foreground",
-                            row.bestCellIndexes.has(index) && "bg-emerald-50/80 font-medium text-emerald-800"
-                          )}
+                          className={cn("px-4 py-3 text-sm text-muted-foreground", row.bestCellIndexes.has(index) && "bg-success/15 font-semibold text-success")}
                         >
                           {renderCellValue(row.key, value)}
                         </td>
@@ -434,7 +431,7 @@ export function CompareClientPage() {
       {history.length ? (
         <Card>
           <CardHeader>
-            <CardTitle>Recent comparisons</CardTitle>
+            <CardTitle>Недавние сравнения</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {history.slice(0, 6).map((entry) => (
@@ -442,12 +439,12 @@ export function CompareClientPage() {
                 <div>
                   <p className="line-clamp-1 text-sm font-medium">{entry.items.map((item) => item.title).join(" vs ")}</p>
                   <p className="text-xs text-muted-foreground">
-                    {formatDateTime(entry.createdAt)} | {entry.items.length} products
+                    {formatDateTime(entry.createdAt)} | {entry.items.length} товаров
                     {entry.category ? ` | ${formatCategory(entry.category)}` : ""}
                   </p>
                 </div>
                 <Button size="sm" variant="outline" onClick={() => restoreSnapshot(entry.id)}>
-                  Restore
+                  Восстановить
                 </Button>
               </div>
             ))}
@@ -464,4 +461,3 @@ const slugify = (text: string) =>
     .replace(/[^a-z0-9\s-]/g, "")
     .trim()
     .replace(/\s+/g, "-");
-

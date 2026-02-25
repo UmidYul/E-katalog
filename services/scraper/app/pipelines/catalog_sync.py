@@ -98,11 +98,11 @@ SYNC_SQL_STATEMENTS = [
       'active'
     from products p
     join lateral (
-      select cp.id
+      select coalesce(cp.merged_into_id, cp.id) as id
       from catalog_canonical_products cp
       where cp.category_id = 1
         and lower(cp.normalized_title) = lower(p.title)
-      order by cp.id asc
+      order by cp.is_active desc, cp.id asc
       limit 1
     ) cp on true
     on conflict (id) do update
@@ -158,11 +158,11 @@ SYNC_SQL_STATEMENTS = [
     join shops s on s.id = o.shop_id
     join catalog_stores cs on cs.slug = __STORE_SLUG_EXPR__
     join lateral (
-      select cp.id
+      select coalesce(cp.merged_into_id, cp.id) as id
       from catalog_canonical_products cp
       where cp.category_id = 1
         and lower(cp.normalized_title) = lower(p.title)
-      order by cp.id asc
+      order by cp.is_active desc, cp.id asc
       limit 1
     ) cp on true
     on conflict (id) do update
@@ -214,11 +214,11 @@ SYNC_SQL_STATEMENTS = [
     from offers o
     join products p on p.id = o.product_id
     join lateral (
-      select cp.id
+      select coalesce(cp.merged_into_id, cp.id) as id
       from catalog_canonical_products cp
       where cp.category_id = 1
         and lower(cp.normalized_title) = lower(p.title)
-      order by cp.id asc
+      order by cp.is_active desc, cp.id asc
       limit 1
     ) cp on true
     join shops s on s.id = o.shop_id
@@ -240,6 +240,33 @@ SYNC_SQL_STATEMENTS = [
         in_stock = excluded.in_stock,
         scraped_at = excluded.scraped_at,
         is_valid = true
+    """,
+    """
+    update catalog_store_products sp
+    set canonical_product_id = cp.merged_into_id
+    from catalog_canonical_products cp
+    where sp.canonical_product_id = cp.id
+      and cp.is_active = false
+      and cp.merged_into_id is not null
+      and sp.canonical_product_id is distinct from cp.merged_into_id
+    """,
+    """
+    update catalog_offers o
+    set canonical_product_id = cp.merged_into_id
+    from catalog_canonical_products cp
+    where o.canonical_product_id = cp.id
+      and cp.is_active = false
+      and cp.merged_into_id is not null
+      and o.canonical_product_id is distinct from cp.merged_into_id
+    """,
+    """
+    update catalog_products p
+    set canonical_product_id = cp.merged_into_id
+    from catalog_canonical_products cp
+    where p.canonical_product_id = cp.id
+      and cp.is_active = false
+      and cp.merged_into_id is not null
+      and p.canonical_product_id is distinct from cp.merged_into_id
     """,
     """
     insert into catalog_price_history (offer_id, price_amount, in_stock, captured_at)
@@ -283,6 +310,8 @@ SYNC_SQL_STATEMENTS = [
     with brand_candidates as (
       select
         cp.id as canonical_id,
+        cp.category_id,
+        cp.normalized_title,
         case
           when src ~ '(^|[^a-z0-9])(apple|iphone)([^a-z0-9]|$)' then 'Apple'
           when src ~ '(^|[^a-z0-9])(samsung|galaxy)([^a-z0-9]|$)' then 'Samsung'
@@ -297,6 +326,8 @@ SYNC_SQL_STATEMENTS = [
       from (
         select
           cp.id,
+          cp.category_id,
+          cp.normalized_title,
           lower(
             coalesce(cp.normalized_title, '')
             || ' '
@@ -307,6 +338,7 @@ SYNC_SQL_STATEMENTS = [
             || coalesce(cp.specs->>'vendor', '')
           ) as src
         from catalog_canonical_products cp
+        where cp.brand_id is null
       ) cp
     ),
     ensured_brands as (
@@ -320,15 +352,37 @@ SYNC_SQL_STATEMENTS = [
       on conflict (name) do update
       set normalized_name = excluded.normalized_name
       returning id, name
+    ),
+    ranked_brand_candidates as (
+      select
+        bc.canonical_id,
+        bc.category_id,
+        bc.normalized_title,
+        bc.brand_name,
+        row_number() over (
+          partition by bc.category_id, bc.brand_name, lower(bc.normalized_title)
+          order by bc.canonical_id
+        ) as rank_in_group
+      from brand_candidates bc
+      where bc.brand_name is not null
     )
     update catalog_canonical_products cp
     set brand_id = b.id
-    from brand_candidates bc
+    from ranked_brand_candidates bc
     left join ensured_brands eb on eb.name = bc.brand_name
     join catalog_brands b on b.name = bc.brand_name
     where cp.id = bc.canonical_id
-      and bc.brand_name is not null
+      and bc.rank_in_group = 1
       and cp.brand_id is null
+      and not exists (
+        select 1
+        from catalog_canonical_products cp_existing
+        where cp_existing.id <> cp.id
+          and cp_existing.is_active = true
+          and cp_existing.category_id = cp.category_id
+          and cp_existing.brand_id = b.id
+          and lower(cp_existing.normalized_title) = lower(cp.normalized_title)
+      )
     """,
     """
     update catalog_products p

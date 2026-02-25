@@ -22,11 +22,10 @@ export function SpecsTable({ specs }: { specs: Record<string, string | number | 
               </div>
             ))
           ) : (
-            <p className="text-sm text-muted-foreground">No specs available.</p>
+            <p className="text-sm text-muted-foreground">Характеристики пока отсутствуют.</p>
           )}
         </div>
       </CardContent>
     </Card>
   );
 }
-
