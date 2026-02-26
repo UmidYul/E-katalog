@@ -1,0 +1,69 @@
+name: Backup Restore Validation
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * 0"
+
+permissions:
+  contents: read
+
+jobs:
+  backup-restore-check:
+    name: Postgres backup + restore validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONUNBUFFERED: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/scraper
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: scraper
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d scraper"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install PostgreSQL client tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Apply DB migrations
+        env:
+          PYTHONPATH: .
+        run: |
+          alembic -c migrations/alembic.ini upgrade head
+
+      - name: Backup and validate restore
+        run: |
+          python scripts/db_backup_restore.py --label ci --validate-restore
+
+      - name: Upload backup artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-restore-artifacts
+          path: artifacts/backups/

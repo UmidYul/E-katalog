@@ -11,6 +11,7 @@ from sqlalchemy import text
 
 from app.api.deps import get_redis
 from app.core.config import settings
+from app.core.observability import http_metrics
 from app.db.session import engine
 
 router = APIRouter(tags=["health"])
@@ -138,3 +139,8 @@ async def ready(response: Response, redis: Redis = Depends(get_redis)) -> dict[s
             "celery": celery_check,
         },
     }
+
+
+@router.get("/metrics", include_in_schema=False)
+async def metrics() -> Response:
+    return Response(content=http_metrics.render_prometheus(), media_type="text/plain; version=0.0.4; charset=utf-8")

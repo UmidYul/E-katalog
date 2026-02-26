@@ -21,6 +21,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db_session, get_redis
+from app.api.idempotency import execute_idempotent_json
 from app.core.config import settings
 from app.core.rate_limit import enforce_rate_limit
 from app.repositories.auth_storage import (
@@ -991,27 +992,30 @@ async def register(
     redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ):
-    await enforce_rate_limit(request, redis, bucket="auth-register", limit=12)
-    normalized_email = payload.email.lower().strip()
-    if await _get_user_by_email(redis, normalized_email, db):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="email already exists")
+    async def _op():
+        await enforce_rate_limit(request, redis, bucket="auth-register", limit=12)
+        normalized_email = payload.email.lower().strip()
+        if await _get_user_by_email(redis, normalized_email, db):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="email already exists")
 
-    user = await _create_user(
-        redis,
-        db=db,
-        email=normalized_email,
-        full_name=payload.full_name,
-        password_hash=_hash_password(payload.password),
-    )
-    await _set_auth_cookies(response, user_id=int(user["id"]), redis=redis, request=request, db=db)
-    return AuthUserResponse(
-        id=str(user["uuid"]),
-        email=user["email"],
-        full_name=user["full_name"],
-        role=user["role"],
-        twofa_enabled=bool(user["twofa_enabled"]),
-        email_confirmed=bool(user.get("email_confirmed")),
-    )
+        user = await _create_user(
+            redis,
+            db=db,
+            email=normalized_email,
+            full_name=payload.full_name,
+            password_hash=_hash_password(payload.password),
+        )
+        await _set_auth_cookies(response, user_id=int(user["id"]), redis=redis, request=request, db=db)
+        return AuthUserResponse(
+            id=str(user["uuid"]),
+            email=user["email"],
+            full_name=user["full_name"],
+            role=user["role"],
+            twofa_enabled=bool(user["twofa_enabled"]),
+            email_confirmed=bool(user.get("email_confirmed")),
+        )
+
+    return await execute_idempotent_json(request, redis, scope="auth.register", handler=_op)
 
 
 @router.post("/login", response_model=AuthUserResponse | TwoFactorChallengeResponse)
@@ -1169,21 +1173,25 @@ async def change_password(
 ):
     current = await _resolve_user_from_access(request, redis, touch=True, db=db)
     user_id = int(current["internal_id"])
-    user = await _load_user(redis, user_id, db)
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found")
-    if not _verify_password(payload.current_password, str(user["password_hash"])):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid current password")
-    if payload.current_password == payload.new_password:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="new password must differ from current password")
 
-    await redis.hset(f"auth:user:{user_id}", mapping={"password_hash": _hash_password(payload.new_password), "updated_at": _now_iso()})
-    await _sync_user_from_redis(redis, db, user_id=user_id)
-    await db.commit()
-    revoked = 0
-    if payload.revoke_other_sessions:
-        revoked = await _revoke_all_sessions_except(redis, user_id=user_id, keep_session_id=current.get("session_id"), db=db)
-    return {"ok": True, "revoked_sessions": revoked}
+    async def _op():
+        user = await _load_user(redis, user_id, db)
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found")
+        if not _verify_password(payload.current_password, str(user["password_hash"])):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid current password")
+        if payload.current_password == payload.new_password:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="new password must differ from current password")
+
+        await redis.hset(f"auth:user:{user_id}", mapping={"password_hash": _hash_password(payload.new_password), "updated_at": _now_iso()})
+        await _sync_user_from_redis(redis, db, user_id=user_id)
+        await db.commit()
+        revoked = 0
+        if payload.revoke_other_sessions:
+            revoked = await _revoke_all_sessions_except(redis, user_id=user_id, keep_session_id=current.get("session_id"), db=db)
+        return {"ok": True, "revoked_sessions": revoked}
+
+    return await execute_idempotent_json(request, redis, scope=f"auth.change_password:{user_id}", handler=_op)
 
 
 @router.post("/password-reset/request", response_model=PasswordResetRequestResponse)
@@ -1193,34 +1201,37 @@ async def request_password_reset(
     redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ):
-    await enforce_rate_limit(request, redis, bucket="auth-password-reset-request", limit=20)
-    normalized_email = payload.email.lower().strip()
-    user = await _get_user_by_email(redis, normalized_email, db)
-    debug_token: str | None = None
-    ttl_seconds = max(60, int(settings.auth_password_reset_ttl_seconds))
+    async def _op():
+        await enforce_rate_limit(request, redis, bucket="auth-password-reset-request", limit=20)
+        normalized_email = payload.email.lower().strip()
+        user = await _get_user_by_email(redis, normalized_email, db)
+        debug_token: str | None = None
+        ttl_seconds = max(60, int(settings.auth_password_reset_ttl_seconds))
 
-    if user is not None:
-        redis_user_id = int(user["id"])
-        pg_user_id = await _resolve_pg_user_id(redis, db, user_id=redis_user_id)
-        if pg_user_id is None:
-            synced_id = await _sync_user_from_redis(redis, db, user_id=redis_user_id)
-            if synced_id is not None:
-                pg_user_id = int(synced_id)
-        if pg_user_id is not None:
-            issued_token = _issue_token()
-            await pg_create_password_reset_token(
-                db,
-                user_id=pg_user_id,
-                raw_token=issued_token,
-                expires_at=datetime.now(UTC) + timedelta(seconds=ttl_seconds),
-            )
-            await db.commit()
-            if settings.environment == "local" or settings.auth_password_reset_debug_return_token:
-                debug_token = issued_token
+        if user is not None:
+            redis_user_id = int(user["id"])
+            pg_user_id = await _resolve_pg_user_id(redis, db, user_id=redis_user_id)
+            if pg_user_id is None:
+                synced_id = await _sync_user_from_redis(redis, db, user_id=redis_user_id)
+                if synced_id is not None:
+                    pg_user_id = int(synced_id)
+            if pg_user_id is not None:
+                issued_token = _issue_token()
+                await pg_create_password_reset_token(
+                    db,
+                    user_id=pg_user_id,
+                    raw_token=issued_token,
+                    expires_at=datetime.now(UTC) + timedelta(seconds=ttl_seconds),
+                )
+                await db.commit()
+                if settings.environment == "local" or settings.auth_password_reset_debug_return_token:
+                    debug_token = issued_token
 
-    if debug_token:
-        return PasswordResetRequestResponse(ok=True, expires_in=ttl_seconds, reset_token=debug_token)
-    return PasswordResetRequestResponse(ok=True)
+        if debug_token:
+            return PasswordResetRequestResponse(ok=True, expires_in=ttl_seconds, reset_token=debug_token)
+        return PasswordResetRequestResponse(ok=True)
+
+    return await execute_idempotent_json(request, redis, scope="auth.password_reset.request", handler=_op)
 
 
 @router.post("/password-reset/confirm")
@@ -1231,31 +1242,34 @@ async def confirm_password_reset(
     redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ):
-    await enforce_rate_limit(request, redis, bucket="auth-password-reset-confirm", limit=30)
-    token = payload.token.strip()
-    if not token:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid reset token")
+    async def _op():
+        await enforce_rate_limit(request, redis, bucket="auth-password-reset-confirm", limit=30)
+        token = payload.token.strip()
+        if not token:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid reset token")
 
-    pg_user_id = await pg_consume_password_reset_token(db, raw_token=token)
-    if pg_user_id is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid or expired reset token")
+        pg_user_id = await pg_consume_password_reset_token(db, raw_token=token)
+        if pg_user_id is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid or expired reset token")
 
-    redis_user_id = await _ensure_redis_user_from_postgres(redis, db, pg_user_id=pg_user_id)
-    if redis_user_id is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found")
+        redis_user_id = await _ensure_redis_user_from_postgres(redis, db, pg_user_id=pg_user_id)
+        if redis_user_id is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found")
 
-    await redis.hset(
-        f"auth:user:{redis_user_id}",
-        mapping={
-            "password_hash": _hash_password(payload.new_password),
-            "updated_at": _now_iso(),
-        },
-    )
-    await _sync_user_from_redis(redis, db, user_id=redis_user_id)
-    revoked = await _revoke_all_sessions_except(redis, user_id=redis_user_id, keep_session_id=None, db=db)
-    await db.commit()
-    _clear_auth_cookies(response)
-    return {"ok": True, "revoked_sessions": revoked}
+        await redis.hset(
+            f"auth:user:{redis_user_id}",
+            mapping={
+                "password_hash": _hash_password(payload.new_password),
+                "updated_at": _now_iso(),
+            },
+        )
+        await _sync_user_from_redis(redis, db, user_id=redis_user_id)
+        revoked = await _revoke_all_sessions_except(redis, user_id=redis_user_id, keep_session_id=None, db=db)
+        await db.commit()
+        _clear_auth_cookies(response)
+        return {"ok": True, "revoked_sessions": revoked}
+
+    return await execute_idempotent_json(request, redis, scope="auth.password_reset.confirm", handler=_op)
 
 
 @router.post("/email-confirmation/request", response_model=EmailConfirmationRequestResponse)
@@ -1264,24 +1278,28 @@ async def request_email_confirmation(
     redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ):
-    await enforce_rate_limit(request, redis, bucket="auth-email-confirm-request", limit=20)
     current = await _resolve_user_from_access(request, redis, touch=True, db=db)
     user_id = int(current["internal_id"])
-    user = await _load_user(redis, user_id, db)
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found")
 
-    ttl_seconds = max(300, int(settings.auth_email_confirmation_ttl_seconds))
-    if bool(user.get("email_confirmed")):
-        return EmailConfirmationRequestResponse(ok=True, expires_in=ttl_seconds)
+    async def _op():
+        await enforce_rate_limit(request, redis, bucket="auth-email-confirm-request", limit=20)
+        user = await _load_user(redis, user_id, db)
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found")
 
-    confirmation_token = _issue_token()
-    await redis.setex(_email_confirmation_key(confirmation_token), ttl_seconds, str(user_id))
+        ttl_seconds = max(300, int(settings.auth_email_confirmation_ttl_seconds))
+        if bool(user.get("email_confirmed")):
+            return EmailConfirmationRequestResponse(ok=True, expires_in=ttl_seconds)
 
-    debug_token: str | None = None
-    if settings.environment == "local" or settings.auth_email_confirmation_debug_return_token:
-        debug_token = confirmation_token
-    return EmailConfirmationRequestResponse(ok=True, expires_in=ttl_seconds, confirmation_token=debug_token)
+        confirmation_token = _issue_token()
+        await redis.setex(_email_confirmation_key(confirmation_token), ttl_seconds, str(user_id))
+
+        debug_token: str | None = None
+        if settings.environment == "local" or settings.auth_email_confirmation_debug_return_token:
+            debug_token = confirmation_token
+        return EmailConfirmationRequestResponse(ok=True, expires_in=ttl_seconds, confirmation_token=debug_token)
+
+    return await execute_idempotent_json(request, redis, scope=f"auth.email_confirmation.request:{user_id}", handler=_op)
 
 
 @router.post("/email-confirmation/confirm")
@@ -1291,32 +1309,35 @@ async def confirm_email(
     redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ):
-    await enforce_rate_limit(request, redis, bucket="auth-email-confirm", limit=30)
-    token = payload.token.strip()
-    if not token:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid email confirmation token")
+    async def _op():
+        await enforce_rate_limit(request, redis, bucket="auth-email-confirm", limit=30)
+        token = payload.token.strip()
+        if not token:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid email confirmation token")
 
-    raw_user_id = await redis.get(_email_confirmation_key(token))
-    if not raw_user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid or expired email confirmation token")
-    try:
-        user_id = int(raw_user_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid email confirmation token") from exc
+        raw_user_id = await redis.get(_email_confirmation_key(token))
+        if not raw_user_id:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid or expired email confirmation token")
+        try:
+            user_id = int(raw_user_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid email confirmation token") from exc
 
-    now_iso = _now_iso()
-    await redis.hset(
-        f"auth:user:{user_id}",
-        mapping={
-            "email_confirmed": "1",
-            "email_confirmed_at": now_iso,
-            "updated_at": now_iso,
-        },
-    )
-    await redis.delete(_email_confirmation_key(token))
-    await _sync_user_from_redis(redis, db, user_id=user_id)
-    await db.commit()
-    return {"ok": True, "email_confirmed": True}
+        now_iso = _now_iso()
+        await redis.hset(
+            f"auth:user:{user_id}",
+            mapping={
+                "email_confirmed": "1",
+                "email_confirmed_at": now_iso,
+                "updated_at": now_iso,
+            },
+        )
+        await redis.delete(_email_confirmation_key(token))
+        await _sync_user_from_redis(redis, db, user_id=user_id)
+        await db.commit()
+        return {"ok": True, "email_confirmed": True}
+
+    return await execute_idempotent_json(request, redis, scope="auth.email_confirmation.confirm", handler=_op)
 
 
 @router.get("/sessions", response_model=list[SessionInfo])

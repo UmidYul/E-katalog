@@ -18,6 +18,14 @@ docker compose -f infra/docker/docker-compose.yml exec api alembic -c /srv/migra
 Open:
 - `http://localhost` -> Next.js frontend behind Nginx
 - `http://localhost/api/v1/health` -> FastAPI health
+- `http://localhost/api/v1/metrics` -> Prometheus-style API metrics
+
+Observability envs:
+- `SENTRY_ENABLED`, `SENTRY_DSN`, `SENTRY_TRACES_SAMPLE_RATE`, `SENTRY_PROFILES_SAMPLE_RATE`
+
+Backup/restore:
+- Runbook: `docs/BACKUP_RESTORE_RUNBOOK.md`
+- Script: `python scripts/db_backup_restore.py --label manual --validate-restore`
 
 ## Canonical Product Architecture (v2)
 

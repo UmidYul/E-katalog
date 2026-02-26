@@ -21,6 +21,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db_session, get_redis
+from app.api.idempotency import execute_idempotent_json
 from app.api.rbac import ADMIN_ROLE
 from app.api.rbac import require_roles
 from app.api.v1.routers.auth import _ensure_user_uuid
@@ -1955,18 +1956,50 @@ async def patch_user(
     redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    if _auth_reads_from_postgres():
-        normalized_uuid = _normalize_uuid_ref(user_id, field_name="user_id")
-        user = (
-            await db.execute(
-                select(AuthUser).where(AuthUser.uuid == normalized_uuid).limit(1)
-            )
-        ).scalars().first()
-        if user is None:
-            raise HTTPException(status_code=404, detail="user not found")
+    async def _op():
+        if _auth_reads_from_postgres():
+            normalized_uuid = _normalize_uuid_ref(user_id, field_name="user_id")
+            user = (
+                await db.execute(
+                    select(AuthUser).where(AuthUser.uuid == normalized_uuid).limit(1)
+                )
+            ).scalars().first()
+            if user is None:
+                raise HTTPException(status_code=404, detail="user not found")
 
+            normalized_payload = payload or {}
+            updates: dict[str, Any] = {}
+            if "full_name" in normalized_payload:
+                updates["full_name"] = str(normalized_payload["full_name"])
+            if "role" in normalized_payload:
+                next_role = str(normalized_payload["role"]).strip().lower().replace("-", "_")
+                if next_role not in VALID_USER_ROLES:
+                    raise HTTPException(status_code=422, detail="invalid role")
+                updates["role"] = next_role
+            if "is_active" in normalized_payload:
+                updates["is_active"] = bool(normalized_payload["is_active"])
+            if updates:
+                await db.execute(
+                    update(AuthUser)
+                    .where(AuthUser.id == user.id)
+                    .values(**updates, updated_at=datetime.now(UTC))
+                )
+                await _audit_admin_action(
+                    db,
+                    current_user=current_user,
+                    request=request,
+                    action="users.patch",
+                    entity_type="user",
+                    entity_id=str(user.uuid),
+                    payload={"updates": sorted(updates.keys())},
+                )
+                await db.commit()
+            return await get_user(user_id, redis, db)
+
+        internal_user_id, _ = await _get_user_by_uuid_or_404(redis, user_id)
+        key = f"auth:user:{internal_user_id}"
+        updates: dict[str, str] = {}
         normalized_payload = payload or {}
-        updates: dict[str, Any] = {}
         if "full_name" in normalized_payload:
             updates["full_name"] = str(normalized_payload["full_name"])
         if "role" in normalized_payload:
@@ -1975,51 +2008,22 @@ async def patch_user(
                 raise HTTPException(status_code=422, detail="invalid role")
             updates["role"] = next_role
         if "is_active" in normalized_payload:
-            updates["is_active"] = bool(normalized_payload["is_active"])
+            updates["is_active"] = "true" if bool(normalized_payload["is_active"]) else "false"
         if updates:
-            await db.execute(
-                update(AuthUser)
-                .where(AuthUser.id == user.id)
-                .values(**updates, updated_at=datetime.now(UTC))
-            )
+            await redis.hset(key, mapping=updates)
             await _audit_admin_action(
                 db,
                 current_user=current_user,
                 request=request,
                 action="users.patch",
                 entity_type="user",
-                entity_id=str(user.uuid),
+                entity_id=user_id,
                 payload={"updates": sorted(updates.keys())},
             )
             await db.commit()
         return await get_user(user_id, redis, db)
 
-    internal_user_id, _ = await _get_user_by_uuid_or_404(redis, user_id)
-    key = f"auth:user:{internal_user_id}"
-    updates: dict[str, str] = {}
-    normalized_payload = payload or {}
-    if "full_name" in normalized_payload:
-        updates["full_name"] = str(normalized_payload["full_name"])
-    if "role" in normalized_payload:
-        next_role = str(normalized_payload["role"]).strip().lower().replace("-", "_")
-        if next_role not in VALID_USER_ROLES:
-            raise HTTPException(status_code=422, detail="invalid role")
-        updates["role"] = next_role
-    if "is_active" in normalized_payload:
-        updates["is_active"] = "true" if bool(normalized_payload["is_active"]) else "false"
-    if updates:
-        await redis.hset(key, mapping=updates)
-        await _audit_admin_action(
-            db,
-            current_user=current_user,
-            request=request,
-            action="users.patch",
-            entity_type="user",
-            entity_id=user_id,
-            payload={"updates": sorted(updates.keys())},
-        )
-        await db.commit()
-    return await get_user(user_id, redis, db)
+    return await execute_idempotent_json(request, redis, scope=f"admin.users.patch:{user_id}", handler=_op)
 
 
 @router.delete("/users/{user_id}")
@@ -2664,33 +2668,36 @@ async def bulk_delete_products(
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),
 ) -> dict[str, Any]:
-    resolved_set: set[int] = set()
-    for item in payload.product_ids:
-        resolved = await _resolve_product_id_or_404(db, item)
-        if resolved > 0:
-            resolved_set.add(resolved)
-    product_ids = sorted(resolved_set)
-    if not product_ids:
-        raise HTTPException(status_code=422, detail="product_ids must contain at least one valid product reference")
+    async def _op():
+        resolved_set: set[int] = set()
+        for item in payload.product_ids:
+            resolved = await _resolve_product_id_or_404(db, item)
+            if resolved > 0:
+                resolved_set.add(resolved)
+        product_ids = sorted(resolved_set)
+        if not product_ids:
+            raise HTTPException(status_code=422, detail="product_ids must contain at least one valid product reference")
 
-    deleted_count = (
-        await db.execute(
-            text("delete from catalog_canonical_products where id = any(cast(:product_ids as bigint[]))"),
-            {"product_ids": product_ids},
+        deleted_count = (
+            await db.execute(
+                text("delete from catalog_canonical_products where id = any(cast(:product_ids as bigint[]))"),
+                {"product_ids": product_ids},
+            )
+        ).rowcount or 0
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="products.bulk_delete",
+            entity_type="product",
+            entity_id=None,
+            payload={"requested": len(product_ids), "deleted": int(deleted_count)},
         )
-    ).rowcount or 0
-    await _audit_admin_action(
-        db,
-        current_user=current_user,
-        request=request,
-        action="products.bulk_delete",
-        entity_type="product",
-        entity_id=None,
-        payload={"requested": len(product_ids), "deleted": int(deleted_count)},
-    )
-    await db.commit()
-    await _invalidate_product_caches(redis)
-    return {"ok": True, "requested": len(product_ids), "deleted": int(deleted_count)}
+        await db.commit()
+        await _invalidate_product_caches(redis)
+        return {"ok": True, "requested": len(product_ids), "deleted": int(deleted_count)}
+
+    return await execute_idempotent_json(request, redis, scope="admin.products.bulk_delete", handler=_op)
 
 
 @router.post("/products/import")
@@ -2701,68 +2708,71 @@ async def import_products(
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),
 ) -> dict[str, Any]:
-    rows = _parse_import_rows(payload)
-    if not rows:
-        raise HTTPException(status_code=422, detail="import payload has no rows")
+    async def _op():
+        rows = _parse_import_rows(payload)
+        if not rows:
+            raise HTTPException(status_code=422, detail="import payload has no rows")
 
-    default_store_id = await _resolve_default_store_id(db, payload.store_id)
-    default_category_id = await _resolve_default_category_id(db)
-    id_cache: dict[int, int] = {default_store_id: default_store_id}
-    slug_cache: dict[str, int] = {}
-    name_cache: dict[str, int] = {}
+        default_store_id = await _resolve_default_store_id(db, payload.store_id)
+        default_category_id = await _resolve_default_category_id(db)
+        id_cache: dict[int, int] = {default_store_id: default_store_id}
+        slug_cache: dict[str, int] = {}
+        name_cache: dict[str, int] = {}
 
-    imported_rows = 0
-    skipped_rows = 0
-    errors: list[str] = []
+        imported_rows = 0
+        skipped_rows = 0
+        errors: list[str] = []
 
-    for index, row in enumerate(rows, start=1):
-        try:
-            async with db.begin_nested():
-                imported = await _ingest_import_row(
-                    db,
-                    row,
-                    default_category_id=default_category_id,
-                    default_store_id=default_store_id,
-                    id_cache=id_cache,
-                    slug_cache=slug_cache,
-                    name_cache=name_cache,
-                )
-            if imported:
-                imported_rows += 1
-            else:
+        for index, row in enumerate(rows, start=1):
+            try:
+                async with db.begin_nested():
+                    imported = await _ingest_import_row(
+                        db,
+                        row,
+                        default_category_id=default_category_id,
+                        default_store_id=default_store_id,
+                        id_cache=id_cache,
+                        slug_cache=slug_cache,
+                        name_cache=name_cache,
+                    )
+                if imported:
+                    imported_rows += 1
+                else:
+                    skipped_rows += 1
+                    errors.append(f"row {index}: skipped because required fields are missing")
+            except Exception as exc:  # noqa: BLE001
                 skipped_rows += 1
-                errors.append(f"row {index}: skipped because required fields are missing")
-        except Exception as exc:  # noqa: BLE001
-            skipped_rows += 1
-            errors.append(f"row {index}: {exc}")
+                errors.append(f"row {index}: {exc}")
 
-    if imported_rows == 0:
-        await db.rollback()
-        raise HTTPException(status_code=422, detail="no valid rows were imported")
+        if imported_rows == 0:
+            await db.rollback()
+            raise HTTPException(status_code=422, detail="no valid rows were imported")
 
-    await _audit_admin_action(
-        db,
-        current_user=current_user,
-        request=request,
-        action="products.import",
-        entity_type="product_import",
-        entity_id=None,
-        payload={"source": payload.source, "received_rows": len(rows), "imported_rows": imported_rows, "skipped_rows": skipped_rows},
-    )
-    await db.commit()
-    await _invalidate_product_caches(redis)
-    task_id = enqueue_ingested_products_pipeline()
-    response: dict[str, Any] = {
-        "ok": True,
-        "source": payload.source,
-        "received_rows": len(rows),
-        "imported_rows": imported_rows,
-        "skipped_rows": skipped_rows,
-        "task_id": task_id,
-    }
-    if errors:
-        response["errors"] = errors[:20]
-    return response
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="products.import",
+            entity_type="product_import",
+            entity_id=None,
+            payload={"source": payload.source, "received_rows": len(rows), "imported_rows": imported_rows, "skipped_rows": skipped_rows},
+        )
+        await db.commit()
+        await _invalidate_product_caches(redis)
+        task_id = enqueue_ingested_products_pipeline()
+        response: dict[str, Any] = {
+            "ok": True,
+            "source": payload.source,
+            "received_rows": len(rows),
+            "imported_rows": imported_rows,
+            "skipped_rows": skipped_rows,
+            "task_id": task_id,
+        }
+        if errors:
+            response["errors"] = errors[:20]
+        return response
+
+    return await execute_idempotent_json(request, redis, scope="admin.products.import", handler=_op)
 
 
 @router.get("/products/export")
@@ -2883,33 +2893,36 @@ async def patch_order(
     redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    normalized_order_id = _normalize_uuid_ref(order_id, field_name="order_id")
-    key = "admin:orders"
-    raw_rows = await redis.lrange(key, 0, -1)
-    next_rows: list[str] = []
-    target: dict[str, Any] | None = None
-    for raw in raw_rows:
-        row = json.loads(raw)
-        if str(row.get("id", "")).lower() == normalized_order_id:
-            row["status"] = payload.status
-            target = row
-        next_rows.append(json.dumps(row, ensure_ascii=False))
-    if target is None:
-        raise HTTPException(status_code=404, detail="order not found")
-    await redis.delete(key)
-    if next_rows:
-        await redis.rpush(key, *next_rows)
-    await _audit_admin_action(
-        db,
-        current_user=current_user,
-        request=request,
-        action="orders.patch",
-        entity_type="order",
-        entity_id=normalized_order_id,
-        payload={"status": payload.status},
-    )
-    await db.commit()
-    return target
+    async def _op():
+        normalized_order_id = _normalize_uuid_ref(order_id, field_name="order_id")
+        key = "admin:orders"
+        raw_rows = await redis.lrange(key, 0, -1)
+        next_rows: list[str] = []
+        target: dict[str, Any] | None = None
+        for raw in raw_rows:
+            row = json.loads(raw)
+            if str(row.get("id", "")).lower() == normalized_order_id:
+                row["status"] = payload.status
+                target = row
+            next_rows.append(json.dumps(row, ensure_ascii=False))
+        if target is None:
+            raise HTTPException(status_code=404, detail="order not found")
+        await redis.delete(key)
+        if next_rows:
+            await redis.rpush(key, *next_rows)
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="orders.patch",
+            entity_type="order",
+            entity_id=normalized_order_id,
+            payload={"status": payload.status},
+        )
+        await db.commit()
+        return target
+
+    return await execute_idempotent_json(request, redis, scope=f"admin.orders.patch:{order_id}", handler=_op)
 
 
 @router.get("/analytics")
@@ -3406,48 +3419,51 @@ async def acknowledge_alert_event(
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),
 ) -> dict[str, Any]:
-    normalized = _normalize_uuid_ref(alert_id, field_name="alert_id")
-    row = (
-        await db.execute(
-            text(
-                """
-                update admin_alert_events
-                set status = 'ack',
-                    acknowledged_at = now(),
-                    updated_at = now()
-                where uuid = cast(:uuid as uuid)
-                returning
-                    uuid as id,
-                    code,
-                    title,
-                    source,
-                    severity,
-                    status,
-                    metric_value,
-                    threshold_value,
-                    context,
-                    created_at,
-                    acknowledged_at,
-                    resolved_at
-                """
-            ),
-            {"uuid": normalized},
+    async def _op():
+        normalized = _normalize_uuid_ref(alert_id, field_name="alert_id")
+        row = (
+            await db.execute(
+                text(
+                    """
+                    update admin_alert_events
+                    set status = 'ack',
+                        acknowledged_at = now(),
+                        updated_at = now()
+                    where uuid = cast(:uuid as uuid)
+                    returning
+                        uuid as id,
+                        code,
+                        title,
+                        source,
+                        severity,
+                        status,
+                        metric_value,
+                        threshold_value,
+                        context,
+                        created_at,
+                        acknowledged_at,
+                        resolved_at
+                    """
+                ),
+                {"uuid": normalized},
+            )
+        ).mappings().first()
+        if not row:
+            raise HTTPException(status_code=404, detail="alert event not found")
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="alerts.ack",
+            entity_type="alert_event",
+            entity_id=normalized,
+            payload={"status": "ack"},
         )
-    ).mappings().first()
-    if not row:
-        raise HTTPException(status_code=404, detail="alert event not found")
-    await _audit_admin_action(
-        db,
-        current_user=current_user,
-        request=request,
-        action="alerts.ack",
-        entity_type="alert_event",
-        entity_id=normalized,
-        payload={"status": "ack"},
-    )
-    await db.commit()
-    await _invalidate_admin_analytics_cache(redis)
-    return _serialize_alert_event_row(dict(row))
+        await db.commit()
+        await _invalidate_admin_analytics_cache(redis)
+        return _serialize_alert_event_row(dict(row))
+
+    return await execute_idempotent_json(request, redis, scope=f"admin.analytics.alerts.ack:{alert_id.lower()}", handler=_op)
 
 
 @router.patch("/analytics/alerts/{alert_id}/resolve")
@@ -3458,48 +3474,51 @@ async def resolve_alert_event(
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),
 ) -> dict[str, Any]:
-    normalized = _normalize_uuid_ref(alert_id, field_name="alert_id")
-    row = (
-        await db.execute(
-            text(
-                """
-                update admin_alert_events
-                set status = 'resolved',
-                    resolved_at = now(),
-                    updated_at = now()
-                where uuid = cast(:uuid as uuid)
-                returning
-                    uuid as id,
-                    code,
-                    title,
-                    source,
-                    severity,
-                    status,
-                    metric_value,
-                    threshold_value,
-                    context,
-                    created_at,
-                    acknowledged_at,
-                    resolved_at
-                """
-            ),
-            {"uuid": normalized},
+    async def _op():
+        normalized = _normalize_uuid_ref(alert_id, field_name="alert_id")
+        row = (
+            await db.execute(
+                text(
+                    """
+                    update admin_alert_events
+                    set status = 'resolved',
+                        resolved_at = now(),
+                        updated_at = now()
+                    where uuid = cast(:uuid as uuid)
+                    returning
+                        uuid as id,
+                        code,
+                        title,
+                        source,
+                        severity,
+                        status,
+                        metric_value,
+                        threshold_value,
+                        context,
+                        created_at,
+                        acknowledged_at,
+                        resolved_at
+                    """
+                ),
+                {"uuid": normalized},
+            )
+        ).mappings().first()
+        if not row:
+            raise HTTPException(status_code=404, detail="alert event not found")
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="alerts.resolve",
+            entity_type="alert_event",
+            entity_id=normalized,
+            payload={"status": "resolved"},
         )
-    ).mappings().first()
-    if not row:
-        raise HTTPException(status_code=404, detail="alert event not found")
-    await _audit_admin_action(
-        db,
-        current_user=current_user,
-        request=request,
-        action="alerts.resolve",
-        entity_type="alert_event",
-        entity_id=normalized,
-        payload={"status": "resolved"},
-    )
-    await db.commit()
-    await _invalidate_admin_analytics_cache(redis)
-    return _serialize_alert_event_row(dict(row))
+        await db.commit()
+        await _invalidate_admin_analytics_cache(redis)
+        return _serialize_alert_event_row(dict(row))
+
+    return await execute_idempotent_json(request, redis, scope=f"admin.analytics.alerts.resolve:{alert_id.lower()}", handler=_op)
 
 
 @router.post("/analytics/alerts/evaluate")
@@ -3509,19 +3528,22 @@ async def enqueue_alert_evaluation(
     redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    task_id = enqueue_admin_alert_evaluation()
-    await _invalidate_admin_analytics_cache(redis)
-    await _audit_admin_action(
-        db,
-        current_user=current_user,
-        request=request,
-        action="alerts.evaluate.enqueue",
-        entity_type="task",
-        entity_id=task_id,
-        payload={"queued": "maintenance"},
-    )
-    await db.commit()
-    return {"task_id": task_id, "queued": "maintenance"}
+    async def _op():
+        task_id = enqueue_admin_alert_evaluation()
+        await _invalidate_admin_analytics_cache(redis)
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="alerts.evaluate.enqueue",
+            entity_type="task",
+            entity_id=task_id,
+            payload={"queued": "maintenance"},
+        )
+        await db.commit()
+        return {"task_id": task_id, "queued": "maintenance"}
+
+    return await execute_idempotent_json(request, redis, scope="admin.analytics.alerts.evaluate", handler=_op)
 
 
 @router.get("/settings")
@@ -3553,129 +3575,152 @@ async def patch_settings(
     redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    key = "admin:settings"
-    updates: dict[str, str] = {}
-    if payload.site_name is not None:
-        updates["site_name"] = payload.site_name
-    if payload.support_email is not None:
-        updates["support_email"] = payload.support_email
-    if payload.branding_logo_url is not None:
-        updates["branding_logo_url"] = payload.branding_logo_url
-    if payload.feature_ai_enabled is not None:
-        updates["feature_ai_enabled"] = "true" if payload.feature_ai_enabled else "false"
-    if updates:
-        await redis.hset(key, mapping=updates)
-        await _audit_admin_action(
-            db,
-            current_user=current_user,
-            request=request,
-            action="settings.patch",
-            entity_type="settings",
-            entity_id="admin:settings",
-            payload={"updates": sorted(updates.keys())},
-        )
-        await db.commit()
-    return await get_settings(redis)
+    async def _op():
+        key = "admin:settings"
+        updates: dict[str, str] = {}
+        if payload.site_name is not None:
+            updates["site_name"] = payload.site_name
+        if payload.support_email is not None:
+            updates["support_email"] = payload.support_email
+        if payload.branding_logo_url is not None:
+            updates["branding_logo_url"] = payload.branding_logo_url
+        if payload.feature_ai_enabled is not None:
+            updates["feature_ai_enabled"] = "true" if payload.feature_ai_enabled else "false"
+        if updates:
+            await redis.hset(key, mapping=updates)
+            await _audit_admin_action(
+                db,
+                current_user=current_user,
+                request=request,
+                action="settings.patch",
+                entity_type="settings",
+                entity_id="admin:settings",
+                payload={"updates": sorted(updates.keys())},
+            )
+            await db.commit()
+        return await get_settings(redis)
+
+    return await execute_idempotent_json(request, redis, scope="admin.settings.patch", handler=_op)
 
 
 @router.post("/reindex/products")
 async def reindex_products(
     request: Request,
     current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    task_id = enqueue_reindex_batches()
-    await _audit_admin_action(
-        db,
-        current_user=current_user,
-        request=request,
-        action="tasks.reindex.enqueue",
-        entity_type="task",
-        entity_id=task_id,
-        payload={"queued": "reindex"},
-    )
-    await db.commit()
-    return {"task_id": task_id, "queued": "reindex"}
+    async def _op():
+        task_id = enqueue_reindex_batches()
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="tasks.reindex.enqueue",
+            entity_type="task",
+            entity_id=task_id,
+            payload={"queued": "reindex"},
+        )
+        await db.commit()
+        return {"task_id": task_id, "queued": "reindex"}
+
+    return await execute_idempotent_json(request, redis, scope="admin.tasks.reindex.enqueue", handler=_op)
 
 
 @router.post("/embeddings/rebuild")
 async def rebuild_embeddings(
     request: Request,
     current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    task_id = enqueue_embedding_batches()
-    await _audit_admin_action(
-        db,
-        current_user=current_user,
-        request=request,
-        action="tasks.embedding.enqueue",
-        entity_type="task",
-        entity_id=task_id,
-        payload={"queued": "embedding"},
-    )
-    await db.commit()
-    return {"task_id": task_id, "queued": "embedding"}
+    async def _op():
+        task_id = enqueue_embedding_batches()
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="tasks.embedding.enqueue",
+            entity_type="task",
+            entity_id=task_id,
+            payload={"queued": "embedding"},
+        )
+        await db.commit()
+        return {"task_id": task_id, "queued": "embedding"}
+
+    return await execute_idempotent_json(request, redis, scope="admin.tasks.embedding.enqueue", handler=_op)
 
 
 @router.post("/dedupe/run")
 async def run_dedupe(
     request: Request,
     current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    task_id = enqueue_dedupe_batches()
-    await _audit_admin_action(
-        db,
-        current_user=current_user,
-        request=request,
-        action="tasks.dedupe.enqueue",
-        entity_type="task",
-        entity_id=task_id,
-        payload={"queued": "dedupe"},
-    )
-    await db.commit()
-    return {"task_id": task_id, "queued": "dedupe"}
+    async def _op():
+        task_id = enqueue_dedupe_batches()
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="tasks.dedupe.enqueue",
+            entity_type="task",
+            entity_id=task_id,
+            payload={"queued": "dedupe"},
+        )
+        await db.commit()
+        return {"task_id": task_id, "queued": "dedupe"}
+
+    return await execute_idempotent_json(request, redis, scope="admin.tasks.dedupe.enqueue", handler=_op)
 
 
 @router.post("/scrape/run")
 async def run_scrape(
     request: Request,
     current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    task_id = enqueue_full_crawl()
-    await _audit_admin_action(
-        db,
-        current_user=current_user,
-        request=request,
-        action="tasks.scrape.enqueue",
-        entity_type="task",
-        entity_id=task_id,
-        payload={"queued": "scrape"},
-    )
-    await db.commit()
-    return {"task_id": task_id, "queued": "scrape"}
+    async def _op():
+        task_id = enqueue_full_crawl()
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="tasks.scrape.enqueue",
+            entity_type="task",
+            entity_id=task_id,
+            payload={"queued": "scrape"},
+        )
+        await db.commit()
+        return {"task_id": task_id, "queued": "scrape"}
+
+    return await execute_idempotent_json(request, redis, scope="admin.tasks.scrape.enqueue", handler=_op)
 
 
 @router.post("/catalog/rebuild")
 async def run_catalog_rebuild(
     request: Request,
     current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    task_id = enqueue_full_catalog_rebuild()
-    await _audit_admin_action(
-        db,
-        current_user=current_user,
-        request=request,
-        action="tasks.catalog_rebuild.enqueue",
-        entity_type="task",
-        entity_id=task_id,
-        payload={"queued": "catalog_rebuild"},
-    )
-    await db.commit()
-    return {"task_id": task_id, "queued": "catalog_rebuild"}
+    async def _op():
+        task_id = enqueue_full_catalog_rebuild()
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="tasks.catalog_rebuild.enqueue",
+            entity_type="task",
+            entity_id=task_id,
+            payload={"queued": "catalog_rebuild"},
+        )
+        await db.commit()
+        return {"task_id": task_id, "queued": "catalog_rebuild"}
+
+    return await execute_idempotent_json(request, redis, scope="admin.tasks.catalog_rebuild.enqueue", handler=_op)
 
 
 @router.get("/quality/reports/latest")
@@ -3854,102 +3899,113 @@ async def deactivate_quality_products_without_valid_offers(
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),
 ) -> dict[str, Any]:
-    resolved_set: set[int] = set()
-    for item in payload.product_ids:
-        resolved = await _resolve_product_id_or_404(db, item)
-        if resolved > 0:
-            resolved_set.add(resolved)
+    async def _op():
+        resolved_set: set[int] = set()
+        for item in payload.product_ids:
+            resolved = await _resolve_product_id_or_404(db, item)
+            if resolved > 0:
+                resolved_set.add(resolved)
 
-    product_ids = sorted(resolved_set)
-    if not product_ids:
-        raise HTTPException(status_code=422, detail="product_ids must contain at least one valid product reference")
+        product_ids = sorted(resolved_set)
+        if not product_ids:
+            raise HTTPException(status_code=422, detail="product_ids must contain at least one valid product reference")
 
-    deactivated_ids = (
-        await db.execute(
-            text(
-                """
-                with candidates as (
-                    select
-                        cp.id
-                    from catalog_canonical_products cp
-                    left join catalog_offers o
-                      on o.canonical_product_id = cp.id
-                     and o.is_valid = true
-                     and o.in_stock = true
-                    where cp.id = any(cast(:product_ids as bigint[]))
-                    group by cp.id
-                    having count(distinct o.store_id) = 0
-                )
-                update catalog_canonical_products cp
-                set is_active = false,
-                    updated_at = now()
-                from candidates c
-                where cp.id = c.id
-                  and cp.is_active = true
-                returning cp.id
-                """
-            ),
-            {"product_ids": product_ids},
+        deactivated_ids = (
+            await db.execute(
+                text(
+                    """
+                    with candidates as (
+                        select
+                            cp.id
+                        from catalog_canonical_products cp
+                        left join catalog_offers o
+                          on o.canonical_product_id = cp.id
+                         and o.is_valid = true
+                         and o.in_stock = true
+                        where cp.id = any(cast(:product_ids as bigint[]))
+                        group by cp.id
+                        having count(distinct o.store_id) = 0
+                    )
+                    update catalog_canonical_products cp
+                    set is_active = false,
+                        updated_at = now()
+                    from candidates c
+                    where cp.id = c.id
+                      and cp.is_active = true
+                    returning cp.id
+                    """
+                ),
+                {"product_ids": product_ids},
+            )
+        ).scalars().all()
+
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="quality.products.deactivate",
+            entity_type="product",
+            entity_id=None,
+            payload={"requested": len(product_ids), "deactivated": len(deactivated_ids)},
         )
-    ).scalars().all()
+        await db.commit()
+        await _invalidate_product_caches(redis)
+        return {
+            "ok": True,
+            "requested": len(product_ids),
+            "deactivated": len(deactivated_ids),
+            "skipped": max(0, len(product_ids) - len(deactivated_ids)),
+        }
 
-    await _audit_admin_action(
-        db,
-        current_user=current_user,
-        request=request,
-        action="quality.products.deactivate",
-        entity_type="product",
-        entity_id=None,
-        payload={"requested": len(product_ids), "deactivated": len(deactivated_ids)},
-    )
-    await db.commit()
-    await _invalidate_product_caches(redis)
-    return {
-        "ok": True,
-        "requested": len(product_ids),
-        "deactivated": len(deactivated_ids),
-        "skipped": max(0, len(product_ids) - len(deactivated_ids)),
-    }
+    return await execute_idempotent_json(request, redis, scope="admin.quality.products.deactivate", handler=_op)
 
 
 @router.post("/quality/reports/run")
 async def run_quality_report(
     request: Request,
     current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    task_id = enqueue_catalog_quality_report()
-    await _audit_admin_action(
-        db,
-        current_user=current_user,
-        request=request,
-        action="quality.report.enqueue",
-        entity_type="task",
-        entity_id=task_id,
-        payload={"queued": "maintenance"},
-    )
-    await db.commit()
-    return {"task_id": task_id, "queued": "maintenance"}
+    async def _op():
+        task_id = enqueue_catalog_quality_report()
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="quality.report.enqueue",
+            entity_type="task",
+            entity_id=task_id,
+            payload={"queued": "maintenance"},
+        )
+        await db.commit()
+        return {"task_id": task_id, "queued": "maintenance"}
+
+    return await execute_idempotent_json(request, redis, scope="admin.quality.report.enqueue", handler=_op)
 
 
 @router.post("/quality/alerts/test")
 async def run_quality_alert_test(
     request: Request,
     current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    task_id = enqueue_test_quality_alert()
-    await _audit_admin_action(
-        db,
-        current_user=current_user,
-        request=request,
-        action="quality.alert_test.enqueue",
-        entity_type="task",
-        entity_id=task_id,
-        payload={"queued": "maintenance"},
-    )
-    await db.commit()
-    return {"task_id": task_id, "queued": "maintenance"}
+    async def _op():
+        task_id = enqueue_test_quality_alert()
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="quality.alert_test.enqueue",
+            entity_type="task",
+            entity_id=task_id,
+            payload={"queued": "maintenance"},
+        )
+        await db.commit()
+        return {"task_id": task_id, "queued": "maintenance"}
+
+    return await execute_idempotent_json(request, redis, scope="admin.quality.alert_test.enqueue", handler=_op)
 
 
 @router.get("/tasks/{task_id}")

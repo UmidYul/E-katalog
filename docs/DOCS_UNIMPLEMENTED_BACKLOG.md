@@ -15,11 +15,11 @@ This file aggregates items that are still not fully implemented based on explici
 - [~] Password reset + email confirmation: password-reset API is implemented; email confirmation API/token flow added, but external delivery/provider integration is still pending.
 - [~] Unified RBAC policy layer for API: shared `app/api/rbac.py` added and adopted by admin + product-feedback routers; remaining routers should migrate to the same policy helpers.
 - [x] Audit log for admin operations baseline implemented: `admin_audit_events` table + `/api/v1/admin/audit/events` + write logging in mutating admin endpoints.
-- [ ] Idempotency keys for critical write endpoints (`TODO`).
-- [ ] Anti-bruteforce hardening for auth (`TODO` in P0 list; later update marks this as `DONE`, needs status reconciliation).
-- [ ] Observability hardening (Sentry + metrics + tracing) (`TODO`).
-- [ ] Expanded readiness/liveness checks (`TODO` in P0 list; later update marks this as `DONE`, needs status reconciliation).
-- [ ] Backups + restore validation (runbook + automation) (`TODO`).
+- [~] Idempotency keys for critical write endpoints: baseline implemented (`Idempotency-Key` + Redis TTL replay) for auth recovery flows, critical admin writes, admin task enqueue endpoints, and product price-alert upsert; remaining non-critical writes can be migrated incrementally.
+- [x] Anti-bruteforce hardening for auth implemented (ip/email lockout + separate Redis buckets).
+- [x] Observability baseline implemented in API: optional Sentry integration (error + tracing), Prometheus-style `/api/v1/metrics`, and request timing header `X-Response-Time-Ms`.
+- [x] Expanded readiness/liveness checks implemented (`/live` + enriched `/ready` with DB/Redis/Celery checks).
+- [x] Backups + restore validation baseline implemented: `scripts/db_backup_restore.py` + GitHub workflow `.github/workflows/backup-restore-validation.yml` + runbook `docs/BACKUP_RESTORE_RUNBOOK.md`.
 - [ ] OpenAPI contract testing + API versioning work is still in progress (`IN_PROGRESS`).
 - [ ] Cleanup tasks for sessions/tokens/temporary entities are still in progress (`IN_PROGRESS`).
 - [ ] Notifications pipeline for price/stock (email/telegram/webhook) (`TODO`).

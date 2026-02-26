@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.rate_limit import enforce_rate_limit
+from app.api.idempotency import execute_idempotent_json
 from app.api.deps import get_db_session, get_redis
 from app.api.v1.routers.auth import get_current_user
 from app.schemas.catalog import (
@@ -188,62 +189,70 @@ async def upsert_product_price_alert(
 ):
     redis = get_redis()
     await enforce_rate_limit(request, redis, bucket="price-alerts-write", limit=90)
+    async def _op():
+        repo = CatalogRepository(db, cursor_secret=settings.cursor_secret)
+        product = await repo.get_product(product_id)
+        if product is None:
+            raise HTTPException(status_code=404, detail="product not found")
 
-    repo = CatalogRepository(db, cursor_secret=settings.cursor_secret)
-    product = await repo.get_product(product_id)
-    if product is None:
-        raise HTTPException(status_code=404, detail="product not found")
+        product_uuid = str(product["id"])
+        product_internal_id = int(product["legacy_id"])
+        user_uuid = _user_uuid_from_current(current_user)
+        channel = str(payload.channel or "telegram").strip().lower()
+        now = datetime.now(UTC)
+        fields_set = payload.model_fields_set
 
-    product_uuid = str(product["id"])
-    product_internal_id = int(product["legacy_id"])
-    user_uuid = _user_uuid_from_current(current_user)
-    channel = str(payload.channel or "telegram").strip().lower()
-    now = datetime.now(UTC)
-    fields_set = payload.model_fields_set
+        current_price = payload.current_price
+        if current_price is None:
+            compare_meta = await repo.get_product_compare_meta(product_internal_id)
+            price_min = compare_meta.get("price_min")
+            current_price = float(price_min) if price_min is not None else None
 
-    current_price = payload.current_price
-    if current_price is None:
-        compare_meta = await repo.get_product_compare_meta(product_internal_id)
-        price_min = compare_meta.get("price_min")
-        current_price = float(price_min) if price_min is not None else None
-
-    stmt = (
-        select(CatalogPriceAlert)
-        .where(CatalogPriceAlert.user_uuid == user_uuid)
-        .where(CatalogPriceAlert.product_id == product_internal_id)
-        .where(CatalogPriceAlert.channel == channel)
-        .limit(1)
-    )
-    alert = (await db.execute(stmt)).scalar_one_or_none()
-    if alert is None:
-        alert = CatalogPriceAlert(
-            user_uuid=user_uuid,
-            product_id=product_internal_id,
-            channel=channel,
-            alerts_enabled=payload.alerts_enabled if payload.alerts_enabled is not None else True,
-            baseline_price=_as_decimal(payload.baseline_price if "baseline_price" in fields_set else current_price),
-            target_price=_as_decimal(payload.target_price if "target_price" in fields_set else None),
-            last_seen_price=_as_decimal(current_price),
-            created_at=now,
-            updated_at=now,
+        stmt = (
+            select(CatalogPriceAlert)
+            .where(CatalogPriceAlert.user_uuid == user_uuid)
+            .where(CatalogPriceAlert.product_id == product_internal_id)
+            .where(CatalogPriceAlert.channel == channel)
+            .limit(1)
         )
-        db.add(alert)
-    else:
-        if "alerts_enabled" in fields_set and payload.alerts_enabled is not None:
-            alert.alerts_enabled = bool(payload.alerts_enabled)
-        if "target_price" in fields_set:
-            alert.target_price = _as_decimal(payload.target_price)
-        if "baseline_price" in fields_set:
-            alert.baseline_price = _as_decimal(payload.baseline_price)
-        if current_price is not None:
-            alert.last_seen_price = _as_decimal(current_price)
-            if "baseline_price" not in fields_set and alert.baseline_price is None:
-                alert.baseline_price = _as_decimal(current_price)
-        alert.updated_at = now
+        alert = (await db.execute(stmt)).scalar_one_or_none()
+        if alert is None:
+            alert = CatalogPriceAlert(
+                user_uuid=user_uuid,
+                product_id=product_internal_id,
+                channel=channel,
+                alerts_enabled=payload.alerts_enabled if payload.alerts_enabled is not None else True,
+                baseline_price=_as_decimal(payload.baseline_price if "baseline_price" in fields_set else current_price),
+                target_price=_as_decimal(payload.target_price if "target_price" in fields_set else None),
+                last_seen_price=_as_decimal(current_price),
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(alert)
+        else:
+            if "alerts_enabled" in fields_set and payload.alerts_enabled is not None:
+                alert.alerts_enabled = bool(payload.alerts_enabled)
+            if "target_price" in fields_set:
+                alert.target_price = _as_decimal(payload.target_price)
+            if "baseline_price" in fields_set:
+                alert.baseline_price = _as_decimal(payload.baseline_price)
+            if current_price is not None:
+                alert.last_seen_price = _as_decimal(current_price)
+                if "baseline_price" not in fields_set and alert.baseline_price is None:
+                    alert.baseline_price = _as_decimal(current_price)
+            alert.updated_at = now
 
-    await db.commit()
-    await db.refresh(alert)
-    return _build_price_alert_response(alert, product_uuid=product_uuid)
+        await db.commit()
+        await db.refresh(alert)
+        return _build_price_alert_response(alert, product_uuid=product_uuid)
+
+    user_uuid = _user_uuid_from_current(current_user)
+    return await execute_idempotent_json(
+        request,
+        redis,
+        scope=f"products.alerts.upsert:{user_uuid}:{product_id.lower()}",
+        handler=_op,
+    )
 
 
 @router.get("/{product_id}/offers", response_model=list[OfferOut])

@@ -102,6 +102,14 @@ class Settings(BaseSettings):
     auth_session_revoked_retention_days: int = 30
     health_check_timeout_seconds: float = 2.0
     health_require_celery_worker: bool = False
+    idempotency_enabled: bool = True
+    idempotency_ttl_seconds: int = 86400
+    sentry_enabled: bool = False
+    sentry_dsn: str | None = None
+    sentry_release: str = ""
+    sentry_traces_sample_rate: float = 0.10
+    sentry_profiles_sample_rate: float = 0.0
+    sentry_send_default_pii: bool = False
     next_public_app_url: str = "http://localhost"
     oauth_totp_issuer: str = "ZincMarket"
     oauth_google_client_id: str | None = None

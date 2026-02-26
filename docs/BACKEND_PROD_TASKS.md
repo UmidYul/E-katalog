@@ -8,11 +8,11 @@
 2. `TODO` Password reset + подтверждение email.
 3. `TODO` Единый RBAC policy layer для API.
 4. `DONE` Audit log baseline для админ-операций (таблица + endpoint + write-hooks).
-5. `TODO` Idempotency keys для критичных write-эндпоинтов.
-6. `TODO` Усиленный anti-bruteforce для auth (ip/email lockout + отдельные buckets).
-7. `TODO` Observability: Sentry + метрики + tracing.
-8. `TODO` Расширенный readiness/liveness (db/redis/celery).
-9. `TODO` Бэкапы + проверка восстановления (runbook + автоматизация).
+5. `IN_PROGRESS` Idempotency keys для критичных write-эндпоинтов (baseline покрытие уже добавлено для auth recovery, ключевых admin write и enqueue-task роутов, а также price alerts upsert).
+6. `DONE` Усиленный anti-bruteforce для auth (ip/email lockout + отдельные buckets).
+7. `DONE` Observability baseline: Sentry + HTTP metrics + request tracing.
+8. `DONE` Расширенный readiness/liveness (db/redis/celery).
+9. `DONE` Бэкапы + проверка восстановления (runbook + автоматизация).
 10. `TODO` Контрактные тесты по OpenAPI + версионирование API.
 11. `IN_PROGRESS` Cleanup tasks для сессий/токенов/временных сущностей.
 12. `TODO` Уведомления о цене/наличии через очередь (email/telegram/webhook).
@@ -62,3 +62,6 @@
 - `DONE` Admin users management (`/admin/users` list/get/patch/delete + analytics users snapshot) now reads/writes Postgres in `AUTH_STORAGE_MODE=postgres`.
 - `IN_PROGRESS` Unified RBAC policy layer started: shared role helpers/dependencies in `services/api/app/api/rbac.py` adopted by admin and product-feedback routers.
 - `DONE` Audit log baseline for admin operations: `admin_audit_events` table + `/api/v1/admin/audit/events` + write-audit hooks across mutating admin endpoints.
+- `IN_PROGRESS` Idempotency baseline: shared `app/api/idempotency.py` helper + config/env toggles; adopted in auth recovery flows, admin critical writes (including task enqueue + analytics alert status), and `POST /api/v1/products/{product_id}/alerts`.
+- `DONE` Observability baseline in API: optional Sentry init (with performance tracing/profiling knobs), request-level HTTP metrics exposed at `/api/v1/metrics` (Prometheus text format), and response timing header `X-Response-Time-Ms`.
+- `DONE` Backup/restore baseline: `scripts/db_backup_restore.py` (pg_dump + optional restore validation + metadata hash) and scheduled/manual workflow `.github/workflows/backup-restore-validation.yml`; runbook added at `docs/BACKUP_RESTORE_RUNBOOK.md`.
