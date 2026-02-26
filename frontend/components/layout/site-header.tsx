@@ -87,7 +87,7 @@ export function SiteHeader() {
   };
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border/80 bg-background/97 backdrop-blur-[2px] dark:bg-background/90 dark:backdrop-blur">
+    <header className="sticky top-0 z-40 border-b border-border bg-background shadow-[0_12px_34px_-26px_rgba(15,23,42,0.8)] supports-[backdrop-filter]:bg-background/95 supports-[backdrop-filter]:backdrop-blur-md dark:bg-card dark:supports-[backdrop-filter]:bg-card/92">
       <div className="container flex h-16 items-center gap-3">
         <Link href="/" className="flex items-center gap-2 font-heading text-lg font-extrabold tracking-tight">
           <ShoppingBag className="h-5 w-5 text-primary" />
@@ -108,7 +108,7 @@ export function SiteHeader() {
               key={link.href}
               href={link.href}
               className={cn(
-                "rounded-xl px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground",
+                "rounded-xl px-3 py-2 text-sm font-medium text-foreground/80 transition-colors hover:text-foreground",
                 pathname.startsWith(link.href) && "bg-secondary text-foreground"
               )}
             >
@@ -118,7 +118,7 @@ export function SiteHeader() {
           <Link
             href="/compare"
             className={cn(
-              "rounded-xl px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground",
+              "rounded-xl px-3 py-2 text-sm font-medium text-foreground/80 transition-colors hover:text-foreground",
               pathname.startsWith("/compare") && "bg-secondary text-foreground"
             )}
           >
@@ -127,7 +127,7 @@ export function SiteHeader() {
           <Link
             href={authLink.href}
             className={cn(
-              "rounded-xl px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground",
+              "rounded-xl px-3 py-2 text-sm font-medium text-foreground/80 transition-colors hover:text-foreground",
               pathname.startsWith(authLink.href) && "bg-secondary text-foreground"
             )}
           >
@@ -136,7 +136,7 @@ export function SiteHeader() {
 
           {topCategories.length ? (
             <div className="group relative">
-              <button type="button" className="cursor-default rounded-xl px-3 py-2 text-sm font-medium text-muted-foreground transition-colors group-hover:bg-secondary group-hover:text-foreground">
+              <button type="button" className="cursor-default rounded-xl px-3 py-2 text-sm font-medium text-foreground/80 transition-colors group-hover:bg-secondary group-hover:text-foreground">
                 Категории
               </button>
               <div className="invisible absolute right-0 top-11 z-50 min-w-64 rounded-xl border border-border bg-card p-2 opacity-0 shadow-soft transition-all duration-150 group-hover:visible group-hover:opacity-100">
@@ -173,8 +173,8 @@ export function SiteHeader() {
         </div>
       </div>
 
-      <div className="hidden border-t border-border/60 md:block">
-        <div className="container flex h-9 items-center justify-between gap-3 text-xs text-muted-foreground">
+      <div className="hidden border-t border-border/70 bg-background/90 supports-[backdrop-filter]:bg-background/85 md:block dark:bg-card/90 dark:supports-[backdrop-filter]:bg-card/85">
+        <div className="container flex h-9 items-center justify-between gap-3 text-xs text-foreground/75">
           <span className="inline-flex items-center gap-1.5">
             <ShieldCheck className="h-3.5 w-3.5 text-primary" /> Проверенные магазины и прозрачные предложения
           </span>

@@ -1,7 +1,6 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
 
 import { authApi, type AuthUser } from "@/lib/api/openapi-client";
 import { authStore } from "@/store/auth.store";
@@ -85,14 +84,14 @@ export const useRegister = () => {
 
 export const useLogout = () => {
   const queryClient = useQueryClient();
-  const router = useRouter();
   return useMutation({
     mutationFn: authApi.logout,
     onSuccess: () => {
       authStore.getState().clearSession();
       queryClient.clear();
-      router.replace("/");
-      router.refresh();
+      if (typeof window !== "undefined") {
+        window.location.assign("/");
+      }
     }
   });
 };

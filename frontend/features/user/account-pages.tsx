@@ -40,6 +40,16 @@ const normalizeDraft = (draft: LocalProfileDraft): LocalProfileDraft => ({
   about: draft.about.trim()
 });
 
+const normalizeTelegram = (value: string, email?: string): string => {
+  const normalized = value.trim();
+  if (!normalized) return "";
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  if (normalizedEmail && normalized.toLowerCase() === normalizedEmail) {
+    return "";
+  }
+  return normalized;
+};
+
 const formatShortAccountId = (value: string) => {
   const normalized = value.trim();
   if (normalized.length <= 12) return normalized;
@@ -174,17 +184,20 @@ export function ProfileClient() {
       display_name: profileQuery.data.display_name || profileQuery.data.full_name || "",
       phone: profileQuery.data.phone || "",
       city: profileQuery.data.city || "",
-      telegram: profileQuery.data.telegram || "",
+      telegram: normalizeTelegram(profileQuery.data.telegram || "", me.data?.email),
       about: profileQuery.data.about || ""
     };
-    const normalizedStored = normalizeDraft(storedDraft);
+    const normalizedStored = {
+      ...normalizeDraft(storedDraft),
+      telegram: normalizeTelegram(storedDraft.telegram || "", me.data?.email)
+    };
     const hasLocalBackup = Object.values(normalizedStored).some((value) => Boolean(value));
     const serverUpdatedAt = profileQuery.data.updated_at ? new Date(profileQuery.data.updated_at).getTime() : 0;
     const localUpdatedAt = storedDraft.updated_at ? new Date(storedDraft.updated_at).getTime() : 0;
     const preferLocalBackup = hasLocalBackup && localUpdatedAt > serverUpdatedAt;
     setProfileForm(preferLocalBackup ? { ...serverDraft, ...normalizedStored } : serverDraft);
     setHydratedFromServer(true);
-  }, [hydratedFromServer, profileQuery.data, storedDraft]);
+  }, [hydratedFromServer, me.data?.email, profileQuery.data, storedDraft]);
 
   useEffect(() => {
     if (!remoteRecentlyViewed.data?.length) return;
@@ -219,13 +232,18 @@ export function ProfileClient() {
       display_name: profileQuery.data?.display_name || me.data?.full_name || "",
       phone: profileQuery.data?.phone || "",
       city: profileQuery.data?.city || "",
-      telegram: profileQuery.data?.telegram || "",
+      telegram: normalizeTelegram(profileQuery.data?.telegram || "", me.data?.email),
       about: profileQuery.data?.about || ""
     }),
-    [me.data?.full_name, profileQuery.data?.about, profileQuery.data?.city, profileQuery.data?.display_name, profileQuery.data?.phone, profileQuery.data?.telegram]
+    [me.data?.email, me.data?.full_name, profileQuery.data?.about, profileQuery.data?.city, profileQuery.data?.display_name, profileQuery.data?.phone, profileQuery.data?.telegram]
   );
 
-  const hasDraftChanges = useMemo(() => JSON.stringify(normalizeDraft(profileForm)) !== JSON.stringify(normalizeDraft(baselineDraft)), [baselineDraft, profileForm]);
+  const hasDraftChanges = useMemo(
+    () =>
+      JSON.stringify({ ...normalizeDraft(profileForm), telegram: normalizeTelegram(profileForm.telegram, me.data?.email) }) !==
+      JSON.stringify({ ...normalizeDraft(baselineDraft), telegram: normalizeTelegram(baselineDraft.telegram, me.data?.email) }),
+    [baselineDraft, me.data?.email, profileForm]
+  );
 
   const completionScore = useMemo(() => {
     const checks = [
@@ -369,7 +387,10 @@ export function ProfileClient() {
   };
 
   const saveServerProfile = async () => {
-    const normalized = normalizeDraft(profileForm);
+    const normalized = {
+      ...normalizeDraft(profileForm),
+      telegram: normalizeTelegram(profileForm.telegram, me.data?.email)
+    };
     if (normalized.display_name.length < 2) {
       setStatus("Имя должно содержать минимум 2 символа.");
       return;
@@ -500,7 +521,12 @@ export function ProfileClient() {
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-muted-foreground">Telegram</label>
-                  <Input placeholder="@username" value={profileForm.telegram} onChange={(e) => onDraftFieldChange("telegram", e.target.value)} />
+                  <Input
+                    placeholder="@username"
+                    value={profileForm.telegram}
+                    autoComplete="off"
+                    onChange={(e) => onDraftFieldChange("telegram", e.target.value)}
+                  />
                 </div>
               </div>
               <div className="space-y-1">
