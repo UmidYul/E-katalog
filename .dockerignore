@@ -41,3 +41,18 @@ infra/monitoring/grafana
 !frontend/**
 !infra/nginx/**
 !infra/postgres/**
+
+# Never include frontend local build artifacts after re-include rules above.
+frontend/node_modules
+frontend/.next
+frontend/.nuxt
+frontend/.turbo
+frontend/coverage
+frontend/*.tsbuildinfo
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/.pnpm-debug.log*
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local

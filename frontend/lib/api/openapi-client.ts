@@ -41,6 +41,17 @@ import type {
   AlertStatus,
   Severity,
 } from "@/types/admin";
+import type {
+  B2BAct,
+  B2BAnalyticsOverview,
+  B2BCampaign,
+  B2BFeed,
+  B2BFeedRun,
+  B2BInvoice,
+  B2BBillingPlan,
+  B2BMe,
+  B2BSupportTicket,
+} from "@/types/b2b";
 
 export type CatalogQuery = {
   q?: string;
@@ -488,5 +499,142 @@ export const adminApi = {
     apiClient.get<{ task_id: string; state: string; ready: boolean; successful: boolean; progress: number; info?: Record<string, unknown> }>(
       `/admin/tasks/${taskId}`,
     ),
+};
+
+export const b2bApi = {
+  me: () => apiClient.get<B2BMe>("/b2b/me"),
+  createOrg: (payload: {
+    name: string;
+    slug: string;
+    legal_name?: string | null;
+    tax_id?: string | null;
+    website_url?: string | null;
+  }) => apiClient.post<{ organization: B2BMe["organizations"][number]; membership: B2BMe["memberships"][number] }>("/b2b/orgs", payload),
+  inviteMember: (orgId: string, payload: { email: string; role: string; expires_in_days?: number }) =>
+    apiClient.post(`/b2b/orgs/${orgId}/invites`, payload),
+  patchMember: (orgId: string, memberId: string, payload: { role?: string; status?: string }) =>
+    apiClient.patch(`/b2b/orgs/${orgId}/members/${memberId}`, payload),
+
+  submitOnboarding: (payload: {
+    org_id: string;
+    company_name: string;
+    legal_address?: string;
+    billing_email: string;
+    contact_name: string;
+    contact_phone?: string;
+    website_domain?: string;
+    tax_id?: string;
+    payout_details?: Record<string, unknown>;
+    submit?: boolean;
+  }) => apiClient.post("/b2b/onboarding/applications", payload),
+  uploadOnboardingDocument: (payload: {
+    org_id: string;
+    application_id?: string | null;
+    document_type: string;
+    storage_url: string;
+    checksum?: string | null;
+  }) => apiClient.post("/b2b/onboarding/documents", payload),
+  acceptContract: (payload: { org_id: string; contract_version: string }) => apiClient.post("/b2b/onboarding/accept-offer", payload),
+
+  feeds: (query: { org_id?: string; store_id?: string } = {}) => apiClient.get<B2BFeed[]>("/b2b/feeds", { params: query }),
+  createFeed: (payload: {
+    org_id: string;
+    store_id: string;
+    source_type?: string;
+    source_url: string;
+    schedule_cron?: string;
+    auth_config?: Record<string, unknown>;
+    is_active?: boolean;
+  }) => apiClient.post<B2BFeed>("/b2b/feeds", payload),
+  validateFeed: (feedId: string, orgId?: string) =>
+    apiClient.post<{ feed_id: string; run_id: string; status: string; quality_snapshot: Record<string, number> }>(
+      `/b2b/feeds/${feedId}/validate`,
+      {},
+      { params: { org_id: orgId } },
+    ),
+  feedRuns: (feedId: string, orgId?: string) => apiClient.get<B2BFeedRun[]>(`/b2b/feeds/${feedId}/runs`, { params: { org_id: orgId } }),
+
+  campaigns: (query: { org_id?: string } = {}) => apiClient.get<B2BCampaign[]>("/b2b/campaigns", { params: query }),
+  createCampaign: (payload: {
+    org_id: string;
+    store_id: string;
+    name: string;
+    daily_budget: number;
+    monthly_budget: number;
+    bid_default: number;
+    bid_cap: number;
+    pacing_mode?: "even" | "aggressive";
+    starts_at?: string | null;
+    ends_at?: string | null;
+    targets?: Array<Record<string, unknown>>;
+  }) => apiClient.post<B2BCampaign>("/b2b/campaigns", payload),
+  patchCampaign: (campaignId: string, payload: Partial<{
+    status: "draft" | "active" | "paused" | "archived";
+    daily_budget: number;
+    monthly_budget: number;
+    bid_default: number;
+    bid_cap: number;
+    pacing_mode: "even" | "aggressive";
+    ends_at: string | null;
+  }>, orgId?: string) => apiClient.patch<B2BCampaign>(`/b2b/campaigns/${campaignId}`, payload, { params: { org_id: orgId } }),
+
+  analyticsOverview: (query: { org_id?: string; period_days?: number } = {}) =>
+    apiClient.get<B2BAnalyticsOverview>("/b2b/analytics/overview", { params: query }),
+  analyticsOffers: (query: { org_id?: string; limit?: number } = {}) =>
+    apiClient.get<Array<{ offer_id: string; clicks: number; billable_clicks: number; spend: number }>>("/b2b/analytics/offers", { params: query }),
+  analyticsAttribution: (query: { org_id?: string; period_days?: number } = {}) =>
+    apiClient.get<Array<{ source_page: string; placement: string; clicks: number; billable_clicks: number; spend: number }>>(
+      "/b2b/analytics/attribution",
+      { params: query },
+    ),
+
+  billingPlans: () => apiClient.get<B2BBillingPlan[]>("/b2b/billing/plans"),
+  subscribe: (payload: { org_id: string; plan_code: string }) =>
+    apiClient.post<{ id: string; org_id: string; plan_id: string; status: string; starts_at: string; renews_at?: string | null; created_at: string }>(
+      "/b2b/billing/subscriptions",
+      payload,
+    ),
+  invoices: (query: { org_id?: string; limit?: number; offset?: number } = {}) =>
+    apiClient.get<B2BInvoice[]>("/b2b/billing/invoices", { params: query }),
+  payInvoice: (invoiceId: string, payload: { provider?: string; amount?: number }, orgId?: string) =>
+    apiClient.post<{ invoice_id: string; payment_id: string; status: string; redirect_url?: string | null }>(
+      `/b2b/billing/invoices/${invoiceId}/pay`,
+      payload,
+      { params: { org_id: orgId } },
+    ),
+  acts: (query: { org_id?: string } = {}) => apiClient.get<B2BAct[]>("/b2b/billing/acts", { params: query }),
+
+  tickets: (query: { org_id?: string; status?: string; limit?: number; offset?: number } = {}) =>
+    apiClient.get<B2BSupportTicket[]>("/b2b/support/tickets", { params: query }),
+  createTicket: (payload: { org_id: string; subject: string; category?: string; priority?: string; body: string }) =>
+    apiClient.post<B2BSupportTicket>("/b2b/support/tickets", payload),
+};
+
+export const adminB2bApi = {
+  onboardingApplications: (query: { status?: string; limit?: number; offset?: number } = {}) =>
+    apiClient.get<{ items: Array<Record<string, unknown>>; total: number; limit: number; offset: number }>("/admin/b2b/onboarding/applications", {
+      params: query,
+    }),
+  patchOnboardingApplication: (applicationId: string, payload: { status: string; rejection_reason?: string | null }) =>
+    apiClient.patch(`/admin/b2b/onboarding/applications/${applicationId}`, payload),
+  disputes: (query: { status?: string; limit?: number; offset?: number } = {}) =>
+    apiClient.get<{ items: Array<Record<string, unknown>>; total: number; limit: number; offset: number }>("/admin/b2b/disputes", { params: query }),
+  patchDispute: (disputeId: string, payload: { status: string; resolution_note?: string | null }) =>
+    apiClient.patch(`/admin/b2b/disputes/${disputeId}`, payload),
+  riskFlags: (query: { level?: string; limit?: number; offset?: number } = {}) =>
+    apiClient.get<{ items: Array<Record<string, unknown>>; total: number; limit: number; offset: number }>("/admin/b2b/risk-flags", { params: query }),
+  plans: () => apiClient.get<B2BBillingPlan[]>("/admin/b2b/plans"),
+  upsertPlan: (payload: {
+    code: string;
+    name: string;
+    monthly_fee: number;
+    included_clicks: number;
+    click_price: number;
+    limits?: Record<string, unknown>;
+  }) => apiClient.post<B2BBillingPlan>("/admin/b2b/plans/upsert", payload),
+  runInvoicesJob: () => apiClient.post<{ task_id: string; queued: string }>("/admin/b2b/tasks/invoices"),
+  runActsJob: () => apiClient.post<{ task_id: string; queued: string }>("/admin/b2b/tasks/acts"),
+  runFraudScanJob: () => apiClient.post<{ task_id: string; queued: string }>("/admin/b2b/tasks/fraud-scan"),
+  runFeedHealthJob: () => apiClient.post<{ task_id: string; queued: string }>("/admin/b2b/tasks/feed-health"),
 };
 

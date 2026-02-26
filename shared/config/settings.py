@@ -66,6 +66,13 @@ class Settings(BaseSettings):
     offer_trust_score_refresh_limit: int = 200000
     offer_trust_score_freshness_hours: int = 72
     offer_trust_score_stock_window_days: int = 14
+    b2b_enabled: bool = False
+    b2b_click_dedupe_window_seconds: int = 120
+    b2b_click_token_ttl_seconds: int = 900
+    b2b_default_click_price_uzs: float = 0.0
+    b2b_shadow_billing_enabled: bool = False
+    b2b_invoice_due_days: int = 7
+    b2b_low_balance_threshold_uzs: float = 100000.0
     normalization_rules_enabled: bool = True
     normalization_rules_path: str = "services/worker/app/platform/services/normalization_rules.yaml"
     normalization_rules_reload_seconds: int = 60

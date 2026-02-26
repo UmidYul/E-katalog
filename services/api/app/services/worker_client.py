@@ -79,3 +79,35 @@ def enqueue_admin_alert_evaluation() -> str:
         queue="maintenance",
         routing_key="maintenance",
     )
+
+
+def enqueue_b2b_subscription_invoices() -> str:
+    return _send(
+        "app.tasks.b2b_tasks.generate_b2b_subscription_invoices",
+        queue="maintenance",
+        routing_key="maintenance",
+    )
+
+
+def enqueue_b2b_acts_generation() -> str:
+    return _send(
+        "app.tasks.b2b_tasks.generate_b2b_acts_for_paid_invoices",
+        queue="maintenance",
+        routing_key="maintenance",
+    )
+
+
+def enqueue_b2b_fraud_scan() -> str:
+    return _send(
+        "app.tasks.b2b_tasks.scan_b2b_click_fraud_flags",
+        queue="maintenance",
+        routing_key="maintenance",
+    )
+
+
+def enqueue_b2b_feed_health_validation() -> str:
+    return _send(
+        "app.tasks.b2b_tasks.validate_b2b_feed_health",
+        queue="maintenance",
+        routing_key="maintenance",
+    )

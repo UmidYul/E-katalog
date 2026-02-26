@@ -78,3 +78,31 @@ def test_auth_selected_mutating_routes_have_idempotency_wrapper() -> None:
     source = "\n".join(lines)
     missing = [scope for scope in expected_scopes if scope not in source]
     assert not missing, "auth routes missing expected idempotency scopes:\n" + "\n".join(missing)
+
+
+def test_b2b_orgs_mutating_routes_have_idempotency_wrapper() -> None:
+    _assert_mutating_routes_idempotent("b2b_orgs.py")
+
+
+def test_b2b_onboarding_mutating_routes_have_idempotency_wrapper() -> None:
+    _assert_mutating_routes_idempotent("b2b_onboarding.py")
+
+
+def test_b2b_feeds_mutating_routes_have_idempotency_wrapper() -> None:
+    _assert_mutating_routes_idempotent("b2b_feeds.py")
+
+
+def test_b2b_campaigns_mutating_routes_have_idempotency_wrapper() -> None:
+    _assert_mutating_routes_idempotent("b2b_campaigns.py")
+
+
+def test_b2b_billing_mutating_routes_have_idempotency_wrapper() -> None:
+    _assert_mutating_routes_idempotent("b2b_billing.py")
+
+
+def test_b2b_support_mutating_routes_have_idempotency_wrapper() -> None:
+    _assert_mutating_routes_idempotent("b2b_support.py")
+
+
+def test_admin_b2b_mutating_routes_have_idempotency_wrapper() -> None:
+    _assert_mutating_routes_idempotent("admin_b2b.py")

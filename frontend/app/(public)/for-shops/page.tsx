@@ -56,9 +56,14 @@ export default function ForShopsPage() {
             .
           </p>
           <div className="mt-3">
-            <Link href="/contacts" className="text-sm underline">
-              Контактные каналы и SLA-ответа
-            </Link>
+            <div className="flex flex-wrap gap-4">
+              <Link href="/b2b" className="text-sm underline">
+                Перейти в B2B кабинет
+              </Link>
+              <Link href="/contacts" className="text-sm underline">
+                Контактные каналы и SLA-ответа
+              </Link>
+            </div>
           </div>
         </section>
       </section>

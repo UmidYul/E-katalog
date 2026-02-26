@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const PROTECTED_PREFIX = "/profile";
 const DASHBOARD_PREFIX = "/dashboard";
+const B2B_PREFIX = "/b2b";
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -27,10 +28,16 @@ export function middleware(request: NextRequest) {
     }
   }
 
+  if (pathname.startsWith(B2B_PREFIX) && !hasAccess) {
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("next", pathname);
+    return NextResponse.redirect(loginUrl);
+  }
+
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/profile/:path*", "/favorites/:path*", "/recently-viewed/:path*", "/dashboard/:path*"]
+  matcher: ["/profile/:path*", "/favorites/:path*", "/recently-viewed/:path*", "/dashboard/:path*", "/b2b/:path*"]
 };
 

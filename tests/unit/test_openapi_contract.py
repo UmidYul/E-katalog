@@ -62,6 +62,19 @@ def test_openapi_contract_contains_core_auth_endpoints() -> None:
         "/api/v1/products/{product_id}/alerts": {"post"},
         "/api/v1/users/me/alerts": {"get"},
         "/api/v1/users/me/alerts/{alert_id}": {"delete"},
+        "/api/v1/b2b/me": {"get"},
+        "/api/v1/b2b/orgs": {"post"},
+        "/api/v1/b2b/onboarding/applications": {"post"},
+        "/api/v1/b2b/feeds": {"get", "post"},
+        "/api/v1/b2b/campaigns": {"get", "post"},
+        "/api/v1/b2b/analytics/overview": {"get"},
+        "/api/v1/b2b/billing/plans": {"get"},
+        "/api/v1/b2b/billing/subscriptions": {"post"},
+        "/api/v1/b2b/support/tickets": {"get", "post"},
+        "/api/v1/go/{offer_id}": {"post"},
+        "/api/v1/admin/b2b/onboarding/applications": {"get"},
+        "/api/v1/admin/b2b/disputes": {"get"},
+        "/api/v1/admin/b2b/risk-flags": {"get"},
     }
     for path, methods in expected_methods.items():
         assert path in paths

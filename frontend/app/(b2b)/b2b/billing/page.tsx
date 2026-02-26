@@ -1,0 +1,5 @@
+import { B2BBillingPage } from "@/features/b2b/b2b-billing-page";
+
+export default function Page() {
+  return <B2BBillingPage />;
+}

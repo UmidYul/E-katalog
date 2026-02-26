@@ -17,6 +17,7 @@ celery_app = Celery(
         "app.tasks.reindex_tasks",
         "app.tasks.export_tasks",
         "app.tasks.maintenance_tasks",
+        "app.tasks.b2b_tasks",
     ],
 )
 
@@ -97,6 +98,10 @@ celery_app.conf.update(
         },
         "app.tasks.maintenance_tasks.compact_canonical_match_snapshots": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.maintenance_tasks.enqueue_compact_canonical_match_snapshots": {"queue": "maintenance", "routing_key": "maintenance"},
+        "app.tasks.b2b_tasks.generate_b2b_subscription_invoices": {"queue": "maintenance", "routing_key": "maintenance"},
+        "app.tasks.b2b_tasks.generate_b2b_acts_for_paid_invoices": {"queue": "maintenance", "routing_key": "maintenance"},
+        "app.tasks.b2b_tasks.scan_b2b_click_fraud_flags": {"queue": "maintenance", "routing_key": "maintenance"},
+        "app.tasks.b2b_tasks.validate_b2b_feed_health": {"queue": "maintenance", "routing_key": "maintenance"},
     },
     beat_schedule={
         "scrape-every-6h": {
@@ -207,6 +212,26 @@ celery_app.conf.update(
         "canonical-match-snapshot-compaction-daily-0445": {
             "task": "app.tasks.maintenance_tasks.enqueue_compact_canonical_match_snapshots",
             "schedule": crontab(minute=45, hour=4),
+            "options": {"queue": "maintenance", "routing_key": "maintenance"},
+        },
+        "b2b-subscription-invoices-daily-0115": {
+            "task": "app.tasks.b2b_tasks.generate_b2b_subscription_invoices",
+            "schedule": crontab(minute=15, hour=1),
+            "options": {"queue": "maintenance", "routing_key": "maintenance"},
+        },
+        "b2b-acts-generation-hourly-xx35": {
+            "task": "app.tasks.b2b_tasks.generate_b2b_acts_for_paid_invoices",
+            "schedule": crontab(minute=35),
+            "options": {"queue": "maintenance", "routing_key": "maintenance"},
+        },
+        "b2b-fraud-scan-every-15m": {
+            "task": "app.tasks.b2b_tasks.scan_b2b_click_fraud_flags",
+            "schedule": crontab(minute="*/15"),
+            "options": {"queue": "maintenance", "routing_key": "maintenance"},
+        },
+        "b2b-feed-health-every-30m": {
+            "task": "app.tasks.b2b_tasks.validate_b2b_feed_health",
+            "schedule": crontab(minute="*/30"),
             "options": {"queue": "maintenance", "routing_key": "maintenance"},
         },
     },
