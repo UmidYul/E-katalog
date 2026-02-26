@@ -16,6 +16,10 @@ The workflow runs:
    - `test`
    - `build`
 
+Trigger policy:
+- `push` on `dev`
+- `pull_request` (any target branch)
+
 ## Why this CI layout
 
 1. There are two different `app` packages (`services/api/app` and `services/worker/app`).
