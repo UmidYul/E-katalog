@@ -54,7 +54,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 ACCESS_COOKIE = "access_token"
 REFRESH_COOKIE = "refresh_token"
-ROLE_COOKIE = "user_role"
+LEGACY_ROLE_COOKIE = "user_role"
 ACCESS_TTL_SECONDS = 60 * 15
 REFRESH_TTL_SECONDS = 60 * 60 * 24 * 30
 TWOFA_CHALLENGE_TTL_SECONDS = 60 * 5
@@ -864,14 +864,6 @@ async def _set_auth_cookies(
     access = _issue_token()
     refresh = _issue_token()
     encoded = _encode_token_payload(user_id, session_id)
-    role = "user"
-    if db is not None and _auth_reads_from_postgres():
-        pg_user = await pg_load_user_by_id(db, user_id)
-        if pg_user is not None:
-            role = str(pg_user.get("role") or "user")
-    else:
-        role_payload = await redis.hgetall(f"auth:user:{user_id}")
-        role = str(role_payload.get("role", "user")) if role_payload else "user"
 
     if not _auth_reads_from_postgres():
         pipe = redis.pipeline()
@@ -920,14 +912,14 @@ async def _set_auth_cookies(
     }
     response.set_cookie(ACCESS_COOKIE, access, max_age=ACCESS_TTL_SECONDS, **cookie_base)
     response.set_cookie(REFRESH_COOKIE, refresh, max_age=REFRESH_TTL_SECONDS, **cookie_base)
-    response.set_cookie(ROLE_COOKIE, role, max_age=REFRESH_TTL_SECONDS, **cookie_base)
     return session_id
 
 
 def _clear_auth_cookies(response: Response) -> None:
     response.delete_cookie(ACCESS_COOKIE, path="/")
     response.delete_cookie(REFRESH_COOKIE, path="/")
-    response.delete_cookie(ROLE_COOKIE, path="/")
+    # Legacy cleanup: role cookie is no longer used for authorization.
+    response.delete_cookie(LEGACY_ROLE_COOKIE, path="/")
 
 
 async def _resolve_user_from_access(

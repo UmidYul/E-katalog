@@ -1,11 +1,13 @@
 "use client";
 
 import { ReactNode, useMemo } from "react";
-import { usePathname } from "next/navigation";
+import { useEffect } from "react";
+import { usePathname, useRouter } from "next/navigation";
 
 import { AdminFooter } from "@/components/layout/admin-footer";
 import { AdminSidebar } from "@/components/layout/admin-sidebar";
 import { AdminTopbar } from "@/components/layout/admin-topbar";
+import { useAdminAccess } from "@/features/auth/use-admin-access";
 
 const titles: Record<string, { title: string; subtitle: string }> = {
   "/dashboard": { title: "Executive Hub", subtitle: "Ключевые KPI, риски и приоритеты платформы" },
@@ -20,12 +22,29 @@ const titles: Record<string, { title: string; subtitle: string }> = {
 
 export function DashboardShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const { me, role } = useAdminAccess();
+  const canAccessDashboard = role === "admin" || role === "moderator";
+
+  useEffect(() => {
+    if (!me.isFetched || me.isLoading) {
+      return;
+    }
+    if (!canAccessDashboard) {
+      router.replace("/");
+    }
+  }, [canAccessDashboard, me.isFetched, me.isLoading, router]);
+
   const header = useMemo(() => {
     const found = Object.keys(titles).find((route) => pathname === route || pathname.startsWith(`${route}/`));
     return found
       ? titles[found] ?? { title: "Админка", subtitle: "Рабочее пространство платформы" }
       : { title: "Админка", subtitle: "Рабочее пространство платформы" };
   }, [pathname]);
+
+  if (!me.isFetched || me.isLoading || !canAccessDashboard) {
+    return <div className="min-h-screen bg-background" />;
+  }
 
   return (
     <div className="flex min-h-screen bg-background">
