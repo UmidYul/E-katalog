@@ -28,7 +28,7 @@ The workflow runs:
 1. Open `Settings -> Actions -> General`:
    - `Actions permissions`: `Allow all actions and reusable workflows`
    - `Workflow permissions`: `Read repository contents permission`
-2. Open `Settings -> Branches -> Add branch protection rule` for `main`.
+2. Open `Settings -> Rules -> Rulesets` and create/edit a ruleset for `main`.
 3. Enable:
    - `Require a pull request before merging`
    - `Require status checks to pass before merging`
@@ -36,6 +36,36 @@ The workflow runs:
 4. Add required checks:
    - `Backend (pytest)`
    - `Frontend (lint, typecheck, test, build)`
+5. Solo maintainer setup (recommended):
+   - `Required approving reviews`: `0`
+   - keep required status checks enabled
+6. Open `Settings -> General -> Pull Requests` and enable:
+   - `Automatically delete head branches`
+
+## Git workflow (main + feature branches)
+
+1. Always branch from latest `main`:
+
+```bash
+git checkout main
+git pull origin main
+git checkout -b feat/<short-task-name>
+```
+
+2. Push feature branch and open PR into `main`:
+
+```bash
+git push -u origin feat/<short-task-name>
+```
+
+3. Merge only after required checks are green.
+4. After merge, GitHub auto-deletes remote feature branch (if enabled above).
+5. Periodically clean local merged branches:
+
+```bash
+git fetch -p
+git branch --merged main
+```
 
 ## Local pre-push smoke check
 
