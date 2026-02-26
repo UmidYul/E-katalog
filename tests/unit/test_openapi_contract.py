@@ -96,3 +96,48 @@ def test_api_version_header_is_set_for_api_routes() -> None:
     payload = json.loads(_run_api_python(script))
     assert int(payload.get("status", 0)) == 200
     assert str(payload.get("version", "")).strip() == "v1"
+
+
+def test_api_version_header_respects_config_override() -> None:
+    script = (
+        "import json,os,sys;"
+        "os.environ['API_VERSION_HEADER_VALUE']='2026.02';"
+        f"sys.path.insert(0,{str(API_ROOT)!r});"
+        "from fastapi.testclient import TestClient;"
+        "from app.main import app;"
+        "client=TestClient(app);"
+        "response=client.get('/api/v1/health');"
+        "print(json.dumps({'status': response.status_code, 'version': response.headers.get('X-API-Version')}))"
+    )
+    payload = json.loads(_run_api_python(script))
+    assert int(payload.get("status", 0)) == 200
+    assert str(payload.get("version", "")).strip() == "2026.02"
+
+
+def test_api_version_header_not_added_outside_api_prefix() -> None:
+    script = (
+        "import json,sys;"
+        f"sys.path.insert(0,{str(API_ROOT)!r});"
+        "from fastapi.testclient import TestClient;"
+        "from app.main import app;"
+        "client=TestClient(app);"
+        "response=client.get('/docs');"
+        "print(json.dumps({'status': response.status_code, 'version': response.headers.get('X-API-Version')}))"
+    )
+    payload = json.loads(_run_api_python(script))
+    assert int(payload.get("status", 0)) == 200
+    assert payload.get("version") is None
+
+
+def test_openapi_contract_operations_have_tags_and_responses() -> None:
+    schema = _load_openapi_schema()
+    paths = schema.get("paths", {})
+    assert paths
+
+    for path, path_item in paths.items():
+        for method, operation in path_item.items():
+            assert method in {"get", "post", "put", "patch", "delete", "options", "head", "trace"}
+            tags = operation.get("tags")
+            assert isinstance(tags, list) and tags, f"missing tags for {method.upper()} {path}"
+            responses = operation.get("responses")
+            assert isinstance(responses, dict) and responses, f"missing responses for {method.upper()} {path}"

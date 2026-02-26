@@ -13,8 +13,8 @@
 7. `DONE` Observability baseline: Sentry + HTTP metrics + request tracing.
 8. `DONE` Расширенный readiness/liveness (db/redis/celery).
 9. `DONE` Бэкапы + проверка восстановления (runbook + автоматизация).
-10. `TODO` Контрактные тесты по OpenAPI + версионирование API.
-11. `IN_PROGRESS` Cleanup tasks для сессий/токенов/временных сущностей.
+10. `DONE` Контрактные тесты по OpenAPI + версионирование API (v1 prefix + stable operationId + version header checks).
+11. `DONE` Cleanup tasks для сессий/токенов/временных сущностей.
 12. `TODO` Уведомления о цене/наличии через очередь (email/telegram/webhook).
 
 ## Текущий спринт: Auth в Postgres
@@ -55,7 +55,7 @@
 - `DONE` Expanded readiness/liveness endpoints: `/live` + enriched `/ready` with DB/Redis/Celery checks and 503 on not-ready.
 - `DONE` Added maintenance cleanup for auth token tables in Postgres (`cleanup_auth_token_tables`): expired/used reset tokens, expired/revoked session tokens, old revoked sessions.
 - `DONE` Registered `cleanup_auth_token_tables` in Celery routing + daily beat schedule (`cleanup-auth-token-tables-daily-0355`), with route/schedule tests.
-- `IN_PROGRESS` OpenAPI contract coverage started: added `tests/unit/test_openapi_contract.py` (core auth endpoints, `/api/v1` prefix, unique `operationId`, API version header check).
+- `DONE` OpenAPI contract coverage expanded: `tests/unit/test_openapi_contract.py` validates core endpoints, `/api/v1` prefix, unique/stable `operationId`, required tags/responses, and API version header behavior (default + override + non-API routes).
 - `DONE` API version response header added for all API routes: `X-API-Version` (configurable via `API_VERSION_HEADER_VALUE`, default `v1`).
 - `IN_PROGRESS` Stage C auth read cutover: in `AUTH_STORAGE_MODE=postgres`, user/email/session reads now prefer Postgres, and session revocation covers Postgres-only sessions.
 - `DONE` User profile + notification preferences read/write now use Postgres in `AUTH_STORAGE_MODE=postgres` (`services/api/app/api/v1/routers/users.py`); Redis path remains for `redis|dual`.
@@ -65,3 +65,5 @@
 - `IN_PROGRESS` Idempotency baseline: shared `app/api/idempotency.py` helper + config/env toggles; adopted in auth recovery flows, admin critical writes (including task enqueue + analytics alert status), and `POST /api/v1/products/{product_id}/alerts`.
 - `DONE` Observability baseline in API: optional Sentry init (with performance tracing/profiling knobs), request-level HTTP metrics exposed at `/api/v1/metrics` (Prometheus text format), and response timing header `X-Response-Time-Ms`.
 - `DONE` Backup/restore baseline: `scripts/db_backup_restore.py` (pg_dump + optional restore validation + metadata hash) and scheduled/manual workflow `.github/workflows/backup-restore-validation.yml`; runbook added at `docs/BACKUP_RESTORE_RUNBOOK.md`.
+- `DONE` OpenAPI contract and API versioning baseline: `tests/unit/test_openapi_contract.py` verifies core paths, unique/stable `operationId`, required tags/responses, `X-API-Version` default and override behavior.
+- `DONE` Cleanup tasks baseline expanded: Redis auth sessions cleanup, Postgres auth token-table cleanup, and periodic TTL normalization for ephemeral auth keys (`2fa challenge`, `email confirmation`, `oauth state`) via Celery beat.

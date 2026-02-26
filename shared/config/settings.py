@@ -100,6 +100,10 @@ class Settings(BaseSettings):
     auth_password_reset_used_retention_days: int = 7
     auth_session_token_revoked_retention_days: int = 30
     auth_session_revoked_retention_days: int = 30
+    auth_2fa_challenge_ttl_seconds: int = 300
+    auth_oauth_state_ttl_seconds: int = 600
+    auth_ephemeral_cleanup_enabled: bool = True
+    auth_ephemeral_cleanup_scan_limit: int = 20000
     health_check_timeout_seconds: float = 2.0
     health_require_celery_worker: bool = False
     idempotency_enabled: bool = True

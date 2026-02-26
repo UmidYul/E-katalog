@@ -20,8 +20,8 @@ This file aggregates items that are still not fully implemented based on explici
 - [x] Observability baseline implemented in API: optional Sentry integration (error + tracing), Prometheus-style `/api/v1/metrics`, and request timing header `X-Response-Time-Ms`.
 - [x] Expanded readiness/liveness checks implemented (`/live` + enriched `/ready` with DB/Redis/Celery checks).
 - [x] Backups + restore validation baseline implemented: `scripts/db_backup_restore.py` + GitHub workflow `.github/workflows/backup-restore-validation.yml` + runbook `docs/BACKUP_RESTORE_RUNBOOK.md`.
-- [ ] OpenAPI contract testing + API versioning work is still in progress (`IN_PROGRESS`).
-- [ ] Cleanup tasks for sessions/tokens/temporary entities are still in progress (`IN_PROGRESS`).
+- [x] OpenAPI contract testing + API versioning baseline implemented (`tests/unit/test_openapi_contract.py` + `X-API-Version` middleware behavior checks).
+- [x] Cleanup tasks for sessions/tokens/temporary entities baseline implemented (Redis auth sessions cleanup, Postgres token cleanup, ephemeral auth key TTL cleanup).
 - [ ] Notifications pipeline for price/stock (email/telegram/webhook) (`TODO`).
 - [ ] Stage B dual-write transition still has open TODO markers in source doc (`dual` writes in both stores, reads from Redis during transition).
 - [ ] Stage C cutover tasks:

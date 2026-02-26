@@ -1460,6 +1460,90 @@ def enqueue_cleanup_auth_token_tables(self) -> str:
     return cleanup_auth_token_tables.delay().id
 
 
+async def _cleanup_auth_ephemeral_keys_redis(*, scan_limit: int) -> dict[str, Any]:
+    if not settings.auth_ephemeral_cleanup_enabled:
+        return {"status": "disabled", "at": datetime.now(UTC).isoformat()}
+
+    effective_scan_limit = max(100, int(scan_limit))
+    redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    scanned_total = 0
+    fixed_total = 0
+    skipped_with_ttl = 0
+    missing_total = 0
+
+    groups = [
+        ("auth:2fa:challenge:*", max(60, int(settings.auth_2fa_challenge_ttl_seconds))),
+        ("auth:email-confirmation:*", max(300, int(settings.auth_email_confirmation_ttl_seconds))),
+        ("auth:oauth:state:*", max(300, int(settings.auth_oauth_state_ttl_seconds))),
+    ]
+    group_stats: dict[str, dict[str, int]] = {
+        pattern: {"scanned": 0, "fixed": 0, "skipped_with_ttl": 0, "missing": 0} for pattern, _ in groups
+    }
+
+    for pattern, ttl_seconds in groups:
+        async for key in redis.scan_iter(match=pattern):
+            if scanned_total >= effective_scan_limit:
+                break
+            scanned_total += 1
+            group_stats[pattern]["scanned"] += 1
+
+            ttl = await redis.ttl(key)
+            if ttl == -2:
+                missing_total += 1
+                group_stats[pattern]["missing"] += 1
+                continue
+            if ttl == -1:
+                await redis.expire(key, ttl_seconds)
+                fixed_total += 1
+                group_stats[pattern]["fixed"] += 1
+                continue
+            skipped_with_ttl += 1
+            group_stats[pattern]["skipped_with_ttl"] += 1
+
+    if hasattr(redis, "aclose"):
+        await redis.aclose()
+    else:
+        await redis.close()
+
+    logger.info(
+        "cleanup_auth_ephemeral_keys_completed",
+        scan_limit=effective_scan_limit,
+        scanned_total=scanned_total,
+        fixed_total=fixed_total,
+        skipped_with_ttl=skipped_with_ttl,
+        missing_total=missing_total,
+    )
+    return {
+        "status": "ok",
+        "scan_limit": effective_scan_limit,
+        "scanned_total": scanned_total,
+        "fixed_total": fixed_total,
+        "skipped_with_ttl": skipped_with_ttl,
+        "missing_total": missing_total,
+        "groups": group_stats,
+        "at": datetime.now(UTC).isoformat(),
+    }
+
+
+@celery_app.task(bind=True)
+def cleanup_auth_ephemeral_keys(self, scan_limit: int | None = None) -> dict[str, Any]:
+    effective_scan_limit = (
+        int(scan_limit)
+        if isinstance(scan_limit, int) and scan_limit > 0
+        else int(settings.auth_ephemeral_cleanup_scan_limit)
+    )
+    return asyncio.run(
+        _cleanup_auth_ephemeral_keys_redis(
+            scan_limit=effective_scan_limit,
+        )
+    )
+
+
+@celery_app.task(bind=True)
+def enqueue_cleanup_auth_ephemeral_keys(self) -> str:
+    return cleanup_auth_ephemeral_keys.delay().id
+
+
 @celery_app.task(bind=True)
 def cleanup_stale_offers(self, days: int = 14) -> dict:
     return asyncio.run(_cleanup(days))
