@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.rate_limit import enforce_rate_limit
 from app.api.deps import get_db_session, get_redis
+from app.api.idempotency import execute_idempotent_json
+from app.core.logging import logger
 from app.schemas.catalog import CompareRequest, CompareShareCreateOut, CompareShareCreateRequest, CompareShareResolveOut
 from app.core.config import settings
 from app.repositories.catalog import CatalogRepository
@@ -128,19 +130,36 @@ async def create_compare_share_link(
     db: AsyncSession = Depends(get_db_session),
 ):
     redis = get_redis()
-    await enforce_rate_limit(request, redis, bucket="compare-share-write", limit=45)
+    async def _op():
+        await enforce_rate_limit(request, redis, bucket="compare-share-write", limit=45)
 
-    repo = CatalogRepository(db, cursor_secret=settings.cursor_secret)
-    resolved_ids, _ = await _resolve_compare_products(repo, [str(product_id) for product_id in payload.product_ids])
+        repo = CatalogRepository(db, cursor_secret=settings.cursor_secret)
+        resolved_ids, _ = await _resolve_compare_products(repo, [str(product_id) for product_id in payload.product_ids])
 
-    expires_at = datetime.now(UTC) + timedelta(days=int(payload.ttl_days))
-    token = _encode_share_payload(product_ids=resolved_ids, expires_at=expires_at)
-    return CompareShareCreateOut(
-        token=token,
-        product_ids=resolved_ids,
-        share_path=f"/compare?share={token}",
-        expires_at=expires_at.isoformat(),
-        request_id=request.state.request_id,
+        expires_at = datetime.now(UTC) + timedelta(days=int(payload.ttl_days))
+        token = _encode_share_payload(product_ids=resolved_ids, expires_at=expires_at)
+        telemetry_source = (payload.telemetry_source or "compare_page").strip().lower()[:64]
+        logger.info(
+            "compare_share_created",
+            request_id=request.state.request_id,
+            product_count=len(resolved_ids),
+            ttl_days=int(payload.ttl_days),
+            telemetry_source=telemetry_source,
+        )
+        return CompareShareCreateOut(
+            token=token,
+            product_ids=resolved_ids,
+            share_path=f"/compare?share={token}",
+            expires_at=expires_at.isoformat(),
+            request_id=request.state.request_id,
+        )
+
+    product_fingerprint = ",".join(sorted(str(product_id).strip().lower() for product_id in payload.product_ids))
+    return await execute_idempotent_json(
+        request,
+        redis,
+        scope=f"compare.share.create:{product_fingerprint}:{int(payload.ttl_days)}",
+        handler=_op,
     )
 
 
@@ -159,6 +178,12 @@ async def resolve_compare_share_link(
 
     repo = CatalogRepository(db, cursor_secret=settings.cursor_secret)
     resolved_ids, _ = await _resolve_compare_products(repo, product_ids)
+    logger.info(
+        "compare_share_resolved",
+        request_id=request.state.request_id,
+        product_count=len(resolved_ids),
+        token_size=len(token),
+    )
     return CompareShareResolveOut(
         product_ids=resolved_ids,
         expires_at=expires_at.isoformat(),

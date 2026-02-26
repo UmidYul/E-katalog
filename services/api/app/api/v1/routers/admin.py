@@ -2034,46 +2034,49 @@ async def delete_user(
     redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, bool]:
-    if _auth_reads_from_postgres():
-        normalized_uuid = _normalize_uuid_ref(user_id, field_name="user_id")
-        user = (
-            await db.execute(
-                select(AuthUser).where(AuthUser.uuid == normalized_uuid).limit(1)
+    async def _op():
+        if _auth_reads_from_postgres():
+            normalized_uuid = _normalize_uuid_ref(user_id, field_name="user_id")
+            user = (
+                await db.execute(
+                    select(AuthUser).where(AuthUser.uuid == normalized_uuid).limit(1)
+                )
+            ).scalars().first()
+            if user is None:
+                raise HTTPException(status_code=404, detail="user not found")
+            actor_uuid = str(user.uuid)
+            await db.delete(user)
+            await _audit_admin_action(
+                db,
+                current_user=current_user,
+                request=request,
+                action="users.delete",
+                entity_type="user",
+                entity_id=actor_uuid,
+                payload={},
             )
-        ).scalars().first()
-        if user is None:
-            raise HTTPException(status_code=404, detail="user not found")
-        actor_uuid = str(user.uuid)
-        await db.delete(user)
+            await db.commit()
+            return {"ok": True}
+
+        internal_user_id, payload = await _get_user_by_uuid_or_404(redis, user_id)
+        key = f"auth:user:{internal_user_id}"
+        email = payload.get("email")
+        if email:
+            await redis.delete(f"auth:user:email:{email}")
+        await redis.delete(key)
         await _audit_admin_action(
             db,
             current_user=current_user,
             request=request,
             action="users.delete",
             entity_type="user",
-            entity_id=actor_uuid,
+            entity_id=user_id,
             payload={},
         )
         await db.commit()
         return {"ok": True}
 
-    internal_user_id, payload = await _get_user_by_uuid_or_404(redis, user_id)
-    key = f"auth:user:{internal_user_id}"
-    email = payload.get("email")
-    if email:
-        await redis.delete(f"auth:user:email:{email}")
-    await redis.delete(key)
-    await _audit_admin_action(
-        db,
-        current_user=current_user,
-        request=request,
-        action="users.delete",
-        entity_type="user",
-        entity_id=user_id,
-        payload={},
-    )
-    await db.commit()
-    return {"ok": True}
+    return await execute_idempotent_json(request, redis, scope=f"admin.users.delete:{user_id}", handler=_op)
 
 
 @router.get("/stores", response_model=PaginatedOut)
@@ -2129,50 +2132,54 @@ async def create_store(
     request: Request,
     payload: StoreCreate,
     current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    slug = payload.slug or _slugify(payload.name)
-    try:
-        row = (
-            await db.execute(
-                text(
-                    """
-                    insert into catalog_stores
-                        (slug, name, provider, base_url, country_code, is_active, trust_score, crawl_priority)
-                    values
-                        (:slug, :name, :provider, :base_url, :country_code, :is_active, :trust_score, :crawl_priority)
-                    returning
-                        uuid as id, slug, name, provider, base_url, country_code, is_active, trust_score, crawl_priority
-                    """
-                ),
-                {
-                    "slug": slug,
-                    "name": payload.name,
-                    "provider": payload.provider.lower(),
-                    "base_url": payload.base_url,
-                    "country_code": payload.country_code.upper(),
-                    "is_active": payload.is_active,
-                    "trust_score": payload.trust_score,
-                    "crawl_priority": payload.crawl_priority,
-                },
-            )
-        ).mappings().first()
-    except IntegrityError:
-        await db.rollback()
-        raise HTTPException(status_code=409, detail="store with same id/slug already exists")
-    if not row:
-        raise HTTPException(status_code=500, detail="failed to create store")
-    await _audit_admin_action(
-        db,
-        current_user=current_user,
-        request=request,
-        action="stores.create",
-        entity_type="store",
-        entity_id=str(row["id"]),
-        payload={"slug": row["slug"], "provider": row["provider"]},
-    )
-    await db.commit()
-    return {**dict(row), "sources_count": 0}
+    async def _op():
+        slug = payload.slug or _slugify(payload.name)
+        try:
+            row = (
+                await db.execute(
+                    text(
+                        """
+                        insert into catalog_stores
+                            (slug, name, provider, base_url, country_code, is_active, trust_score, crawl_priority)
+                        values
+                            (:slug, :name, :provider, :base_url, :country_code, :is_active, :trust_score, :crawl_priority)
+                        returning
+                            uuid as id, slug, name, provider, base_url, country_code, is_active, trust_score, crawl_priority
+                        """
+                    ),
+                    {
+                        "slug": slug,
+                        "name": payload.name,
+                        "provider": payload.provider.lower(),
+                        "base_url": payload.base_url,
+                        "country_code": payload.country_code.upper(),
+                        "is_active": payload.is_active,
+                        "trust_score": payload.trust_score,
+                        "crawl_priority": payload.crawl_priority,
+                    },
+                )
+            ).mappings().first()
+        except IntegrityError:
+            await db.rollback()
+            raise HTTPException(status_code=409, detail="store with same id/slug already exists")
+        if not row:
+            raise HTTPException(status_code=500, detail="failed to create store")
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="stores.create",
+            entity_type="store",
+            entity_id=str(row["id"]),
+            payload={"slug": row["slug"], "provider": row["provider"]},
+        )
+        await db.commit()
+        return {**dict(row), "sources_count": 0}
+
+    return await execute_idempotent_json(request, redis, scope=f"admin.stores.create:{(payload.slug or _slugify(payload.name)).lower()}", handler=_op)
 
 
 @router.patch("/stores/{store_id}")
@@ -2181,70 +2188,74 @@ async def patch_store(
     store_id: str = Path(..., pattern=UUID_REF_PATTERN),
     payload: StorePatch = None,
     current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    internal_store_id = await _resolve_store_id_or_404(db, store_id)
-    await db.execute(
-        text(
-            """
-            update catalog_stores
-            set
-                name = coalesce(:name, name),
-                slug = coalesce(:slug, slug),
-                provider = coalesce(:provider, provider),
-                base_url = coalesce(:base_url, base_url),
-                country_code = coalesce(:country_code, country_code),
-                trust_score = coalesce(:trust_score, trust_score),
-                crawl_priority = coalesce(:crawl_priority, crawl_priority),
-                is_active = coalesce(:is_active, is_active),
-                updated_at = now()
-            where id = :id
-            """
-        ),
-        {
-            "id": internal_store_id,
-            "name": payload.name if payload else None,
-            "slug": payload.slug if payload else None,
-            "provider": payload.provider.lower() if payload and payload.provider else None,
-            "base_url": payload.base_url if payload else None,
-            "country_code": payload.country_code.upper() if payload and payload.country_code else None,
-            "trust_score": payload.trust_score if payload else None,
-            "crawl_priority": payload.crawl_priority if payload else None,
-            "is_active": payload.is_active if payload else None,
-        },
-    )
-    row = (
+    async def _op():
+        internal_store_id = await _resolve_store_id_or_404(db, store_id)
         await db.execute(
             text(
                 """
-                select
-                    s.uuid as id, s.slug, s.name, s.provider, s.base_url, s.country_code, s.is_active, s.trust_score, s.crawl_priority,
-                    coalesce(ss.sources_count, 0) as sources_count
-                from catalog_stores s
-                left join (
-                    select store_id, count(*)::int as sources_count
-                    from catalog_scrape_sources
-                    group by store_id
-                ) ss on ss.store_id = s.id
-                where s.id = :id
+                update catalog_stores
+                set
+                    name = coalesce(:name, name),
+                    slug = coalesce(:slug, slug),
+                    provider = coalesce(:provider, provider),
+                    base_url = coalesce(:base_url, base_url),
+                    country_code = coalesce(:country_code, country_code),
+                    trust_score = coalesce(:trust_score, trust_score),
+                    crawl_priority = coalesce(:crawl_priority, crawl_priority),
+                    is_active = coalesce(:is_active, is_active),
+                    updated_at = now()
+                where id = :id
                 """
             ),
-            {"id": internal_store_id},
+            {
+                "id": internal_store_id,
+                "name": payload.name if payload else None,
+                "slug": payload.slug if payload else None,
+                "provider": payload.provider.lower() if payload and payload.provider else None,
+                "base_url": payload.base_url if payload else None,
+                "country_code": payload.country_code.upper() if payload and payload.country_code else None,
+                "trust_score": payload.trust_score if payload else None,
+                "crawl_priority": payload.crawl_priority if payload else None,
+                "is_active": payload.is_active if payload else None,
+            },
         )
-    ).mappings().first()
-    if not row:
-        raise HTTPException(status_code=404, detail="store not found")
-    await _audit_admin_action(
-        db,
-        current_user=current_user,
-        request=request,
-        action="stores.patch",
-        entity_type="store",
-        entity_id=str(row["id"]),
-        payload={"updates": sorted((payload.model_dump(exclude_unset=True) if payload else {}).keys())},
-    )
-    await db.commit()
-    return dict(row)
+        row = (
+            await db.execute(
+                text(
+                    """
+                    select
+                        s.uuid as id, s.slug, s.name, s.provider, s.base_url, s.country_code, s.is_active, s.trust_score, s.crawl_priority,
+                        coalesce(ss.sources_count, 0) as sources_count
+                    from catalog_stores s
+                    left join (
+                        select store_id, count(*)::int as sources_count
+                        from catalog_scrape_sources
+                        group by store_id
+                    ) ss on ss.store_id = s.id
+                    where s.id = :id
+                    """
+                ),
+                {"id": internal_store_id},
+            )
+        ).mappings().first()
+        if not row:
+            raise HTTPException(status_code=404, detail="store not found")
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="stores.patch",
+            entity_type="store",
+            entity_id=str(row["id"]),
+            payload={"updates": sorted((payload.model_dump(exclude_unset=True) if payload else {}).keys())},
+        )
+        await db.commit()
+        return dict(row)
+
+    return await execute_idempotent_json(request, redis, scope=f"admin.stores.patch:{store_id}", handler=_op)
 
 
 @router.delete("/stores/{store_id}")
@@ -2252,21 +2263,25 @@ async def delete_store(
     request: Request,
     store_id: str = Path(..., pattern=UUID_REF_PATTERN),
     current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, bool]:
-    internal_store_id = await _resolve_store_id_or_404(db, store_id)
-    await db.execute(text("delete from catalog_stores where id = :id"), {"id": internal_store_id})
-    await _audit_admin_action(
-        db,
-        current_user=current_user,
-        request=request,
-        action="stores.delete",
-        entity_type="store",
-        entity_id=store_id,
-        payload={},
-    )
-    await db.commit()
-    return {"ok": True}
+    async def _op():
+        internal_store_id = await _resolve_store_id_or_404(db, store_id)
+        await db.execute(text("delete from catalog_stores where id = :id"), {"id": internal_store_id})
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="stores.delete",
+            entity_type="store",
+            entity_id=store_id,
+            payload={},
+        )
+        await db.commit()
+        return {"ok": True}
+
+    return await execute_idempotent_json(request, redis, scope=f"admin.stores.delete:{store_id}", handler=_op)
 
 
 @router.get("/stores/{store_id}/sources", response_model=PaginatedOut)
@@ -2302,49 +2317,53 @@ async def create_store_source(
     store_id: str = Path(..., pattern=UUID_REF_PATTERN),
     payload: ScrapeSourceCreate = None,
     current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    internal_store_id = await _resolve_store_id_or_404(db, store_id)
-    normalized_url, normalized_type = await _normalize_source_payload(
-        db,
-        store_id=internal_store_id,
-        url_value=payload.url if payload else "",
-        source_type=payload.source_type if payload else None,
-    )
-    row = (
-        await db.execute(
-            text(
-                """
-                insert into catalog_scrape_sources (store_id, url, source_type, is_active, priority)
-                values (:store_id, :url, :source_type, :is_active, :priority)
-                returning
-                    uuid as id,
-                    (select uuid from catalog_stores where id = store_id) as store_id,
-                    url, source_type, is_active, priority, created_at, updated_at
-                """
-            ),
-            {
-                "store_id": internal_store_id,
-                "url": normalized_url,
-                "source_type": normalized_type,
-                "is_active": payload.is_active if payload else True,
-                "priority": payload.priority if payload else 100,
-            },
+    async def _op():
+        internal_store_id = await _resolve_store_id_or_404(db, store_id)
+        normalized_url, normalized_type = await _normalize_source_payload(
+            db,
+            store_id=internal_store_id,
+            url_value=payload.url if payload else "",
+            source_type=payload.source_type if payload else None,
         )
-    ).mappings().first()
-    if not row:
-        raise HTTPException(status_code=500, detail="failed to create source")
-    await _audit_admin_action(
-        db,
-        current_user=current_user,
-        request=request,
-        action="store_sources.create",
-        entity_type="store_source",
-        entity_id=str(row["id"]),
-        payload={"store_id": str(row["store_id"]), "source_type": str(row["source_type"])},
-    )
-    await db.commit()
-    return dict(row)
+        row = (
+            await db.execute(
+                text(
+                    """
+                    insert into catalog_scrape_sources (store_id, url, source_type, is_active, priority)
+                    values (:store_id, :url, :source_type, :is_active, :priority)
+                    returning
+                        uuid as id,
+                        (select uuid from catalog_stores where id = store_id) as store_id,
+                        url, source_type, is_active, priority, created_at, updated_at
+                    """
+                ),
+                {
+                    "store_id": internal_store_id,
+                    "url": normalized_url,
+                    "source_type": normalized_type,
+                    "is_active": payload.is_active if payload else True,
+                    "priority": payload.priority if payload else 100,
+                },
+            )
+        ).mappings().first()
+        if not row:
+            raise HTTPException(status_code=500, detail="failed to create source")
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="store_sources.create",
+            entity_type="store_source",
+            entity_id=str(row["id"]),
+            payload={"store_id": str(row["store_id"]), "source_type": str(row["source_type"])},
+        )
+        await db.commit()
+        return dict(row)
+
+    return await execute_idempotent_json(request, redis, scope=f"admin.store_sources.create:{store_id}", handler=_op)
 
 
 @router.patch("/stores/{store_id}/sources/{source_id}")
@@ -2354,73 +2373,77 @@ async def patch_store_source(
     source_id: str = Path(..., pattern=UUID_REF_PATTERN),
     payload: ScrapeSourcePatch = None,
     current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    internal_store_id = await _resolve_store_id_or_404(db, store_id)
-    internal_source_id = await _resolve_source_id_or_404(db, store_id=internal_store_id, source_ref=source_id)
-    current = (
-        await db.execute(
-            text("select url, source_type from catalog_scrape_sources where id = :source_id and store_id = :store_id"),
-            {"source_id": internal_source_id, "store_id": internal_store_id},
+    async def _op():
+        internal_store_id = await _resolve_store_id_or_404(db, store_id)
+        internal_source_id = await _resolve_source_id_or_404(db, store_id=internal_store_id, source_ref=source_id)
+        current = (
+            await db.execute(
+                text("select url, source_type from catalog_scrape_sources where id = :source_id and store_id = :store_id"),
+                {"source_id": internal_source_id, "store_id": internal_store_id},
+            )
+        ).mappings().first()
+        if not current:
+            raise HTTPException(status_code=404, detail="source not found")
+        normalized_url, normalized_type = await _normalize_source_payload(
+            db,
+            store_id=internal_store_id,
+            url_value=payload.url if payload and payload.url is not None else current["url"],
+            source_type=payload.source_type if payload and payload.source_type is not None else current["source_type"],
         )
-    ).mappings().first()
-    if not current:
-        raise HTTPException(status_code=404, detail="source not found")
-    normalized_url, normalized_type = await _normalize_source_payload(
-        db,
-        store_id=internal_store_id,
-        url_value=payload.url if payload and payload.url is not None else current["url"],
-        source_type=payload.source_type if payload and payload.source_type is not None else current["source_type"],
-    )
 
-    await db.execute(
-        text(
-            """
-            update catalog_scrape_sources
-            set
-                url = :url,
-                source_type = :source_type,
-                is_active = coalesce(:is_active, is_active),
-                priority = coalesce(:priority, priority),
-                updated_at = now()
-            where id = :source_id and store_id = :store_id
-            """
-        ),
-        {
-            "source_id": internal_source_id,
-            "store_id": internal_store_id,
-            "url": normalized_url,
-            "source_type": normalized_type,
-            "is_active": payload.is_active if payload else None,
-            "priority": payload.priority if payload else None,
-        },
-    )
-    row = (
         await db.execute(
             text(
                 """
-                select ss.uuid as id, s.uuid as store_id, ss.url, ss.source_type, ss.is_active, ss.priority, ss.created_at, ss.updated_at
-                from catalog_scrape_sources ss
-                join catalog_stores s on s.id = ss.store_id
-                where ss.id = :source_id and ss.store_id = :store_id
+                update catalog_scrape_sources
+                set
+                    url = :url,
+                    source_type = :source_type,
+                    is_active = coalesce(:is_active, is_active),
+                    priority = coalesce(:priority, priority),
+                    updated_at = now()
+                where id = :source_id and store_id = :store_id
                 """
             ),
-            {"source_id": internal_source_id, "store_id": internal_store_id},
+            {
+                "source_id": internal_source_id,
+                "store_id": internal_store_id,
+                "url": normalized_url,
+                "source_type": normalized_type,
+                "is_active": payload.is_active if payload else None,
+                "priority": payload.priority if payload else None,
+            },
         )
-    ).mappings().first()
-    if not row:
-        raise HTTPException(status_code=404, detail="source not found")
-    await _audit_admin_action(
-        db,
-        current_user=current_user,
-        request=request,
-        action="store_sources.patch",
-        entity_type="store_source",
-        entity_id=str(row["id"]),
-        payload={"updates": sorted((payload.model_dump(exclude_unset=True) if payload else {}).keys())},
-    )
-    await db.commit()
-    return dict(row)
+        row = (
+            await db.execute(
+                text(
+                    """
+                    select ss.uuid as id, s.uuid as store_id, ss.url, ss.source_type, ss.is_active, ss.priority, ss.created_at, ss.updated_at
+                    from catalog_scrape_sources ss
+                    join catalog_stores s on s.id = ss.store_id
+                    where ss.id = :source_id and ss.store_id = :store_id
+                    """
+                ),
+                {"source_id": internal_source_id, "store_id": internal_store_id},
+            )
+        ).mappings().first()
+        if not row:
+            raise HTTPException(status_code=404, detail="source not found")
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="store_sources.patch",
+            entity_type="store_source",
+            entity_id=str(row["id"]),
+            payload={"updates": sorted((payload.model_dump(exclude_unset=True) if payload else {}).keys())},
+        )
+        await db.commit()
+        return dict(row)
+
+    return await execute_idempotent_json(request, redis, scope=f"admin.store_sources.patch:{store_id}:{source_id}", handler=_op)
 
 
 @router.delete("/stores/{store_id}/sources/{source_id}")
@@ -2429,25 +2452,29 @@ async def delete_store_source(
     store_id: str = Path(..., pattern=UUID_REF_PATTERN),
     source_id: str = Path(..., pattern=UUID_REF_PATTERN),
     current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, bool]:
-    internal_store_id = await _resolve_store_id_or_404(db, store_id)
-    internal_source_id = await _resolve_source_id_or_404(db, store_id=internal_store_id, source_ref=source_id)
-    await db.execute(
-        text("delete from catalog_scrape_sources where id = :source_id and store_id = :store_id"),
-        {"source_id": internal_source_id, "store_id": internal_store_id},
-    )
-    await _audit_admin_action(
-        db,
-        current_user=current_user,
-        request=request,
-        action="store_sources.delete",
-        entity_type="store_source",
-        entity_id=source_id,
-        payload={"store_id": store_id},
-    )
-    await db.commit()
-    return {"ok": True}
+    async def _op():
+        internal_store_id = await _resolve_store_id_or_404(db, store_id)
+        internal_source_id = await _resolve_source_id_or_404(db, store_id=internal_store_id, source_ref=source_id)
+        await db.execute(
+            text("delete from catalog_scrape_sources where id = :source_id and store_id = :store_id"),
+            {"source_id": internal_source_id, "store_id": internal_store_id},
+        )
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="store_sources.delete",
+            entity_type="store_source",
+            entity_id=source_id,
+            payload={"store_id": store_id},
+        )
+        await db.commit()
+        return {"ok": True}
+
+    return await execute_idempotent_json(request, redis, scope=f"admin.store_sources.delete:{store_id}:{source_id}", handler=_op)
 
 
 @router.post("/categories")
@@ -2455,48 +2482,52 @@ async def create_category(
     request: Request,
     payload: CategoryCreate,
     current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    resolved_parent_id: int | None = None
-    if payload.parent_id is not None:
-        resolved_parent_id = await _resolve_category_id_or_404(db, payload.parent_id)
+    async def _op():
+        resolved_parent_id: int | None = None
+        if payload.parent_id is not None:
+            resolved_parent_id = await _resolve_category_id_or_404(db, payload.parent_id)
 
-    inserted = (
-        await db.execute(
-            text(
-                """
-                insert into catalog_categories (slug, name_uz, parent_id, lft, rgt, is_active)
-                values (:slug, :name, :parent_id, 0, 0, true)
-                returning
-                    uuid as id,
-                    slug,
-                    name_uz,
-                    (select uuid from catalog_categories where id = parent_id) as parent_id,
-                    is_active
-                """
-            ),
-            {"slug": payload.slug, "name": payload.name, "parent_id": resolved_parent_id},
+        inserted = (
+            await db.execute(
+                text(
+                    """
+                    insert into catalog_categories (slug, name_uz, parent_id, lft, rgt, is_active)
+                    values (:slug, :name, :parent_id, 0, 0, true)
+                    returning
+                        uuid as id,
+                        slug,
+                        name_uz,
+                        (select uuid from catalog_categories where id = parent_id) as parent_id,
+                        is_active
+                    """
+                ),
+                {"slug": payload.slug, "name": payload.name, "parent_id": resolved_parent_id},
+            )
+        ).mappings().first()
+        if not inserted:
+            raise HTTPException(status_code=500, detail="failed to create category")
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="categories.create",
+            entity_type="category",
+            entity_id=str(inserted["id"]),
+            payload={"slug": inserted["slug"], "parent_id": inserted["parent_id"]},
         )
-    ).mappings().first()
-    if not inserted:
-        raise HTTPException(status_code=500, detail="failed to create category")
-    await _audit_admin_action(
-        db,
-        current_user=current_user,
-        request=request,
-        action="categories.create",
-        entity_type="category",
-        entity_id=str(inserted["id"]),
-        payload={"slug": inserted["slug"], "parent_id": inserted["parent_id"]},
-    )
-    await db.commit()
-    return {
-        "id": inserted["id"],
-        "slug": inserted["slug"],
-        "name": inserted["name_uz"],
-        "parent_id": inserted["parent_id"],
-        "is_active": inserted["is_active"],
-    }
+        await db.commit()
+        return {
+            "id": inserted["id"],
+            "slug": inserted["slug"],
+            "name": inserted["name_uz"],
+            "parent_id": inserted["parent_id"],
+            "is_active": inserted["is_active"],
+        }
+
+    return await execute_idempotent_json(request, redis, scope=f"admin.categories.create:{payload.slug.lower()}", handler=_op)
 
 
 @router.patch("/categories/{category_id}")
@@ -2505,73 +2536,77 @@ async def patch_category(
     category_id: str = Path(..., pattern=UUID_REF_PATTERN),
     payload: CategoryPatch = Body(...),
     current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    internal_category_id = await _resolve_category_id_or_404(db, category_id)
-    patch_payload = payload.model_dump(exclude_unset=True)
+    async def _op():
+        internal_category_id = await _resolve_category_id_or_404(db, category_id)
+        patch_payload = payload.model_dump(exclude_unset=True)
 
-    parent_ref_marker = object()
-    parent_ref = patch_payload.pop("parent_id", parent_ref_marker)
-    set_parent = parent_ref is not parent_ref_marker
-    resolved_parent_id: int | None
-    if set_parent:
-        if parent_ref is None:
-            resolved_parent_id = None
+        parent_ref_marker = object()
+        parent_ref = patch_payload.pop("parent_id", parent_ref_marker)
+        set_parent = parent_ref is not parent_ref_marker
+        resolved_parent_id: int | None
+        if set_parent:
+            if parent_ref is None:
+                resolved_parent_id = None
+            else:
+                resolved_parent_id = await _resolve_category_id_or_404(db, str(parent_ref))
         else:
-            resolved_parent_id = await _resolve_category_id_or_404(db, str(parent_ref))
-    else:
-        resolved_parent_id = None
+            resolved_parent_id = None
 
-    await db.execute(
-        text(
-            """
-            update catalog_categories
-            set slug = coalesce(:slug, slug),
-                name_uz = coalesce(:name_uz, name_uz),
-                parent_id = case when :set_parent then :parent_id else parent_id end,
-                updated_at = now()
-            where id = :id
-            """
-        ),
-        {
-            "id": internal_category_id,
-            "slug": patch_payload.get("slug"),
-            "name_uz": patch_payload.get("name"),
-            "set_parent": set_parent,
-            "parent_id": resolved_parent_id,
-        },
-    )
-    row = (
         await db.execute(
             text(
                 """
-                select
-                    c.uuid as id,
-                    c.slug,
-                    c.name_uz,
-                    p.uuid as parent_id,
-                    c.is_active
-                from catalog_categories c
-                left join catalog_categories p on p.id = c.parent_id
-                where c.id = :id
+                update catalog_categories
+                set slug = coalesce(:slug, slug),
+                    name_uz = coalesce(:name_uz, name_uz),
+                    parent_id = case when :set_parent then :parent_id else parent_id end,
+                    updated_at = now()
+                where id = :id
                 """
             ),
-            {"id": internal_category_id},
+            {
+                "id": internal_category_id,
+                "slug": patch_payload.get("slug"),
+                "name_uz": patch_payload.get("name"),
+                "set_parent": set_parent,
+                "parent_id": resolved_parent_id,
+            },
         )
-    ).mappings().first()
-    if not row:
-        raise HTTPException(status_code=404, detail="category not found")
-    await _audit_admin_action(
-        db,
-        current_user=current_user,
-        request=request,
-        action="categories.patch",
-        entity_type="category",
-        entity_id=str(row["id"]),
-        payload={"updates": sorted(payload.model_dump(exclude_unset=True).keys())},
-    )
-    await db.commit()
-    return {"id": row["id"], "slug": row["slug"], "name": row["name_uz"], "parent_id": row["parent_id"], "is_active": row["is_active"]}
+        row = (
+            await db.execute(
+                text(
+                    """
+                    select
+                        c.uuid as id,
+                        c.slug,
+                        c.name_uz,
+                        p.uuid as parent_id,
+                        c.is_active
+                    from catalog_categories c
+                    left join catalog_categories p on p.id = c.parent_id
+                    where c.id = :id
+                    """
+                ),
+                {"id": internal_category_id},
+            )
+        ).mappings().first()
+        if not row:
+            raise HTTPException(status_code=404, detail="category not found")
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="categories.patch",
+            entity_type="category",
+            entity_id=str(row["id"]),
+            payload={"updates": sorted(payload.model_dump(exclude_unset=True).keys())},
+        )
+        await db.commit()
+        return {"id": row["id"], "slug": row["slug"], "name": row["name_uz"], "parent_id": row["parent_id"], "is_active": row["is_active"]}
+
+    return await execute_idempotent_json(request, redis, scope=f"admin.categories.patch:{category_id}", handler=_op)
 
 
 @router.delete("/categories/{category_id}")
@@ -2579,21 +2614,25 @@ async def delete_category(
     request: Request,
     category_id: str = Path(..., pattern=UUID_REF_PATTERN),
     current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, bool]:
-    internal_category_id = await _resolve_category_id_or_404(db, category_id)
-    await db.execute(text("delete from catalog_categories where id = :id"), {"id": internal_category_id})
-    await _audit_admin_action(
-        db,
-        current_user=current_user,
-        request=request,
-        action="categories.delete",
-        entity_type="category",
-        entity_id=category_id,
-        payload={},
-    )
-    await db.commit()
-    return {"ok": True}
+    async def _op():
+        internal_category_id = await _resolve_category_id_or_404(db, category_id)
+        await db.execute(text("delete from catalog_categories where id = :id"), {"id": internal_category_id})
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="categories.delete",
+            entity_type="category",
+            entity_id=category_id,
+            payload={},
+        )
+        await db.commit()
+        return {"ok": True}
+
+    return await execute_idempotent_json(request, redis, scope=f"admin.categories.delete:{category_id}", handler=_op)
 
 
 @router.patch("/products/{product_id}")
@@ -2602,38 +2641,42 @@ async def patch_product(
     product_id: str,
     payload: dict[str, Any],
     current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    resolved_product_id = await _resolve_product_id_or_404(db, product_id)
-    await db.execute(
-        text(
-            """
-            update catalog_canonical_products
-            set normalized_title = coalesce(:title, normalized_title),
-                main_image = coalesce(:main_image, main_image),
-                specs = coalesce(cast(:specs as jsonb), specs),
-                updated_at = now()
-            where id = :id
-            """
-        ),
-        {
-            "id": resolved_product_id,
-            "title": payload.get("normalized_title"),
-            "main_image": payload.get("main_image"),
-            "specs": payload.get("specs"),
-        },
-    )
-    await _audit_admin_action(
-        db,
-        current_user=current_user,
-        request=request,
-        action="products.patch",
-        entity_type="product",
-        entity_id=product_id,
-        payload={"updates": sorted(payload.keys())},
-    )
-    await db.commit()
-    return {"ok": True}
+    async def _op():
+        resolved_product_id = await _resolve_product_id_or_404(db, product_id)
+        await db.execute(
+            text(
+                """
+                update catalog_canonical_products
+                set normalized_title = coalesce(:title, normalized_title),
+                    main_image = coalesce(:main_image, main_image),
+                    specs = coalesce(cast(:specs as jsonb), specs),
+                    updated_at = now()
+                where id = :id
+                """
+            ),
+            {
+                "id": resolved_product_id,
+                "title": payload.get("normalized_title"),
+                "main_image": payload.get("main_image"),
+                "specs": payload.get("specs"),
+            },
+        )
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="products.patch",
+            entity_type="product",
+            entity_id=product_id,
+            payload={"updates": sorted(payload.keys())},
+        )
+        await db.commit()
+        return {"ok": True}
+
+    return await execute_idempotent_json(request, redis, scope=f"admin.products.patch:{product_id}", handler=_op)
 
 
 @router.delete("/products/{product_id}")

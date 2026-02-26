@@ -86,6 +86,10 @@ celery_app.conf.update(
         "app.tasks.maintenance_tasks.evaluate_admin_alert_events": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.maintenance_tasks.enqueue_admin_alert_evaluation": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.maintenance_tasks.enqueue_full_catalog_rebuild": {"queue": "maintenance", "routing_key": "maintenance"},
+        "app.tasks.maintenance_tasks.refresh_offer_trust_scores": {"queue": "maintenance", "routing_key": "maintenance"},
+        "app.tasks.maintenance_tasks.enqueue_refresh_offer_trust_scores": {"queue": "maintenance", "routing_key": "maintenance"},
+        "app.tasks.maintenance_tasks.refresh_canonical_key_index": {"queue": "maintenance", "routing_key": "maintenance"},
+        "app.tasks.maintenance_tasks.enqueue_refresh_canonical_key_index": {"queue": "maintenance", "routing_key": "maintenance"},
     },
     beat_schedule={
         "scrape-every-6h": {
@@ -176,6 +180,16 @@ celery_app.conf.update(
         "full-catalog-rebuild-daily-0315": {
             "task": "app.tasks.maintenance_tasks.enqueue_full_catalog_rebuild",
             "schedule": crontab(minute=15, hour=3),
+            "options": {"queue": "maintenance", "routing_key": "maintenance"},
+        },
+        "offer-trust-score-refresh-every-30m": {
+            "task": "app.tasks.maintenance_tasks.enqueue_refresh_offer_trust_scores",
+            "schedule": crontab(minute="*/30"),
+            "options": {"queue": "maintenance", "routing_key": "maintenance"},
+        },
+        "canonical-key-index-refresh-daily-0410": {
+            "task": "app.tasks.maintenance_tasks.enqueue_refresh_canonical_key_index",
+            "schedule": crontab(minute=10, hour=4),
             "options": {"queue": "maintenance", "routing_key": "maintenance"},
         },
     },

@@ -17,12 +17,17 @@ const formatScrapedAt = (value: string) => {
 };
 
 export function OfferTable({ offersByStore }: { offersByStore: OffersByStore[] }) {
-  const [sortBy, setSortBy] = useState<"price" | "seller_rating" | "delivery">("price");
+  const [sortBy, setSortBy] = useState<"best_value" | "price" | "seller_rating" | "delivery">("best_value");
 
   const sortedStores = useMemo(() => {
     const copy = [...offersByStore];
     if (sortBy === "price") {
       return copy.sort((a, b) => a.minimal_price - b.minimal_price);
+    }
+    if (sortBy === "best_value") {
+      const bestValue = (store: OffersByStore) =>
+        store.offers.length ? Math.max(...store.offers.map((offer) => Number(offer.best_value_score ?? offer.trust_score ?? 0))) : 0;
+      return copy.sort((a, b) => bestValue(b) - bestValue(a));
     }
     if (sortBy === "delivery") {
       const minDelivery = (store: OffersByStore) => Math.min(...store.offers.map((offer) => offer.delivery_days ?? 999));
@@ -36,13 +41,14 @@ export function OfferTable({ offersByStore }: { offersByStore: OffersByStore[] }
       <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <CardTitle>Сравнение цен по магазинам</CardTitle>
         <div className="flex items-center gap-2">
-          <Select value={sortBy} onValueChange={(value) => setSortBy(value as "price" | "seller_rating" | "delivery")}>
+          <Select value={sortBy} onValueChange={(value) => setSortBy(value as "best_value" | "price" | "seller_rating" | "delivery")}>
             <div className="w-[220px]">
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
             </div>
             <SelectContent>
+              <SelectItem value="best_value">Лучшее соотношение</SelectItem>
               <SelectItem value="price">Сначала по цене</SelectItem>
               <SelectItem value="seller_rating">По числу предложений</SelectItem>
               <SelectItem value="delivery">По скорости доставки</SelectItem>
@@ -76,6 +82,11 @@ export function OfferTable({ offersByStore }: { offersByStore: OffersByStore[] }
                     <Badge className={offer.in_stock ? "border-success/40 bg-success/15 text-success" : "border-destructive/40 bg-destructive/15 text-destructive"}>
                       {offer.in_stock ? "В наличии" : "Нет в наличии"}
                     </Badge>
+                    {offer.trust_score != null ? (
+                      <Badge className="border-primary/30 bg-primary/10 text-primary">
+                        Trust: {Math.round(Number(offer.trust_score) * 100)}%
+                      </Badge>
+                    ) : null}
                     {offer.delivery_days !== null && offer.delivery_days !== undefined ? <Badge>{offer.delivery_days} дн.</Badge> : null}
                     <span className="text-base font-semibold text-primary">{formatPrice(offer.price_amount, offer.currency)}</span>
                     <a

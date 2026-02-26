@@ -45,6 +45,13 @@ class OfferOut(BaseModel):
     currency: str
     delivery_days: int | None = None
     scraped_at: datetime
+    trust_score: float | None = None
+    trust_freshness: float | None = None
+    trust_seller_rating: float | None = None
+    trust_price_anomaly: float | None = None
+    trust_stock_consistency: float | None = None
+    trust_band: str | None = None
+    best_value_score: float | None = None
     link: str
 
 
@@ -91,6 +98,7 @@ class CompareRequest(BaseModel):
 class CompareShareCreateRequest(BaseModel):
     product_ids: list[UUIDRef] = Field(min_length=2, max_length=4)
     ttl_days: int = Field(default=30, ge=1, le=180)
+    telemetry_source: str | None = Field(default=None, min_length=2, max_length=64)
 
 
 class CompareShareCreateOut(BaseModel):

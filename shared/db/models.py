@@ -220,6 +220,23 @@ class CatalogOffer(CatalogUuidMixin, Base):
         CheckConstraint("price_amount >= 0", name="ck_catalog_offers_price_nonnegative"),
         CheckConstraint("old_price_amount is null or old_price_amount >= 0", name="ck_catalog_offers_old_price_nonnegative"),
         CheckConstraint("shipping_cost is null or shipping_cost >= 0", name="ck_catalog_offers_shipping_nonnegative"),
+        CheckConstraint("trust_score is null or (trust_score >= 0 and trust_score <= 1)", name="ck_catalog_offers_trust_score"),
+        CheckConstraint(
+            "trust_freshness is null or (trust_freshness >= 0 and trust_freshness <= 1)",
+            name="ck_catalog_offers_trust_freshness",
+        ),
+        CheckConstraint(
+            "trust_seller_rating is null or (trust_seller_rating >= 0 and trust_seller_rating <= 1)",
+            name="ck_catalog_offers_trust_seller_rating",
+        ),
+        CheckConstraint(
+            "trust_price_anomaly is null or (trust_price_anomaly >= 0 and trust_price_anomaly <= 1)",
+            name="ck_catalog_offers_trust_price_anomaly",
+        ),
+        CheckConstraint(
+            "trust_stock_consistency is null or (trust_stock_consistency >= 0 and trust_stock_consistency <= 1)",
+            name="ck_catalog_offers_trust_stock_consistency",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -239,6 +256,11 @@ class CatalogOffer(CatalogUuidMixin, Base):
     shipping_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     scraped_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     is_valid: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
+    trust_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    trust_freshness: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    trust_seller_rating: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    trust_price_anomaly: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    trust_stock_consistency: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
@@ -308,6 +330,28 @@ class CatalogCanonicalMergeEvent(CatalogUuidMixin, Base):
     score: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class CatalogCanonicalKeyIndex(CatalogUuidMixin, Base):
+    __tablename__ = "catalog_canonical_key_index"
+    __table_args__ = (
+        UniqueConstraint("canonical_key", name="uq_catalog_canonical_key_index_key"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    canonical_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    canonical_product_id: Mapped[int] = mapped_column(
+        ForeignKey("catalog_canonical_products.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    brand: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown", server_default="unknown")
+    model: Mapped[str] = mapped_column(String(128), nullable=False, default="unknown", server_default="unknown")
+    storage: Mapped[str] = mapped_column(String(32), nullable=False, default="unknown", server_default="unknown")
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="normalize", server_default="normalize")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
 
 
 class CatalogCrawlJob(CatalogUuidMixin, Base):
@@ -572,6 +616,7 @@ Index("ix_catalog_offers_seller_id", CatalogOffer.seller_id)
 Index("ix_catalog_offers_store_product_scraped", CatalogOffer.store_product_id, CatalogOffer.scraped_at.desc())
 Index("ix_catalog_offers_valid_stock_price", CatalogOffer.is_valid, CatalogOffer.in_stock, CatalogOffer.price_amount)
 Index("ix_catalog_offers_scraped_at", CatalogOffer.scraped_at)
+Index("ix_catalog_offers_trust_score", CatalogOffer.trust_score.desc())
 Index("ix_catalog_price_history_offer_captured", CatalogPriceHistory.offer_id, CatalogPriceHistory.captured_at.desc())
 Index("ix_catalog_price_history_captured_at", CatalogPriceHistory.captured_at)
 Index("ix_catalog_product_search_min_price", CatalogProductSearch.min_price)
@@ -582,6 +627,9 @@ Index("ix_catalog_duplicate_status_score", CatalogDuplicateCandidate.status, Cat
 Index("ix_catalog_canonical_merge_events_from", CatalogCanonicalMergeEvent.from_product_id)
 Index("ix_catalog_canonical_merge_events_to", CatalogCanonicalMergeEvent.to_product_id)
 Index("ix_catalog_canonical_merge_events_created_at", CatalogCanonicalMergeEvent.created_at.desc())
+Index("ix_catalog_canonical_key_index_product", CatalogCanonicalKeyIndex.canonical_product_id)
+Index("ix_catalog_canonical_key_index_brand_model_storage", CatalogCanonicalKeyIndex.brand, CatalogCanonicalKeyIndex.model, CatalogCanonicalKeyIndex.storage)
+Index("ix_catalog_canonical_key_index_updated_at", CatalogCanonicalKeyIndex.updated_at.desc())
 Index("ix_catalog_ai_jobs_status_stage", CatalogAIEnrichmentJob.status, CatalogAIEnrichmentJob.stage)
 Index("ix_catalog_ai_jobs_product_id", CatalogAIEnrichmentJob.product_id)
 Index("ix_catalog_quality_reports_created_at", CatalogDataQualityReport.created_at.desc())

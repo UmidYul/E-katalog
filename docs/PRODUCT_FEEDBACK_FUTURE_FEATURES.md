@@ -17,6 +17,11 @@ This document tracks post-MVP roadmap for product feedback after base server syn
   - `POST /api/v1/products/questions/{question_id}/answers`
   - `POST /api/v1/products/reviews/{review_id}/moderation`
   - `POST /api/v1/products/questions/{question_id}/moderation`
+  - `POST /api/v1/products/answers/{answer_id}/moderation`
+  - `POST /api/v1/products/reviews/{review_id}/votes`
+  - `POST /api/v1/products/reviews/{review_id}/report`
+  - `POST /api/v1/products/questions/{question_id}/report`
+  - `POST /api/v1/products/answers/{answer_id}/pin`
 - Admin moderation queue API and dashboard page:
   - `GET /api/v1/products/moderation/queue?status=...&kind=...&limit=...&offset=...`
   - Frontend page: `/dashboard/feedback` with status/type filters and moderation actions.
@@ -32,10 +37,7 @@ This document tracks post-MVP roadmap for product feedback after base server syn
 
 ## Planned Next API
 
-- `POST /api/v1/products/reviews/{review_id}/votes` (helpful/not helpful)
-- `POST /api/v1/products/reviews/{review_id}/report`
-- `POST /api/v1/products/questions/{question_id}/report`
-- `POST /api/v1/products/answers/{answer_id}/pin`
+- Follow-up moderation analytics/reporting endpoints (if needed by dashboard UX).
 
 ## Planned Extended Review Model
 
@@ -83,8 +85,5 @@ This document tracks post-MVP roadmap for product feedback after base server syn
 
 ## Next Client Tasks
 
-1. Add helpful-vote UI for reviews.
-2. Add report actions for reviews and questions.
-3. Add pin/unpin actions for official answers.
-4. Add optimistic updates for votes/reports.
-5. Add pagination for high-volume products.
+1. Fine-tune UX copy/toasts and moderation affordances for edge-cases.
+2. Add broader integration/e2e coverage for feedback flows.

@@ -20,3 +20,4 @@ orjson==3.10.15
 pytest==8.3.5
 qrcode==7.4.2
 sentry-sdk[fastapi]==2.22.0
+PyYAML==6.0.2

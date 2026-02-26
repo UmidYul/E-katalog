@@ -1224,6 +1224,18 @@ def _select_catalog_card_image(
     return str(primary_image or "").strip() or None
 
 
+def _clamp_01(value: float) -> float:
+    return max(0.0, min(1.0, float(value)))
+
+
+def _trust_band(score: float) -> str:
+    if score >= 0.75:
+        return "high"
+    if score >= 0.55:
+        return "medium"
+    return "low"
+
+
 class CatalogRepository:
     def __init__(self, session: AsyncSession, *, cursor_secret: str) -> None:
         self.session = session
@@ -1878,6 +1890,13 @@ class CatalogRepository:
                 CatalogOffer.currency,
                 CatalogOffer.delivery_days,
                 CatalogOffer.scraped_at,
+                CatalogOffer.trust_score,
+                CatalogOffer.trust_freshness,
+                CatalogOffer.trust_seller_rating,
+                CatalogOffer.trust_price_anomaly,
+                CatalogOffer.trust_stock_consistency,
+                CatalogStore.trust_score.label("store_trust_score"),
+                CatalogSeller.rating.label("seller_rating"),
                 func.coalesce(CatalogOffer.offer_url, CatalogStoreProduct.external_url).label("link"),
             )
             .join(CatalogStore, CatalogStore.id == CatalogOffer.store_id)
@@ -1902,6 +1921,7 @@ class CatalogRepository:
             "price": CatalogOffer.price_amount.asc(),
             "delivery": CatalogOffer.delivery_days.asc().nulls_last(),
             "seller_rating": CatalogSeller.rating.desc().nulls_last(),
+            "best_value": CatalogOffer.trust_score.desc().nulls_last(),
         }
         stmt = stmt.order_by(order_map.get(sort, order_map["price"]), CatalogOffer.scraped_at.desc(), CatalogOffer.id.desc()).limit(limit)
         rows = (await self.session.execute(stmt)).all()
@@ -1916,6 +1936,7 @@ class CatalogRepository:
                     "offers_count": 0,
                     "offers": [],
                     "_seen_links": set(),
+                    "_best_value_score": 0.0,
                 }
             bucket = by_store[row.store_id]
             link_key = str(row.link or row.offer_uuid)
@@ -1925,6 +1946,35 @@ class CatalogRepository:
                 continue
 
             bucket["_seen_links"].add(link_key)
+            freshness_score: float | None = float(row.trust_freshness) if row.trust_freshness is not None else None
+            seller_score: float | None = float(row.trust_seller_rating) if row.trust_seller_rating is not None else None
+            price_score: float | None = float(row.trust_price_anomaly) if row.trust_price_anomaly is not None else None
+            stock_score: float | None = float(row.trust_stock_consistency) if row.trust_stock_consistency is not None else None
+            trust_score: float | None = float(row.trust_score) if row.trust_score is not None else None
+
+            if freshness_score is None and row.scraped_at is not None:
+                age_hours = max(0.0, (datetime.now(row.scraped_at.tzinfo) - row.scraped_at).total_seconds() / 3600.0)
+                freshness_score = _clamp_01(1.0 - (age_hours / 72.0))
+            if seller_score is None:
+                if row.seller_rating is not None:
+                    seller_score = _clamp_01(float(row.seller_rating) / 5.0)
+                elif row.store_trust_score is not None:
+                    seller_score = _clamp_01(float(row.store_trust_score))
+                else:
+                    seller_score = 0.55
+            if price_score is None:
+                price_score = 0.65
+            if stock_score is None:
+                stock_score = 0.9 if row.in_stock else 0.35
+            if trust_score is None:
+                trust_score = _clamp_01(
+                    0.35 * float(freshness_score)
+                    + 0.25 * float(seller_score)
+                    + 0.25 * float(price_score)
+                    + 0.15 * float(stock_score)
+                )
+            best_value_score = _clamp_01(0.8 * trust_score + 0.2 * (1.0 if row.in_stock else 0.0))
+
             offer_payload = {
                 "id": row.offer_uuid,
                 "seller_id": row.seller_uuid,
@@ -1935,21 +1985,56 @@ class CatalogRepository:
                 "currency": row.currency,
                 "delivery_days": row.delivery_days,
                 "scraped_at": row.scraped_at,
+                "trust_score": trust_score,
+                "trust_freshness": freshness_score,
+                "trust_seller_rating": seller_score,
+                "trust_price_anomaly": price_score,
+                "trust_stock_consistency": stock_score,
+                "trust_band": _trust_band(trust_score),
+                "best_value_score": best_value_score,
                 "link": row.link,
             }
             bucket["offers"].append(offer_payload)
             bucket["offers_count"] += 1
             if bucket["minimal_price"] is None or offer_payload["price_amount"] < bucket["minimal_price"]:
                 bucket["minimal_price"] = offer_payload["price_amount"]
+            if offer_payload["best_value_score"] > bucket["_best_value_score"]:
+                bucket["_best_value_score"] = offer_payload["best_value_score"]
 
         result = []
         for item in by_store.values():
             item.pop("_seen_links", None)
+            for offer in item["offers"]:
+                if sort == "best_value":
+                    item["offers"].sort(
+                        key=lambda value: (
+                            -(float(value.get("best_value_score") or 0.0)),
+                            float(value.get("price_amount") or 0.0),
+                        )
+                    )
             result.append(item)
 
-        result.sort(
-            key=lambda item: (item["minimal_price"] if item["minimal_price"] is not None else 10**18),
-        )
+        if sort == "best_value":
+            result.sort(
+                key=lambda item: (
+                    -(float(item.get("_best_value_score") or 0.0)),
+                    item["minimal_price"] if item["minimal_price"] is not None else 10**18,
+                ),
+            )
+        elif sort == "delivery":
+            def _store_min_delivery_days(store_item: dict) -> int:
+                days = [int(offer["delivery_days"]) for offer in store_item["offers"] if offer.get("delivery_days") is not None]
+                return min(days) if days else 999
+
+            result.sort(key=_store_min_delivery_days)
+        elif sort == "seller_rating":
+            result.sort(key=lambda item: item["offers_count"], reverse=True)
+        else:
+            result.sort(
+                key=lambda item: (item["minimal_price"] if item["minimal_price"] is not None else 10**18),
+            )
+        for item in result:
+            item.pop("_best_value_score", None)
         return result
 
     async def _load_store_specs_for_products(self, product_ids: list[int]) -> dict[int, dict[str, str]]:
@@ -2125,7 +2210,15 @@ class CatalogRepository:
             seller_ids=seller_ids,
             max_delivery_days=max_delivery_days,
         )
-        return [offer for group in offers_by_store for offer in group["offers"]]
+        flat = [offer for group in offers_by_store for offer in group["offers"]]
+        if sort == "best_value":
+            flat.sort(
+                key=lambda value: (
+                    -(float(value.get("best_value_score") or 0.0)),
+                    float(value.get("price_amount") or 0.0),
+                )
+            )
+        return flat
 
     async def get_product_compare_meta(self, product_id: int) -> dict:
         stmt = (

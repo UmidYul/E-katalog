@@ -16,6 +16,7 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 
 from app.platform.services.pipeline_offsets import ensure_offsets_table
+from app.platform.services.canonical_index import rebuild_canonical_key_index
 from app.core.config import settings
 from app.core.logging import logger
 from app.db.session import AsyncSessionLocal
@@ -1832,6 +1833,185 @@ def cleanup_auth_legacy_redis_keys(
 @celery_app.task(bind=True)
 def enqueue_cleanup_auth_legacy_redis_keys(self) -> str:
     return cleanup_auth_legacy_redis_keys.delay().id
+
+
+@celery_app.task(bind=True)
+def refresh_canonical_key_index(self, limit: int | None = None) -> dict[str, Any]:
+    return asyncio.run(_refresh_canonical_key_index(limit=limit))
+
+
+async def _refresh_canonical_key_index(*, limit: int | None = None) -> dict[str, Any]:
+    effective_limit = int(limit) if isinstance(limit, int) and limit > 0 else 100000
+    async with AsyncSessionLocal() as session:
+        result = await rebuild_canonical_key_index(session, limit=effective_limit)
+        await session.commit()
+    return {
+        "status": "ok",
+        "indexed": int(result.get("indexed", 0)),
+        "skipped": int(result.get("skipped", 0)),
+        "limit": effective_limit,
+        "at": datetime.now(UTC).isoformat(),
+    }
+
+
+@celery_app.task(bind=True)
+def enqueue_refresh_canonical_key_index(self) -> str:
+    return refresh_canonical_key_index.delay().id
+
+
+async def _refresh_offer_trust_scores(*, limit: int, freshness_hours: int, stock_window_days: int) -> dict[str, Any]:
+    if not settings.offer_trust_score_enabled:
+        return {"status": "disabled", "at": datetime.now(UTC).isoformat()}
+
+    effective_limit = max(1000, int(limit))
+    effective_freshness_hours = max(1, int(freshness_hours))
+    effective_stock_window_days = max(1, int(stock_window_days))
+
+    async with AsyncSessionLocal() as session:
+        updated = await session.execute(
+            text(
+                """
+                with base as (
+                    select
+                        o.id,
+                        o.price_amount::double precision as price_amount,
+                        o.in_stock,
+                        o.scraped_at,
+                        cp_median.median_price,
+                        s.trust_score::double precision as store_trust,
+                        se.rating::double precision as seller_rating,
+                        ph.stock_consistency
+                    from catalog_offers o
+                    left join catalog_stores s on s.id = o.store_id
+                    left join catalog_sellers se on se.id = o.seller_id
+                    left join (
+                        select
+                            canonical_product_id,
+                            percentile_cont(0.5) within group (order by price_amount::double precision) as median_price
+                        from catalog_offers
+                        where is_valid = true and in_stock = true
+                        group by canonical_product_id
+                    ) cp_median on cp_median.canonical_product_id = o.canonical_product_id
+                    left join (
+                        select
+                            ph.offer_id,
+                            avg(case when ph.in_stock then 1.0 else 0.0 end)::double precision as stock_consistency
+                        from catalog_price_history ph
+                        where ph.captured_at >= now() - make_interval(days => cast(:stock_window_days as integer))
+                        group by ph.offer_id
+                    ) ph on ph.offer_id = o.id
+                    where o.is_valid = true
+                    order by o.scraped_at desc, o.id desc
+                    limit :limit
+                ),
+                scored as (
+                    select
+                        id,
+                        greatest(0.0, least(1.0, 1.0 - (extract(epoch from (now() - scraped_at)) / 3600.0) / :freshness_hours)) as trust_freshness,
+                        greatest(0.0, least(1.0, coalesce(seller_rating / 5.0, store_trust, 0.55))) as trust_seller_rating,
+                        greatest(
+                            0.0,
+                            least(
+                                1.0,
+                                case
+                                    when median_price is null or median_price <= 0 then 0.65
+                                    else 1.0 - least(abs(price_amount - median_price) / median_price, 1.0)
+                                end
+                            )
+                        ) as trust_price_anomaly,
+                        greatest(0.0, least(1.0, coalesce(stock_consistency, case when in_stock then 0.9 else 0.35 end))) as trust_stock_consistency
+                    from base
+                ),
+                merged as (
+                    select
+                        id,
+                        trust_freshness,
+                        trust_seller_rating,
+                        trust_price_anomaly,
+                        trust_stock_consistency,
+                        greatest(
+                            0.0,
+                            least(
+                                1.0,
+                                0.35 * trust_freshness
+                                + 0.25 * trust_seller_rating
+                                + 0.25 * trust_price_anomaly
+                                + 0.15 * trust_stock_consistency
+                            )
+                        ) as trust_score
+                    from scored
+                )
+                update catalog_offers o
+                set
+                    trust_freshness = round(m.trust_freshness::numeric, 4),
+                    trust_seller_rating = round(m.trust_seller_rating::numeric, 4),
+                    trust_price_anomaly = round(m.trust_price_anomaly::numeric, 4),
+                    trust_stock_consistency = round(m.trust_stock_consistency::numeric, 4),
+                    trust_score = round(m.trust_score::numeric, 4)
+                from merged m
+                where o.id = m.id
+                """
+            ),
+            {
+                "limit": effective_limit,
+                "freshness_hours": float(effective_freshness_hours),
+                "stock_window_days": effective_stock_window_days,
+            },
+        )
+        await session.commit()
+
+    updated_rows = int(updated.rowcount or 0)
+    logger.info(
+        "offer_trust_scores_refreshed",
+        updated_rows=updated_rows,
+        limit=effective_limit,
+        freshness_hours=effective_freshness_hours,
+        stock_window_days=effective_stock_window_days,
+    )
+    return {
+        "status": "ok",
+        "updated_rows": updated_rows,
+        "limit": effective_limit,
+        "freshness_hours": effective_freshness_hours,
+        "stock_window_days": effective_stock_window_days,
+        "at": datetime.now(UTC).isoformat(),
+    }
+
+
+@celery_app.task(bind=True)
+def refresh_offer_trust_scores(
+    self,
+    limit: int | None = None,
+    freshness_hours: int | None = None,
+    stock_window_days: int | None = None,
+) -> dict[str, Any]:
+    effective_limit = (
+        int(limit)
+        if isinstance(limit, int) and limit > 0
+        else int(settings.offer_trust_score_refresh_limit)
+    )
+    effective_freshness_hours = (
+        int(freshness_hours)
+        if isinstance(freshness_hours, int) and freshness_hours > 0
+        else int(settings.offer_trust_score_freshness_hours)
+    )
+    effective_stock_window_days = (
+        int(stock_window_days)
+        if isinstance(stock_window_days, int) and stock_window_days > 0
+        else int(settings.offer_trust_score_stock_window_days)
+    )
+    return asyncio.run(
+        _refresh_offer_trust_scores(
+            limit=effective_limit,
+            freshness_hours=effective_freshness_hours,
+            stock_window_days=effective_stock_window_days,
+        )
+    )
+
+
+@celery_app.task(bind=True)
+def enqueue_refresh_offer_trust_scores(self) -> str:
+    return refresh_offer_trust_scores.delay().id
 
 
 @celery_app.task(bind=True)

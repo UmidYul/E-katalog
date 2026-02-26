@@ -77,3 +77,16 @@ def test_canonical_key_samsung_handles_cyrillic_model_letter() -> None:
 def test_canonical_key_samsung_handles_sm_internal_model_code() -> None:
     key = canonical_key(extract_attributes("Смартфон Samsung SM-А075F A07 (4/128) black"))
     assert key == "samsung|a07|128"
+
+
+def test_candidate_blocking_reduces_scan_scope() -> None:
+    engine = CanonicalMatchingEngine()
+    for idx in range(20):
+        engine.process_offer(OfferRecord(f"s{idx}", f"Samsung Galaxy A5{idx % 10} 8/256GB Black", "samsung"))
+    engine.process_offer(OfferRecord("a1", "Apple iPhone 13 128GB Midnight", "apple"))
+    total_canonicals = len(engine.canonicals)
+
+    decision = engine.process_offer(OfferRecord("a2", "Apple iPhone 13 128GB Black", "apple"))
+    assert decision.match_type == "exact"
+    assert engine.last_candidate_count > 0
+    assert engine.last_candidate_count < total_canonicals

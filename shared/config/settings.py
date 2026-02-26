@@ -56,6 +56,16 @@ class Settings(BaseSettings):
     quality_report_auto_deactivate_no_offer_limit: int = 500
     quality_report_alert_webhook_url: str | None = None
     quality_report_alert_min_status: Literal["warning", "critical"] = "critical"
+    offer_trust_score_enabled: bool = True
+    offer_trust_score_refresh_limit: int = 200000
+    offer_trust_score_freshness_hours: int = 72
+    offer_trust_score_stock_window_days: int = 14
+    normalization_rules_enabled: bool = True
+    normalization_rules_path: str = "services/worker/app/platform/services/normalization_rules.yaml"
+    normalization_rules_reload_seconds: int = 60
+    canonical_index_cache_enabled: bool = True
+    canonical_index_cache_ttl_seconds: int = 21600
+    canonical_index_cache_prefix: str = "canonidx"
     admin_alerts_enabled: bool = True
     admin_alert_quality_warn_ratio: float = 0.20
     admin_alert_quality_critical_ratio: float = 0.40
@@ -139,6 +149,9 @@ class Settings(BaseSettings):
     sentry_traces_sample_rate: float = 0.10
     sentry_profiles_sample_rate: float = 0.0
     sentry_send_default_pii: bool = False
+    slo_api_5xx_target_ratio: float = 0.005
+    slo_api_latency_p95_target_seconds: float = 0.5
+    slo_api_latency_p99_target_seconds: float = 1.0
     next_public_app_url: str = "http://localhost"
     oauth_totp_issuer: str = "ZincMarket"
     oauth_google_client_id: str | None = None

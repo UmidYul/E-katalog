@@ -42,6 +42,13 @@ export type ProductOffer = {
   currency: string;
   delivery_days?: number | null;
   scraped_at: string;
+  trust_score?: number | null;
+  trust_freshness?: number | null;
+  trust_seller_rating?: number | null;
+  trust_price_anomaly?: number | null;
+  trust_stock_consistency?: number | null;
+  trust_band?: "high" | "medium" | "low" | string | null;
+  best_value_score?: number | null;
   link: string;
 };
 

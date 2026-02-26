@@ -3,13 +3,14 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db_session, get_redis
+from app.api.idempotency import execute_idempotent_json
 from app.api.v1.routers.auth import _ensure_user_uuid, get_current_user
 from app.core.config import settings
 from app.repositories.catalog import CatalogRepository
@@ -301,14 +302,44 @@ async def get_my_profile(
 
 @router.patch("/me/profile", response_model=UserProfileOut)
 async def patch_my_profile(
+    request: Request,
     profile_patch: UserProfilePatch,
     current_user: dict = Depends(get_current_user),
     redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ):
     current_user_id = _current_user_internal_id(current_user)
-    if _auth_reads_from_postgres():
-        user = await _load_pg_user_or_404(db, user_id=current_user_id)
+    async def _op():
+        if _auth_reads_from_postgres():
+            user = await _load_pg_user_or_404(db, user_id=current_user_id)
+            updates: dict[str, str] = {}
+
+            if profile_patch.display_name is not None:
+                display_name = _clean_optional_text(profile_patch.display_name, max_length=120) or ""
+                if len(display_name) < 2:
+                    raise HTTPException(status_code=422, detail="display_name must be at least 2 characters")
+                updates["display_name"] = display_name
+                updates["full_name"] = display_name
+
+            for field, max_length in (("phone", 32), ("city", 120), ("telegram", 64), ("about", 600)):
+                incoming = getattr(profile_patch, field)
+                if incoming is None:
+                    continue
+                updates[field] = _clean_optional_text(incoming, max_length=max_length) or ""
+
+            if not updates:
+                return _build_profile_response_from_pg(user)
+
+            await db.execute(
+                update(AuthUser)
+                .where(AuthUser.id == current_user_id)
+                .values(**updates, updated_at=datetime.now(UTC))
+            )
+            await db.commit()
+            user = await _load_pg_user_or_404(db, user_id=current_user_id)
+            return _build_profile_response_from_pg(user)
+
+        payload = await _load_user_payload(redis, current_user_id)
         updates: dict[str, str] = {}
 
         if profile_patch.display_name is not None:
@@ -325,40 +356,14 @@ async def patch_my_profile(
             updates[field] = _clean_optional_text(incoming, max_length=max_length) or ""
 
         if not updates:
-            return _build_profile_response_from_pg(user)
+            return _build_profile_response(payload)
 
-        await db.execute(
-            update(AuthUser)
-            .where(AuthUser.id == current_user_id)
-            .values(**updates, updated_at=datetime.now(UTC))
-        )
-        await db.commit()
-        user = await _load_pg_user_or_404(db, user_id=current_user_id)
-        return _build_profile_response_from_pg(user)
-
-    payload = await _load_user_payload(redis, current_user_id)
-    updates: dict[str, str] = {}
-
-    if profile_patch.display_name is not None:
-        display_name = _clean_optional_text(profile_patch.display_name, max_length=120) or ""
-        if len(display_name) < 2:
-            raise HTTPException(status_code=422, detail="display_name must be at least 2 characters")
-        updates["display_name"] = display_name
-        updates["full_name"] = display_name
-
-    for field, max_length in (("phone", 32), ("city", 120), ("telegram", 64), ("about", 600)):
-        incoming = getattr(profile_patch, field)
-        if incoming is None:
-            continue
-        updates[field] = _clean_optional_text(incoming, max_length=max_length) or ""
-
-    if not updates:
+        updates["updated_at"] = datetime.now(UTC).isoformat()
+        await redis.hset(f"auth:user:{current_user_id}", mapping=updates)
+        payload = await _load_user_payload(redis, current_user_id)
         return _build_profile_response(payload)
 
-    updates["updated_at"] = datetime.now(UTC).isoformat()
-    await redis.hset(f"auth:user:{current_user_id}", mapping=updates)
-    payload = await _load_user_payload(redis, current_user_id)
-    return _build_profile_response(payload)
+    return await execute_idempotent_json(request, redis, scope=f"users.profile.patch:{current_user_id}", handler=_op)
 
 
 @router.get("/favorites", response_model=list[FavoriteItem])
@@ -387,28 +392,34 @@ async def list_favorites(
 
 @router.post("/favorites/{product_id}")
 async def toggle_favorite(
+    request: Request,
     product_id: str = Path(..., pattern=UUID_REF_PATTERN),
     current_user: dict = Depends(get_current_user),
     redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ):
-    key = f"auth:favorites:{_current_user_internal_id(current_user)}"
-    repo = CatalogRepository(db, cursor_secret=settings.cursor_secret)
-    product = await repo.get_product(product_id)
-    if product is None:
-        raise HTTPException(status_code=404, detail="product not found")
+    user_id = _current_user_internal_id(current_user)
 
-    canonical_product_id = str(product["id"])
-    legacy_product_id = str(product["legacy_id"])
+    async def _op():
+        key = f"auth:favorites:{user_id}"
+        repo = CatalogRepository(db, cursor_secret=settings.cursor_secret)
+        product = await repo.get_product(product_id)
+        if product is None:
+            raise HTTPException(status_code=404, detail="product not found")
 
-    exists = await redis.sismember(key, canonical_product_id)
-    exists_legacy = await redis.sismember(key, legacy_product_id)
-    if exists or exists_legacy:
-        await redis.srem(key, canonical_product_id, legacy_product_id, str(product_id))
-        return {"ok": True, "favorited": False}
+        canonical_product_id = str(product["id"])
+        legacy_product_id = str(product["legacy_id"])
 
-    await redis.sadd(key, canonical_product_id)
-    return {"ok": True, "favorited": True}
+        exists = await redis.sismember(key, canonical_product_id)
+        exists_legacy = await redis.sismember(key, legacy_product_id)
+        if exists or exists_legacy:
+            await redis.srem(key, canonical_product_id, legacy_product_id, str(product_id))
+            return {"ok": True, "favorited": False}
+
+        await redis.sadd(key, canonical_product_id)
+        return {"ok": True, "favorited": True}
+
+    return await execute_idempotent_json(request, redis, scope=f"users.favorites.toggle:{user_id}:{product_id}", handler=_op)
 
 
 @router.get("/me/notification-preferences", response_model=NotificationPreferences)
@@ -452,48 +463,52 @@ async def get_notification_preferences(
 
 @router.patch("/me/notification-preferences", response_model=NotificationPreferences)
 async def patch_notification_preferences(
+    request: Request,
     patch: NotificationPreferencesPatch,
     current_user: dict = Depends(get_current_user),
     redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ):
     user_id = _current_user_internal_id(current_user)
-    if _auth_reads_from_postgres():
-        user = await _load_pg_user_or_404(db, user_id=user_id)
-        decoded = user.notification_preferences if isinstance(user.notification_preferences, dict) else None
+    async def _op():
+        if _auth_reads_from_postgres():
+            user = await _load_pg_user_or_404(db, user_id=user_id)
+            decoded = user.notification_preferences if isinstance(user.notification_preferences, dict) else None
+            current_preferences = _normalize_notification_preferences(decoded)
+            next_preferences = _merge_notification_preferences(current_preferences, patch)
+            await db.execute(
+                update(AuthUser)
+                .where(AuthUser.id == user_id)
+                .values(
+                    notification_preferences=next_preferences.model_dump(),
+                    updated_at=datetime.now(UTC),
+                )
+            )
+            await db.commit()
+            return next_preferences
+
+        payload = await _load_user_payload(redis, user_id)
+        raw = str(payload.get(NOTIFICATION_PREFERENCES_FIELD, "")).strip()
+        decoded: dict | None = None
+        if raw:
+            try:
+                loaded = json.loads(raw)
+                if isinstance(loaded, dict):
+                    decoded = loaded
+            except json.JSONDecodeError:
+                decoded = None
         current_preferences = _normalize_notification_preferences(decoded)
         next_preferences = _merge_notification_preferences(current_preferences, patch)
-        await db.execute(
-            update(AuthUser)
-            .where(AuthUser.id == user_id)
-            .values(
-                notification_preferences=next_preferences.model_dump(),
-                updated_at=datetime.now(UTC),
-            )
+        await redis.hset(
+            f"auth:user:{user_id}",
+            mapping={
+                NOTIFICATION_PREFERENCES_FIELD: json.dumps(next_preferences.model_dump()),
+                "updated_at": datetime.now(UTC).isoformat(),
+            },
         )
-        await db.commit()
         return next_preferences
 
-    payload = await _load_user_payload(redis, user_id)
-    raw = str(payload.get(NOTIFICATION_PREFERENCES_FIELD, "")).strip()
-    decoded: dict | None = None
-    if raw:
-        try:
-            loaded = json.loads(raw)
-            if isinstance(loaded, dict):
-                decoded = loaded
-        except json.JSONDecodeError:
-            decoded = None
-    current_preferences = _normalize_notification_preferences(decoded)
-    next_preferences = _merge_notification_preferences(current_preferences, patch)
-    await redis.hset(
-        f"auth:user:{user_id}",
-        mapping={
-            NOTIFICATION_PREFERENCES_FIELD: json.dumps(next_preferences.model_dump()),
-            "updated_at": datetime.now(UTC).isoformat(),
-        },
-    )
-    return next_preferences
+    return await execute_idempotent_json(request, redis, scope=f"users.notifications.patch:{user_id}", handler=_op)
 
 
 @router.get("/me/alerts", response_model=list[ProductPriceAlertOut])
@@ -526,23 +541,29 @@ async def list_my_price_alerts(
 
 @router.delete("/me/alerts/{alert_id}")
 async def delete_my_price_alert(
+    request: Request,
     alert_id: str = Path(..., pattern=UUID_REF_PATTERN),
     current_user: dict = Depends(get_current_user),
+    redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ):
     user_uuid = _current_user_uuid(current_user)
-    stmt = (
-        select(CatalogPriceAlert)
-        .where(CatalogPriceAlert.user_uuid == user_uuid)
-        .where(CatalogPriceAlert.uuid == alert_id.lower())
-        .limit(1)
-    )
-    alert = (await db.execute(stmt)).scalar_one_or_none()
-    if alert is None:
-        raise HTTPException(status_code=404, detail="alert not found")
-    await db.delete(alert)
-    await db.commit()
-    return {"ok": True}
+
+    async def _op():
+        stmt = (
+            select(CatalogPriceAlert)
+            .where(CatalogPriceAlert.user_uuid == user_uuid)
+            .where(CatalogPriceAlert.uuid == alert_id.lower())
+            .limit(1)
+        )
+        alert = (await db.execute(stmt)).scalar_one_or_none()
+        if alert is None:
+            raise HTTPException(status_code=404, detail="alert not found")
+        await db.delete(alert)
+        await db.commit()
+        return {"ok": True}
+
+    return await execute_idempotent_json(request, redis, scope=f"users.alerts.delete:{user_uuid}:{alert_id.lower()}", handler=_op)
 
 
 @router.get("/me/recently-viewed", response_model=list[RecentlyViewedItem])
@@ -553,33 +574,44 @@ async def get_recently_viewed(current_user: dict = Depends(get_current_user), re
 
 @router.post("/me/recently-viewed", response_model=RecentlyViewedItem)
 async def push_recently_viewed(
+    request: Request,
     payload: RecentlyViewedUpsert,
     current_user: dict = Depends(get_current_user),
     redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ):
     user_id = _current_user_internal_id(current_user)
-    repo = CatalogRepository(db, cursor_secret=settings.cursor_secret)
-    product = await repo.get_product(payload.product_id)
-    if product is None:
-        raise HTTPException(status_code=404, detail="product not found")
+    async def _op():
+        repo = CatalogRepository(db, cursor_secret=settings.cursor_secret)
+        product = await repo.get_product(payload.product_id)
+        if product is None:
+            raise HTTPException(status_code=404, detail="product not found")
 
-    next_item = RecentlyViewedItem(
-        id=str(product["id"]),
-        slug=str(product.get("slug") or product["id"]),
-        title=str(product.get("title") or ""),
-        min_price=_extract_min_price(product),
-        viewed_at=datetime.now(UTC).isoformat(),
-    )
+        next_item = RecentlyViewedItem(
+            id=str(product["id"]),
+            slug=str(product.get("slug") or product["id"]),
+            title=str(product.get("title") or ""),
+            min_price=_extract_min_price(product),
+            viewed_at=datetime.now(UTC).isoformat(),
+        )
 
-    existing = await _load_recently_viewed(redis, user_id)
-    updated = [next_item, *[item for item in existing if item.id != next_item.id]]
-    await _persist_recently_viewed(redis, user_id, updated)
-    return next_item
+        existing = await _load_recently_viewed(redis, user_id)
+        updated = [next_item, *[item for item in existing if item.id != next_item.id]]
+        await _persist_recently_viewed(redis, user_id, updated)
+        return next_item
+
+    return await execute_idempotent_json(request, redis, scope=f"users.recently_viewed.push:{user_id}:{payload.product_id.lower()}", handler=_op)
 
 
 @router.delete("/me/recently-viewed")
-async def clear_recently_viewed(current_user: dict = Depends(get_current_user), redis: Redis = Depends(get_redis)):
+async def clear_recently_viewed(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+    redis: Redis = Depends(get_redis),
+):
     user_id = _current_user_internal_id(current_user)
-    await redis.delete(_recently_viewed_key(user_id))
-    return {"ok": True}
+    async def _op():
+        await redis.delete(_recently_viewed_key(user_id))
+        return {"ok": True}
+
+    return await execute_idempotent_json(request, redis, scope=f"users.recently_viewed.clear:{user_id}", handler=_op)

@@ -77,8 +77,11 @@ export const catalogApi = {
     const { data } = await apiClient.get<ProductDetail>(`/products/${productId}`);
     return data;
   },
-  async getOffers(productId: string): Promise<ProductOffer[]> {
-    const { data } = await apiClient.get<ProductOffer[]>(`/products/${productId}/offers`);
+  async getOffers(
+    productId: string,
+    query?: { sort?: "best_value" | "price" | "seller_rating" | "delivery"; in_stock?: boolean; limit?: number },
+  ): Promise<ProductOffer[]> {
+    const { data } = await apiClient.get<ProductOffer[]>(`/products/${productId}/offers`, { params: query });
     return data;
   },
   async getProductPriceHistory(productId: string, days: number = 30): Promise<PriceHistoryPoint[]> {
@@ -107,10 +110,11 @@ export const catalogApi = {
     });
     return data;
   },
-  async createCompareShare(productIds: string[], ttlDays: number = 30): Promise<CompareShareCreateResponse> {
+  async createCompareShare(productIds: string[], ttlDays: number = 30, telemetrySource?: string): Promise<CompareShareCreateResponse> {
     const { data } = await apiClient.post<CompareShareCreateResponse>("/compare/share", {
       product_ids: productIds,
-      ttl_days: ttlDays
+      ttl_days: ttlDays,
+      telemetry_source: telemetrySource
     });
     return data;
   },
@@ -273,8 +277,8 @@ export const userApi = {
 };
 
 export const productFeedbackApi = {
-  listReviews: async (productId: string): Promise<ProductReview[]> => {
-    const { data } = await apiClient.get<ProductReview[]>(`/products/${productId}/reviews`);
+  listReviews: async (productId: string, query?: { limit?: number; offset?: number }): Promise<ProductReview[]> => {
+    const { data } = await apiClient.get<ProductReview[]>(`/products/${productId}/reviews`, { params: query });
     return data;
   },
   createReview: async (
@@ -284,8 +288,8 @@ export const productFeedbackApi = {
     const { data } = await apiClient.post<ProductReview>(`/products/${productId}/reviews`, payload);
     return data;
   },
-  listQuestions: async (productId: string): Promise<ProductQuestion[]> => {
-    const { data } = await apiClient.get<ProductQuestion[]>(`/products/${productId}/questions`);
+  listQuestions: async (productId: string, query?: { limit?: number; offset?: number }): Promise<ProductQuestion[]> => {
+    const { data } = await apiClient.get<ProductQuestion[]>(`/products/${productId}/questions`, { params: query });
     return data;
   },
   createQuestion: async (

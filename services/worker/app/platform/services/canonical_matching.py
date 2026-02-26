@@ -404,7 +404,9 @@ class CanonicalMatchingEngine:
         self._sequence = 0
         self.canonicals: dict[str, CanonicalProduct] = {}
         self.key_index: dict[str, str] = {}
+        self.bucket_index: dict[tuple[str, str, str], set[str]] = {}
         self.audit_log: list[AuditEvent] = []
+        self.last_candidate_count: int = 0
 
     @staticmethod
     def _is_model_compatible(incoming: ExtractedAttributes, candidate: ExtractedAttributes) -> bool:
@@ -466,7 +468,32 @@ class CanonicalMatchingEngine:
         if not self.dry_run:
             self.canonicals[canonical_id] = canonical
             self.key_index[index_key] = canonical_id
+            self._add_canonical_to_buckets(canonical)
         return canonical
+
+    @staticmethod
+    def _bucket_keys_for_attrs(attrs: ExtractedAttributes) -> tuple[tuple[str, str, str], ...]:
+        brand = attrs.brand or "unknown"
+        model = attrs.model or "unknown"
+        storage = attrs.storage or "unknown"
+        return (
+            (brand, model, storage),
+            (brand, model, "*"),
+            (brand, "*", "*"),
+            ("*", "*", "*"),
+        )
+
+    def _add_canonical_to_buckets(self, canonical: CanonicalProduct) -> None:
+        for bucket_key in self._bucket_keys_for_attrs(canonical.attributes):
+            self.bucket_index.setdefault(bucket_key, set()).add(canonical.canonical_id)
+
+    def _candidate_ids(self, attrs: ExtractedAttributes) -> set[str]:
+        candidate_ids: set[str] = set()
+        for bucket_key in self._bucket_keys_for_attrs(attrs):
+            candidate_ids.update(self.bucket_index.get(bucket_key, set()))
+        if not candidate_ids:
+            candidate_ids.update(self.bucket_index.get(("*", "*", "*"), set()))
+        return candidate_ids
 
     def _log(
         self,
@@ -504,7 +531,15 @@ class CanonicalMatchingEngine:
         best_canonical: CanonicalProduct | None = None
         best_fuzzy = 0.0
         best_embedding = 0.0
-        for canonical in self.canonicals.values():
+        candidate_ids = self._candidate_ids(attrs)
+        self.last_candidate_count = len(candidate_ids)
+        candidates: list[CanonicalProduct]
+        if candidate_ids:
+            candidates = [self.canonicals[item_id] for item_id in candidate_ids if item_id in self.canonicals]
+        else:
+            candidates = list(self.canonicals.values())
+
+        for canonical in candidates:
             if not canonical.is_active:
                 continue
             if not self._is_merge_compatible(attrs, canonical.attributes):

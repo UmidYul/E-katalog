@@ -520,6 +520,8 @@ async def _resolve_pg_user_id(redis: Redis, db: AsyncSession | None, *, user_id:
     existing = await pg_load_user_by_id(db, user_id)
     if existing is not None:
         return int(existing["id"])
+    if _auth_reads_from_postgres():
+        return None
     synced = await _sync_user_from_redis(redis, db, user_id=user_id)
     if synced is not None:
         return int(synced)
@@ -561,6 +563,7 @@ async def _resolve_token_payload(
         payload = await pg_resolve_session_token(db, raw_token=token_value, token_type=token_type)
         if payload is not None:
             return int(payload["user_id"]), str(payload["session_id"])
+        return None, None
     return _decode_token_payload(await redis.get(f"auth:{token_type}:{token_value}"))
 
 
@@ -618,9 +621,7 @@ async def _ensure_user_uuid(redis: Redis, *, user_key: str, payload: dict[str, s
 
 async def _load_user(redis: Redis, user_id: int, db: AsyncSession | None = None) -> dict | None:
     if db is not None and _auth_reads_from_postgres():
-        pg_user = await pg_load_user_by_id(db, user_id)
-        if pg_user is not None:
-            return pg_user
+        return await pg_load_user_by_id(db, user_id)
 
     user_key = f"auth:user:{user_id}"
     payload = await redis.hgetall(user_key)
@@ -654,9 +655,7 @@ async def _load_user(redis: Redis, user_id: int, db: AsyncSession | None = None)
 async def _get_user_by_email(redis: Redis, email: str, db: AsyncSession | None = None) -> dict | None:
     normalized_email = email.lower().strip()
     if db is not None and _auth_reads_from_postgres():
-        pg_user = await pg_load_user_by_email(db, normalized_email)
-        if pg_user is not None:
-            return pg_user
+        return await pg_load_user_by_email(db, normalized_email)
 
     user_id = await redis.get(f"auth:user:email:{normalized_email}")
     if not user_id:
@@ -785,7 +784,7 @@ async def _create_session(
         )
         await redis.sadd(_user_sessions_key(user_id), session_id)
     if db is not None and _auth_writes_to_postgres():
-        pg_user_id = await _resolve_pg_user_id(redis, db, user_id=user_id)
+        pg_user_id = user_id if _auth_reads_from_postgres() else await _resolve_pg_user_id(redis, db, user_id=user_id)
         if pg_user_id is not None:
             await pg_upsert_session(
                 db,
@@ -846,11 +845,18 @@ async def _set_auth_cookies(
     rotate_refresh_token: str | None = None,
 ) -> str:
     if session_id is not None:
-        payload = await redis.hgetall(_session_key(session_id))
-        if not payload or str(payload.get("user_id", "")) != str(user_id):
-            session_id = await _create_session(redis, user_id=user_id, request=request, db=db)
+        if db is not None and _auth_reads_from_postgres():
+            payload = await pg_get_session(db, session_id=session_id)
+            if not payload or str(payload.get("user_id", "")) != str(user_id):
+                session_id = await _create_session(redis, user_id=user_id, request=request, db=db)
+            else:
+                await _touch_session(redis, session_id=session_id, request=request, db=db)
         else:
-            await _touch_session(redis, session_id=session_id, request=request, db=db)
+            payload = await redis.hgetall(_session_key(session_id))
+            if not payload or str(payload.get("user_id", "")) != str(user_id):
+                session_id = await _create_session(redis, user_id=user_id, request=request, db=db)
+            else:
+                await _touch_session(redis, session_id=session_id, request=request, db=db)
     else:
         session_id = await _create_session(redis, user_id=user_id, request=request, db=db)
 
@@ -878,7 +884,7 @@ async def _set_auth_cookies(
             pipe.srem(_session_refresh_key(session_id), rotate_refresh_token)
         await pipe.execute()
     if db is not None and _auth_writes_to_postgres():
-        pg_user_id = await _resolve_pg_user_id(redis, db, user_id=user_id)
+        pg_user_id = user_id if _auth_reads_from_postgres() else await _resolve_pg_user_id(redis, db, user_id=user_id)
         if pg_user_id is not None:
             now_dt = datetime.now(UTC)
             await pg_upsert_session_token(
@@ -943,14 +949,19 @@ async def _resolve_user_from_access(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="user not found")
 
     if session_id:
-        session_payload = await redis.hgetall(_session_key(session_id))
-        if not session_payload or str(session_payload.get("user_id", "")) != str(user_id):
-            if db is None or not _auth_writes_to_postgres():
-                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="session not found")
-            pg_user_id = await _resolve_pg_user_id(redis, db, user_id=user_id)
+        if db is not None and _auth_reads_from_postgres():
             pg_payload = await pg_get_session(db, session_id=session_id)
-            if pg_user_id is None or not pg_payload or str(pg_payload.get("user_id", "")) != str(pg_user_id):
+            if not pg_payload or str(pg_payload.get("user_id", "")) != str(user_id):
                 raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="session not found")
+        else:
+            session_payload = await redis.hgetall(_session_key(session_id))
+            if not session_payload or str(session_payload.get("user_id", "")) != str(user_id):
+                if db is None or not _auth_writes_to_postgres():
+                    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="session not found")
+                pg_user_id = await _resolve_pg_user_id(redis, db, user_id=user_id)
+                pg_payload = await pg_get_session(db, session_id=session_id)
+                if pg_user_id is None or not pg_payload or str(pg_payload.get("user_id", "")) != str(pg_user_id):
+                    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="session not found")
         if touch:
             await _touch_session(redis, session_id=session_id, request=request, db=db)
 
@@ -991,25 +1002,26 @@ async def _revoke_session(
     db: AsyncSession | None = None,
 ) -> bool:
     revoked_redis = False
-    payload = await redis.hgetall(_session_key(session_id))
-    if payload and str(payload.get("user_id", "")) == str(user_id):
-        access_tokens = await redis.smembers(_session_access_key(session_id))
-        refresh_tokens = await redis.smembers(_session_refresh_key(session_id))
-        pipe = redis.pipeline()
-        for token in access_tokens:
-            pipe.delete(f"auth:access:{token}")
-        for token in refresh_tokens:
-            pipe.delete(f"auth:refresh:{token}")
-        pipe.delete(_session_key(session_id))
-        pipe.delete(_session_access_key(session_id))
-        pipe.delete(_session_refresh_key(session_id))
-        pipe.srem(_user_sessions_key(user_id), session_id)
-        await pipe.execute()
-        revoked_redis = True
+    if not _auth_reads_from_postgres():
+        payload = await redis.hgetall(_session_key(session_id))
+        if payload and str(payload.get("user_id", "")) == str(user_id):
+            access_tokens = await redis.smembers(_session_access_key(session_id))
+            refresh_tokens = await redis.smembers(_session_refresh_key(session_id))
+            pipe = redis.pipeline()
+            for token in access_tokens:
+                pipe.delete(f"auth:access:{token}")
+            for token in refresh_tokens:
+                pipe.delete(f"auth:refresh:{token}")
+            pipe.delete(_session_key(session_id))
+            pipe.delete(_session_access_key(session_id))
+            pipe.delete(_session_refresh_key(session_id))
+            pipe.srem(_user_sessions_key(user_id), session_id)
+            await pipe.execute()
+            revoked_redis = True
 
     revoked_postgres = False
     if db is not None and _auth_writes_to_postgres():
-        pg_user_id = await _resolve_pg_user_id(redis, db, user_id=user_id)
+        pg_user_id = user_id if _auth_reads_from_postgres() else await _resolve_pg_user_id(redis, db, user_id=user_id)
         if pg_user_id is not None:
             revoked_postgres = await pg_revoke_session(db, user_id=pg_user_id, session_id=session_id)
             await db.commit()
@@ -1026,14 +1038,15 @@ async def _revoke_all_sessions_except(
 ) -> int:
     revoked = 0
     processed: set[str] = set()
-    for session_id in await redis.smembers(_user_sessions_key(user_id)):
-        if keep_session_id and session_id == keep_session_id:
-            continue
-        if await _revoke_session(redis, user_id=user_id, session_id=session_id, db=db):
-            revoked += 1
-        processed.add(session_id)
+    if not _auth_reads_from_postgres():
+        for session_id in await redis.smembers(_user_sessions_key(user_id)):
+            if keep_session_id and session_id == keep_session_id:
+                continue
+            if await _revoke_session(redis, user_id=user_id, session_id=session_id, db=db):
+                revoked += 1
+            processed.add(session_id)
     if db is not None and _auth_writes_to_postgres():
-        pg_user_id = await _resolve_pg_user_id(redis, db, user_id=user_id)
+        pg_user_id = user_id if _auth_reads_from_postgres() else await _resolve_pg_user_id(redis, db, user_id=user_id)
         if pg_user_id is not None:
             for payload in await pg_list_active_sessions(db, user_id=pg_user_id):
                 session_id = str(payload.get("id") or "").strip()
@@ -1229,12 +1242,17 @@ async def refresh(
     if user_id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid refresh token")
     if session_id:
-        payload = await redis.hgetall(_session_key(session_id))
-        if not payload or str(payload.get("user_id", "")) != str(user_id):
-            pg_user_id = await _resolve_pg_user_id(redis, db, user_id=user_id)
-            pg_payload = await pg_get_session(db, session_id=session_id) if pg_user_id is not None else None
-            if not pg_payload or str(pg_payload.get("user_id", "")) != str(pg_user_id):
+        if _auth_reads_from_postgres():
+            pg_payload = await pg_get_session(db, session_id=session_id)
+            if not pg_payload or str(pg_payload.get("user_id", "")) != str(user_id):
                 raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="session not found")
+        else:
+            payload = await redis.hgetall(_session_key(session_id))
+            if not payload or str(payload.get("user_id", "")) != str(user_id):
+                pg_user_id = await _resolve_pg_user_id(redis, db, user_id=user_id)
+                pg_payload = await pg_get_session(db, session_id=session_id) if pg_user_id is not None else None
+                if not pg_payload or str(pg_payload.get("user_id", "")) != str(pg_user_id):
+                    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="session not found")
 
     if await _load_user(redis, user_id, db) is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="user not found")
@@ -1258,34 +1276,39 @@ async def logout(
     redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ):
-    access = request.cookies.get(ACCESS_COOKIE)
-    refresh_token = request.cookies.get(REFRESH_COOKIE)
-    user_id: int | None = None
-    session_id: str | None = None
+    async def _op():
+        access = request.cookies.get(ACCESS_COOKIE)
+        refresh_token = request.cookies.get(REFRESH_COOKIE)
+        user_id: int | None = None
+        session_id: str | None = None
 
-    if access:
-        user_id, session_id = await _resolve_token_payload(redis, db, raw_token=access, token_type="access")
-    if refresh_token and user_id is None:
-        user_id, session_id = await _resolve_token_payload(redis, db, raw_token=refresh_token, token_type="refresh")
-
-    if user_id is not None and session_id:
-        await _revoke_session(redis, user_id=user_id, session_id=session_id, db=db)
-    else:
-        pipe = redis.pipeline()
         if access:
-            pipe.delete(f"auth:access:{access}")
-        if refresh_token:
-            pipe.delete(f"auth:refresh:{refresh_token}")
-        await pipe.execute()
-        if _auth_writes_to_postgres():
-            if access:
-                await pg_revoke_session_token(db, raw_token=access, token_type="access")
-            if refresh_token:
-                await pg_revoke_session_token(db, raw_token=refresh_token, token_type="refresh")
-            await db.commit()
+            user_id, session_id = await _resolve_token_payload(redis, db, raw_token=access, token_type="access")
+        if refresh_token and user_id is None:
+            user_id, session_id = await _resolve_token_payload(redis, db, raw_token=refresh_token, token_type="refresh")
 
+        if user_id is not None and session_id:
+            await _revoke_session(redis, user_id=user_id, session_id=session_id, db=db)
+        else:
+            if not _auth_reads_from_postgres():
+                pipe = redis.pipeline()
+                if access:
+                    pipe.delete(f"auth:access:{access}")
+                if refresh_token:
+                    pipe.delete(f"auth:refresh:{refresh_token}")
+                await pipe.execute()
+            if _auth_writes_to_postgres():
+                if access:
+                    await pg_revoke_session_token(db, raw_token=access, token_type="access")
+                if refresh_token:
+                    await pg_revoke_session_token(db, raw_token=refresh_token, token_type="refresh")
+                await db.commit()
+
+        return {"ok": True}
+
+    result = await execute_idempotent_json(request, redis, scope="auth.logout", handler=_op)
     _clear_auth_cookies(response)
-    return {"ok": True}
+    return result
 
 
 @router.get("/me", response_model=AuthUserResponse)
@@ -1354,12 +1377,7 @@ async def request_password_reset(
         ttl_seconds = max(60, int(settings.auth_password_reset_ttl_seconds))
 
         if user is not None:
-            redis_user_id = int(user["id"])
-            pg_user_id = await _resolve_pg_user_id(redis, db, user_id=redis_user_id)
-            if pg_user_id is None:
-                synced_id = await _sync_user_from_redis(redis, db, user_id=redis_user_id)
-                if synced_id is not None:
-                    pg_user_id = int(synced_id)
+            pg_user_id = int(user["id"]) if _auth_reads_from_postgres() else await _resolve_pg_user_id(redis, db, user_id=int(user["id"]))
             if pg_user_id is not None:
                 issued_token = _issue_token()
                 await pg_create_password_reset_token(
@@ -1534,25 +1552,23 @@ async def list_sessions(
     stale: list[str] = []
 
     if _auth_reads_from_postgres() and _auth_writes_to_postgres():
-        pg_user_id = await _resolve_pg_user_id(redis, db, user_id=user_id)
-        if pg_user_id is not None:
-            for payload in await pg_list_active_sessions(db, user_id=pg_user_id):
-                session_value = str(payload.get("id") or "")
-                created_at = str(payload.get("created_at") or _now_iso())
-                last_seen_at = str(payload.get("last_seen_at") or created_at)
-                sessions.append(
-                    SessionInfo(
-                        id=session_value,
-                        device=str(payload.get("device") or "unknown device"),
-                        ip_address=str(payload.get("ip_address") or "unknown"),
-                        location=str(payload.get("location") or "unknown"),
-                        created_at=created_at,
-                        last_seen_at=last_seen_at,
-                        is_current=bool(current_session_id and session_value == current_session_id),
-                    )
+        for payload in await pg_list_active_sessions(db, user_id=user_id):
+            session_value = str(payload.get("id") or "")
+            created_at = str(payload.get("created_at") or _now_iso())
+            last_seen_at = str(payload.get("last_seen_at") or created_at)
+            sessions.append(
+                SessionInfo(
+                    id=session_value,
+                    device=str(payload.get("device") or "unknown device"),
+                    ip_address=str(payload.get("ip_address") or "unknown"),
+                    location=str(payload.get("location") or "unknown"),
+                    created_at=created_at,
+                    last_seen_at=last_seen_at,
+                    is_current=bool(current_session_id and session_value == current_session_id),
                 )
-            sessions.sort(key=lambda item: (item.last_seen_at, item.created_at, item.id), reverse=True)
-            return sessions
+            )
+        sessions.sort(key=lambda item: (item.last_seen_at, item.created_at, item.id), reverse=True)
+        return sessions
 
     for session_id in await redis.smembers(_user_sessions_key(user_id)):
         payload = await redis.hgetall(_session_key(session_id))
@@ -1610,11 +1626,21 @@ async def revoke_session(
     current = await _resolve_user_from_access(request, redis, touch=True, db=db)
     user_id = int(current["internal_id"])
     normalized = _normalize_uuid(session_id) or session_id
-    if not await _revoke_session(redis, user_id=user_id, session_id=normalized, db=db):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
+
+    async def _op():
+        if not await _revoke_session(redis, user_id=user_id, session_id=normalized, db=db):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
+        return {"ok": True}
+
+    result = await execute_idempotent_json(
+        request,
+        redis,
+        scope=f"auth.sessions.revoke:{user_id}:{normalized}",
+        handler=_op,
+    )
     if current.get("session_id") == normalized:
         _clear_auth_cookies(response)
-    return {"ok": True}
+    return result
 
 
 @router.delete("/sessions", response_model=SessionBulkRevokeResponse)
@@ -1624,13 +1650,18 @@ async def revoke_other_sessions(
     db: AsyncSession = Depends(get_db_session),
 ):
     current = await _resolve_user_from_access(request, redis, touch=True, db=db)
-    revoked = await _revoke_all_sessions_except(
-        redis,
-        user_id=int(current["internal_id"]),
-        keep_session_id=current.get("session_id"),
-        db=db,
-    )
-    return SessionBulkRevokeResponse(revoked=revoked)
+    user_id = int(current["internal_id"])
+
+    async def _op():
+        revoked = await _revoke_all_sessions_except(
+            redis,
+            user_id=user_id,
+            keep_session_id=current.get("session_id"),
+            db=db,
+        )
+        return SessionBulkRevokeResponse(revoked=revoked)
+
+    return await execute_idempotent_json(request, redis, scope=f"auth.sessions.revoke_others:{user_id}", handler=_op)
 
 
 @router.post("/2fa/setup", response_model=TwoFactorSetupResponse)
@@ -1750,21 +1781,26 @@ async def disable_twofa(
     db: AsyncSession = Depends(get_db_session),
 ):
     current = await _resolve_user_from_access(request, redis, touch=True, db=db)
-    await _patch_auth_user_fields(
-        redis,
-        db,
-        user_id=int(current["internal_id"]),
-        fields={
-            "twofa_enabled": "0",
-            "twofa_secret": "",
-            "twofa_recovery_codes_hash": "",
-            "twofa_pending_secret": "",
-            "twofa_pending_recovery_codes_hash": "",
-            "updated_at": _now_iso(),
-        },
-    )
-    await db.commit()
-    return TwoFactorStatusResponse(enabled=False)
+    user_id = int(current["internal_id"])
+
+    async def _op():
+        await _patch_auth_user_fields(
+            redis,
+            db,
+            user_id=user_id,
+            fields={
+                "twofa_enabled": "0",
+                "twofa_secret": "",
+                "twofa_recovery_codes_hash": "",
+                "twofa_pending_secret": "",
+                "twofa_pending_recovery_codes_hash": "",
+                "updated_at": _now_iso(),
+            },
+        )
+        await db.commit()
+        return TwoFactorStatusResponse(enabled=False)
+
+    return await execute_idempotent_json(request, redis, scope=f"auth.2fa.disable:{user_id}", handler=_op)
 
 
 def _normalize_oauth_provider(provider: str) -> str:
@@ -1909,7 +1945,7 @@ async def _link_oauth_identity(
     db: AsyncSession | None = None,
 ) -> None:
     if db is not None and _auth_writes_to_postgres():
-        pg_user_id = await _resolve_pg_user_id(redis, db, user_id=user_id)
+        pg_user_id = user_id if _auth_reads_from_postgres() else await _resolve_pg_user_id(redis, db, user_id=user_id)
         if pg_user_id is not None:
             await pg_upsert_oauth_identity(
                 db,

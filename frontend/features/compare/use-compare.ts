@@ -38,8 +38,8 @@ export const useResolveCompareShare = (token: string | null) =>
 export const useCreateCompareShare = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (payload: { productIds: string[]; ttlDays?: number }) =>
-      catalogApi.createCompareShare(payload.productIds, payload.ttlDays ?? 30),
+    mutationFn: (payload: { productIds: string[]; ttlDays?: number; source?: string }) =>
+      catalogApi.createCompareShare(payload.productIds, payload.ttlDays ?? 30, payload.source),
     onSuccess: async (_, payload) => {
       await queryClient.invalidateQueries({ queryKey: compareKeys.matrix(payload.productIds) });
     }

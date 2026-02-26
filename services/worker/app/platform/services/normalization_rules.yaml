@@ -1,0 +1,79 @@
+noise_patterns:
+  - "\\bsmartfon\\b"
+  - "\\bsmartphone\\b"
+  - "\\bсмартфон\\w*\\b"
+  - "\\bв\\s+ташкенте\\b"
+  - "\\btsena\\b"
+  - "\\bcena\\b"
+  - "\\bцена\\b"
+
+colors:
+  - "deep blue"
+  - "cosmic orange"
+  - "mist blue"
+  - "lavender"
+  - "silver"
+  - "black"
+  - "white"
+  - "blue"
+  - "green"
+  - "pink"
+  - "yellow"
+  - "sage"
+  - "midnight"
+  - "graphite"
+
+brand_aliases:
+  apple: ["apple", "iphone"]
+  samsung: ["samsung", "galaxy"]
+  xiaomi: ["xiaomi", "redmi", "poco"]
+  honor: ["honor"]
+  huawei: ["huawei"]
+  google: ["google", "pixel"]
+  oneplus: ["oneplus", "one plus"]
+  nothing: ["nothing"]
+
+spec_key_aliases:
+  storage: "storage_gb"
+  storage gb: "storage_gb"
+  built in memory: "storage_gb"
+  built_in_memory: "storage_gb"
+  "встроенная память": "storage_gb"
+  ram: "ram_gb"
+  ram gb: "ram_gb"
+  "оперативная память": "ram_gb"
+  battery: "battery_mah"
+  battery mah: "battery_mah"
+  "емкость аккумулятора": "battery_mah"
+  camera: "camera_mp"
+  camera mp: "camera_mp"
+  main camera: "main_camera_mp"
+  front camera: "front_camera_mp"
+  display: "display_inches"
+  display inches: "display_inches"
+  screen inches: "display_inches"
+  "диагональ экрана": "display_inches"
+  cpu frequency: "cpu_frequency_mhz"
+  cpu_frequency: "cpu_frequency_mhz"
+  "частота процессора": "cpu_frequency_mhz"
+  refresh rate: "refresh_rate_hz"
+  refresh rate hz: "refresh_rate_hz"
+  wifi: "wifi_standard"
+  wi fi: "wifi_standard"
+  bluetooth: "bluetooth_standard"
+  os: "os"
+  operating system: "os"
+  "операционная система": "os"
+
+placeholder_spec_values:
+  - ""
+  - "-"
+  - "--"
+  - "—"
+  - "n/a"
+  - "na"
+  - "none"
+  - "null"
+  - "unknown"
+  - "not specified"
+  - "не указано"

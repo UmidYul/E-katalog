@@ -11,6 +11,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db_session, get_redis
+from app.api.idempotency import execute_idempotent_json
 from app.api.rbac import ADMIN_ROLE, STAFF_ROLES, require_roles
 from app.api.v1.routers.auth import get_current_user
 from app.core.config import settings
@@ -566,43 +567,46 @@ async def create_product_review(
     db: AsyncSession = Depends(get_db_session),
 ):
     redis = get_redis()
-    await enforce_rate_limit(request, redis, bucket="product-feedback-write", limit=60)
-    product_uuid, product_legacy_id = await _ensure_product_exists(db, product_id)
-    author = _clean_required(payload.author, field="author", min_len=2, max_len=120)
-    comment = _clean_required(payload.comment, field="comment", min_len=10, max_len=3000)
-    pros = _clean_optional(payload.pros, max_len=500) or ""
-    cons = _clean_optional(payload.cons, max_len=500) or ""
+    async def _op():
+        await enforce_rate_limit(request, redis, bucket="product-feedback-write", limit=60)
+        product_uuid, product_legacy_id = await _ensure_product_exists(db, product_id)
+        author = _clean_required(payload.author, field="author", min_len=2, max_len=120)
+        comment = _clean_required(payload.comment, field="comment", min_len=10, max_len=3000)
+        pros = _clean_optional(payload.pros, max_len=500) or ""
+        cons = _clean_optional(payload.cons, max_len=500) or ""
 
-    await _enforce_review_antispam(
-        redis,
-        request=request,
-        product_legacy_id=product_legacy_id,
-        author=author,
-        comment=comment,
-    )
+        await _enforce_review_antispam(
+            redis,
+            request=request,
+            product_legacy_id=product_legacy_id,
+            author=author,
+            comment=comment,
+        )
 
-    review_id = f"rev_{await redis.incr('feedback:review:id')}"
-    now = _now_iso()
-    mapping = {
-        "id": review_id,
-        "product_id": product_uuid,
-        "product_legacy_id": str(product_legacy_id),
-        "author": author,
-        "rating": str(int(payload.rating)),
-        "comment": comment,
-        "pros": pros,
-        "cons": cons,
-        "is_verified_purchase": "false",
-        "helpful_votes": "0",
-        "not_helpful_votes": "0",
-        "report_count": "0",
-        "status": "pending",
-        "created_at": now,
-        "updated_at": now,
-    }
-    await redis.hset(_review_key(review_id), mapping=mapping)
-    await redis.zadd(_reviews_index_key(product_legacy_id), {review_id: time()})
-    return _parse_review(mapping)
+        review_id = f"rev_{await redis.incr('feedback:review:id')}"
+        now = _now_iso()
+        mapping = {
+            "id": review_id,
+            "product_id": product_uuid,
+            "product_legacy_id": str(product_legacy_id),
+            "author": author,
+            "rating": str(int(payload.rating)),
+            "comment": comment,
+            "pros": pros,
+            "cons": cons,
+            "is_verified_purchase": "false",
+            "helpful_votes": "0",
+            "not_helpful_votes": "0",
+            "report_count": "0",
+            "status": "pending",
+            "created_at": now,
+            "updated_at": now,
+        }
+        await redis.hset(_review_key(review_id), mapping=mapping)
+        await redis.zadd(_reviews_index_key(product_legacy_id), {review_id: time()})
+        return _parse_review(mapping)
+
+    return await execute_idempotent_json(request, redis, scope=f"product_feedback.review.create:{product_id}", handler=_op)
 
 
 @router.get("/{product_id}/questions", response_model=list[ProductQuestionOut])
@@ -639,25 +643,28 @@ async def create_product_question(
     db: AsyncSession = Depends(get_db_session),
 ):
     redis = get_redis()
-    await enforce_rate_limit(request, redis, bucket="product-feedback-write", limit=60)
-    product_uuid, product_legacy_id = await _ensure_product_exists(db, product_id)
+    async def _op():
+        await enforce_rate_limit(request, redis, bucket="product-feedback-write", limit=60)
+        product_uuid, product_legacy_id = await _ensure_product_exists(db, product_id)
 
-    question_id = f"q_{await redis.incr('feedback:question:id')}"
-    now = _now_iso()
-    mapping = {
-        "id": question_id,
-        "product_id": product_uuid,
-        "product_legacy_id": str(product_legacy_id),
-        "author": _clean_required(payload.author, field="author", min_len=2, max_len=120),
-        "question": _clean_required(payload.question, field="question", min_len=8, max_len=2000),
-        "report_count": "0",
-        "status": "pending",
-        "created_at": now,
-        "updated_at": now,
-    }
-    await redis.hset(_question_key(question_id), mapping=mapping)
-    await redis.zadd(_questions_index_key(product_legacy_id), {question_id: time()})
-    return _parse_question(mapping, [])
+        question_id = f"q_{await redis.incr('feedback:question:id')}"
+        now = _now_iso()
+        mapping = {
+            "id": question_id,
+            "product_id": product_uuid,
+            "product_legacy_id": str(product_legacy_id),
+            "author": _clean_required(payload.author, field="author", min_len=2, max_len=120),
+            "question": _clean_required(payload.question, field="question", min_len=8, max_len=2000),
+            "report_count": "0",
+            "status": "pending",
+            "created_at": now,
+            "updated_at": now,
+        }
+        await redis.hset(_question_key(question_id), mapping=mapping)
+        await redis.zadd(_questions_index_key(product_legacy_id), {question_id: time()})
+        return _parse_question(mapping, [])
+
+    return await execute_idempotent_json(request, redis, scope=f"product_feedback.question.create:{product_id}", handler=_op)
 
 
 @router.post("/questions/{question_id}/answers", response_model=ProductAnswerOut)
@@ -668,36 +675,40 @@ async def create_question_answer(
     current_user: dict = Depends(require_roles(*STAFF_ROLES, detail="staff privileges required")),
 ):
     redis = get_redis()
-    await enforce_rate_limit(request, redis, bucket="product-feedback-write", limit=60)
+    async def _op():
+        await enforce_rate_limit(request, redis, bucket="product-feedback-write", limit=60)
 
-    question_payload = await redis.hgetall(_question_key(question_id))
-    if not question_payload:
-        raise HTTPException(status_code=404, detail="question not found")
+        question_payload = await redis.hgetall(_question_key(question_id))
+        if not question_payload:
+            raise HTTPException(status_code=404, detail="question not found")
 
-    answer_id = f"ans_{await redis.incr('feedback:answer:id')}"
-    now = _now_iso()
-    mapping = {
-        "id": answer_id,
-        "question_id": question_id,
-        "product_id": str(question_payload["product_id"]),
-        "product_legacy_id": str(question_payload.get("product_legacy_id", "")),
-        "author": _clean_required(
-            str(current_user.get("full_name") or current_user.get("email") or payload.author or ""),
-            field="author",
-            min_len=2,
-            max_len=120,
-        ),
-        "text": _clean_required(payload.text, field="text", min_len=2, max_len=2000),
-        "status": "published",
-        "is_official": "true" if bool(payload.is_official) else "false",
-        "is_pinned": "false",
-        "created_at": now,
-        "updated_at": now,
-    }
-    await redis.hset(_answer_key(answer_id), mapping=mapping)
-    await redis.zadd(_answers_index_key(question_id), {answer_id: time()})
-    await redis.hset(_question_key(question_id), mapping={"updated_at": now})
-    return _parse_answer(mapping)
+        answer_id = f"ans_{await redis.incr('feedback:answer:id')}"
+        now = _now_iso()
+        mapping = {
+            "id": answer_id,
+            "question_id": question_id,
+            "product_id": str(question_payload["product_id"]),
+            "product_legacy_id": str(question_payload.get("product_legacy_id", "")),
+            "author": _clean_required(
+                str(current_user.get("full_name") or current_user.get("email") or payload.author or ""),
+                field="author",
+                min_len=2,
+                max_len=120,
+            ),
+            "text": _clean_required(payload.text, field="text", min_len=2, max_len=2000),
+            "status": "published",
+            "is_official": "true" if bool(payload.is_official) else "false",
+            "is_pinned": "false",
+            "created_at": now,
+            "updated_at": now,
+        }
+        await redis.hset(_answer_key(answer_id), mapping=mapping)
+        await redis.zadd(_answers_index_key(question_id), {answer_id: time()})
+        await redis.hset(_question_key(question_id), mapping={"updated_at": now})
+        return _parse_answer(mapping)
+
+    actor_id = _current_user_internal_id(current_user)
+    return await execute_idempotent_json(request, redis, scope=f"product_feedback.answer.create:{question_id}:{actor_id}", handler=_op)
 
 
 @router.post("/reviews/{review_id}/votes", response_model=ProductReviewVoteOut)
@@ -708,26 +719,30 @@ async def vote_review(
     current_user: dict = Depends(get_current_user),
 ):
     redis = get_redis()
-    await enforce_rate_limit(request, redis, bucket="product-feedback-vote", limit=120)
+    async def _op():
+        await enforce_rate_limit(request, redis, bucket="product-feedback-vote", limit=120)
 
-    review_key = _review_key(review_id)
-    review_payload = await redis.hgetall(review_key)
-    if not review_payload:
-        raise HTTPException(status_code=404, detail="review not found")
+        review_key = _review_key(review_id)
+        review_payload = await redis.hgetall(review_key)
+        if not review_payload:
+            raise HTTPException(status_code=404, detail="review not found")
 
-    helpful_votes, not_helpful_votes, user_vote = await _apply_review_vote(
-        redis,
-        review_id=review_id,
-        actor_key=_feedback_actor_key(current_user),
-        helpful=payload.helpful,
-    )
-    return ProductReviewVoteOut(
-        ok=True,
-        review_id=review_id,
-        helpful_votes=helpful_votes,
-        not_helpful_votes=not_helpful_votes,
-        user_vote=user_vote,
-    )
+        helpful_votes, not_helpful_votes, user_vote = await _apply_review_vote(
+            redis,
+            review_id=review_id,
+            actor_key=_feedback_actor_key(current_user),
+            helpful=payload.helpful,
+        )
+        return ProductReviewVoteOut(
+            ok=True,
+            review_id=review_id,
+            helpful_votes=helpful_votes,
+            not_helpful_votes=not_helpful_votes,
+            user_vote=user_vote,
+        )
+
+    actor_id = _current_user_internal_id(current_user)
+    return await execute_idempotent_json(request, redis, scope=f"product_feedback.review.vote:{review_id}:{actor_id}", handler=_op)
 
 
 @router.post("/reviews/{review_id}/report", response_model=ProductFeedbackReportOut)
@@ -738,28 +753,32 @@ async def report_review(
     current_user: dict = Depends(get_current_user),
 ):
     redis = get_redis()
-    await enforce_rate_limit(request, redis, bucket="product-feedback-report", limit=60)
+    async def _op():
+        await enforce_rate_limit(request, redis, bucket="product-feedback-report", limit=60)
 
-    review_key = _review_key(review_id)
-    review_payload = await redis.hgetall(review_key)
-    if not review_payload:
-        raise HTTPException(status_code=404, detail="review not found")
+        review_key = _review_key(review_id)
+        review_payload = await redis.hgetall(review_key)
+        if not review_payload:
+            raise HTTPException(status_code=404, detail="review not found")
 
-    reports_total, created_at = await _register_feedback_report(
-        redis,
-        target_key=review_key,
-        actors_key=_review_reports_actors_key(review_id),
-        events_key=_review_reports_events_key(review_id),
-        actor_key=_feedback_actor_key(current_user),
-        reason=payload.reason,
-    )
-    return ProductFeedbackReportOut(
-        ok=True,
-        target_id=review_id,
-        kind="review",
-        reports_total=reports_total,
-        created_at=created_at,
-    )
+        reports_total, created_at = await _register_feedback_report(
+            redis,
+            target_key=review_key,
+            actors_key=_review_reports_actors_key(review_id),
+            events_key=_review_reports_events_key(review_id),
+            actor_key=_feedback_actor_key(current_user),
+            reason=payload.reason,
+        )
+        return ProductFeedbackReportOut(
+            ok=True,
+            target_id=review_id,
+            kind="review",
+            reports_total=reports_total,
+            created_at=created_at,
+        )
+
+    actor_id = _current_user_internal_id(current_user)
+    return await execute_idempotent_json(request, redis, scope=f"product_feedback.review.report:{review_id}:{actor_id}", handler=_op)
 
 
 @router.post("/questions/{question_id}/report", response_model=ProductFeedbackReportOut)
@@ -770,28 +789,32 @@ async def report_question(
     current_user: dict = Depends(get_current_user),
 ):
     redis = get_redis()
-    await enforce_rate_limit(request, redis, bucket="product-feedback-report", limit=60)
+    async def _op():
+        await enforce_rate_limit(request, redis, bucket="product-feedback-report", limit=60)
 
-    question_key = _question_key(question_id)
-    question_payload = await redis.hgetall(question_key)
-    if not question_payload:
-        raise HTTPException(status_code=404, detail="question not found")
+        question_key = _question_key(question_id)
+        question_payload = await redis.hgetall(question_key)
+        if not question_payload:
+            raise HTTPException(status_code=404, detail="question not found")
 
-    reports_total, created_at = await _register_feedback_report(
-        redis,
-        target_key=question_key,
-        actors_key=_question_reports_actors_key(question_id),
-        events_key=_question_reports_events_key(question_id),
-        actor_key=_feedback_actor_key(current_user),
-        reason=payload.reason,
-    )
-    return ProductFeedbackReportOut(
-        ok=True,
-        target_id=question_id,
-        kind="question",
-        reports_total=reports_total,
-        created_at=created_at,
-    )
+        reports_total, created_at = await _register_feedback_report(
+            redis,
+            target_key=question_key,
+            actors_key=_question_reports_actors_key(question_id),
+            events_key=_question_reports_events_key(question_id),
+            actor_key=_feedback_actor_key(current_user),
+            reason=payload.reason,
+        )
+        return ProductFeedbackReportOut(
+            ok=True,
+            target_id=question_id,
+            kind="question",
+            reports_total=reports_total,
+            created_at=created_at,
+        )
+
+    actor_id = _current_user_internal_id(current_user)
+    return await execute_idempotent_json(request, redis, scope=f"product_feedback.question.report:{question_id}:{actor_id}", handler=_op)
 
 
 @router.post("/answers/{answer_id}/pin", response_model=ProductAnswerPinOut)
@@ -802,36 +825,40 @@ async def pin_answer(
     current_user: dict = Depends(require_roles(*STAFF_ROLES, detail="staff privileges required")),
 ):
     redis = get_redis()
-    await enforce_rate_limit(request, redis, bucket="product-feedback-moderation", limit=60)
+    async def _op():
+        await enforce_rate_limit(request, redis, bucket="product-feedback-moderation", limit=60)
 
-    answer_key = _answer_key(answer_id)
-    answer_payload = await redis.hgetall(answer_key)
-    if not answer_payload:
-        raise HTTPException(status_code=404, detail="answer not found")
+        answer_key = _answer_key(answer_id)
+        answer_payload = await redis.hgetall(answer_key)
+        if not answer_payload:
+            raise HTTPException(status_code=404, detail="answer not found")
 
-    now = _now_iso()
-    pinned = bool(payload.pinned)
-    updates = {
-        "is_pinned": "true" if pinned else "false",
-        "pinned_at": now if pinned else "",
-        "pinned_by": str(current_user.get("email") or current_user.get("full_name") or "staff") if pinned else "",
-        "updated_at": now,
-    }
-    if pinned:
-        updates["is_official"] = "true"
-    await redis.hset(answer_key, mapping=updates)
+        now = _now_iso()
+        pinned = bool(payload.pinned)
+        updates = {
+            "is_pinned": "true" if pinned else "false",
+            "pinned_at": now if pinned else "",
+            "pinned_by": str(current_user.get("email") or current_user.get("full_name") or "staff") if pinned else "",
+            "updated_at": now,
+        }
+        if pinned:
+            updates["is_official"] = "true"
+        await redis.hset(answer_key, mapping=updates)
 
-    question_id = str(answer_payload.get("question_id", "")).strip()
-    if question_id:
-        await redis.hset(_question_key(question_id), mapping={"updated_at": now})
+        question_id = str(answer_payload.get("question_id", "")).strip()
+        if question_id:
+            await redis.hset(_question_key(question_id), mapping={"updated_at": now})
 
-    return ProductAnswerPinOut(
-        ok=True,
-        answer_id=answer_id,
-        pinned=pinned,
-        pinned_at=updates["pinned_at"] or None,
-        pinned_by=updates["pinned_by"] or None,
-    )
+        return ProductAnswerPinOut(
+            ok=True,
+            answer_id=answer_id,
+            pinned=pinned,
+            pinned_at=updates["pinned_at"] or None,
+            pinned_by=updates["pinned_by"] or None,
+        )
+
+    actor_id = _current_user_internal_id(current_user)
+    return await execute_idempotent_json(request, redis, scope=f"product_feedback.answer.pin:{answer_id}:{actor_id}", handler=_op)
 
 
 @router.post("/reviews/{review_id}/moderation", response_model=ProductFeedbackModerationOut)
@@ -842,24 +869,28 @@ async def moderate_review(
     current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin privileges required")),
 ):
     redis = get_redis()
-    await enforce_rate_limit(request, redis, bucket="product-feedback-moderation", limit=60)
+    async def _op():
+        await enforce_rate_limit(request, redis, bucket="product-feedback-moderation", limit=60)
 
-    key = _review_key(review_id)
-    existing = await redis.hgetall(key)
-    if not existing:
-        raise HTTPException(status_code=404, detail="review not found")
+        key = _review_key(review_id)
+        existing = await redis.hgetall(key)
+        if not existing:
+            raise HTTPException(status_code=404, detail="review not found")
 
-    now = _now_iso()
-    await redis.hset(
-        key,
-        mapping={
-            "status": payload.status,
-            "moderated_by": str(current_user.get("email", "admin")),
-            "moderated_at": now,
-            "updated_at": now,
-        },
-    )
-    return ProductFeedbackModerationOut(ok=True, status=payload.status)
+        now = _now_iso()
+        await redis.hset(
+            key,
+            mapping={
+                "status": payload.status,
+                "moderated_by": str(current_user.get("email", "admin")),
+                "moderated_at": now,
+                "updated_at": now,
+            },
+        )
+        return ProductFeedbackModerationOut(ok=True, status=payload.status)
+
+    actor_id = _current_user_internal_id(current_user)
+    return await execute_idempotent_json(request, redis, scope=f"product_feedback.review.moderate:{review_id}:{actor_id}", handler=_op)
 
 
 @router.post("/questions/{question_id}/moderation", response_model=ProductFeedbackModerationOut)
@@ -870,21 +901,61 @@ async def moderate_question(
     current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin privileges required")),
 ):
     redis = get_redis()
-    await enforce_rate_limit(request, redis, bucket="product-feedback-moderation", limit=60)
+    async def _op():
+        await enforce_rate_limit(request, redis, bucket="product-feedback-moderation", limit=60)
 
-    key = _question_key(question_id)
-    existing = await redis.hgetall(key)
-    if not existing:
-        raise HTTPException(status_code=404, detail="question not found")
+        key = _question_key(question_id)
+        existing = await redis.hgetall(key)
+        if not existing:
+            raise HTTPException(status_code=404, detail="question not found")
 
-    now = _now_iso()
-    await redis.hset(
-        key,
-        mapping={
-            "status": payload.status,
-            "moderated_by": str(current_user.get("email", "admin")),
-            "moderated_at": now,
-            "updated_at": now,
-        },
-    )
-    return ProductFeedbackModerationOut(ok=True, status=payload.status)
+        now = _now_iso()
+        await redis.hset(
+            key,
+            mapping={
+                "status": payload.status,
+                "moderated_by": str(current_user.get("email", "admin")),
+                "moderated_at": now,
+                "updated_at": now,
+            },
+        )
+        return ProductFeedbackModerationOut(ok=True, status=payload.status)
+
+    actor_id = _current_user_internal_id(current_user)
+    return await execute_idempotent_json(request, redis, scope=f"product_feedback.question.moderate:{question_id}:{actor_id}", handler=_op)
+
+
+@router.post("/answers/{answer_id}/moderation", response_model=ProductFeedbackModerationOut)
+async def moderate_answer(
+    answer_id: str,
+    payload: ProductFeedbackModerationIn,
+    request: Request,
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin privileges required")),
+):
+    redis = get_redis()
+
+    async def _op():
+        await enforce_rate_limit(request, redis, bucket="product-feedback-moderation", limit=60)
+
+        key = _answer_key(answer_id)
+        existing = await redis.hgetall(key)
+        if not existing:
+            raise HTTPException(status_code=404, detail="answer not found")
+
+        now = _now_iso()
+        await redis.hset(
+            key,
+            mapping={
+                "status": payload.status,
+                "moderated_by": str(current_user.get("email", "admin")),
+                "moderated_at": now,
+                "updated_at": now,
+            },
+        )
+        question_id = str(existing.get("question_id", "")).strip()
+        if question_id:
+            await redis.hset(_question_key(question_id), mapping={"updated_at": now})
+        return ProductFeedbackModerationOut(ok=True, status=payload.status)
+
+    actor_id = _current_user_internal_id(current_user)
+    return await execute_idempotent_json(request, redis, scope=f"product_feedback.answer.moderate:{answer_id}:{actor_id}", handler=_op)

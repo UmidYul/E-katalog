@@ -58,6 +58,7 @@ def test_openapi_contract_contains_core_auth_endpoints() -> None:
         "/api/v1/products/reviews/{review_id}/report": {"post"},
         "/api/v1/products/questions/{question_id}/report": {"post"},
         "/api/v1/products/answers/{answer_id}/pin": {"post"},
+        "/api/v1/products/answers/{answer_id}/moderation": {"post"},
         "/api/v1/products/{product_id}/alerts": {"post"},
         "/api/v1/users/me/alerts": {"get"},
         "/api/v1/users/me/alerts/{alert_id}": {"delete"},
@@ -141,3 +142,33 @@ def test_openapi_contract_operations_have_tags_and_responses() -> None:
             assert isinstance(tags, list) and tags, f"missing tags for {method.upper()} {path}"
             responses = operation.get("responses")
             assert isinstance(responses, dict) and responses, f"missing responses for {method.upper()} {path}"
+
+
+def test_compare_share_create_contract_includes_telemetry_source() -> None:
+    schema = _load_openapi_schema()
+    path_item = schema.get("paths", {}).get("/api/v1/compare/share", {})
+    post_op = path_item.get("post", {})
+    body_schema = (
+        post_op.get("requestBody", {})
+        .get("content", {})
+        .get("application/json", {})
+        .get("schema", {})
+    )
+    schema_ref = str(body_schema.get("$ref", ""))
+    assert schema_ref, "compare/share request body schema ref is required"
+    component_name = schema_ref.rsplit("/", 1)[-1]
+    component = schema.get("components", {}).get("schemas", {}).get(component_name, {})
+    props = component.get("properties", {})
+    telemetry_source = props.get("telemetry_source", {})
+    assert telemetry_source.get("type") == "string"
+    assert int(telemetry_source.get("maxLength", 0)) == 64
+
+
+def test_product_offers_sort_contract_supports_best_value() -> None:
+    schema = _load_openapi_schema()
+    get_op = schema.get("paths", {}).get("/api/v1/products/{product_id}/offers", {}).get("get", {})
+    parameters = get_op.get("parameters", [])
+    sort_param = next((param for param in parameters if str(param.get("name")) == "sort"), None)
+    assert sort_param is not None
+    pattern = str(sort_param.get("schema", {}).get("pattern", ""))
+    assert "best_value" in pattern

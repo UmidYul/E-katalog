@@ -11,11 +11,11 @@ This file aggregates items that are still not fully implemented based on explici
 
 ## 1) Backend Prod Tasks (`docs/BACKEND_PROD_TASKS.md`)
 
-- [~] Auth storage migration Redis -> Postgres: auth router + user profile/notification + admin user-management reads/writes now support `AUTH_STORAGE_MODE=postgres`; remaining cleanup/cutover tasks still pending.
+- [x] Auth storage migration Redis -> Postgres implemented for code paths: auth router + user profile/notification + admin user-management read/write paths are cut over for `AUTH_STORAGE_MODE=postgres`; Redis is retained for rate-limit/lockout and ephemeral keys.
 - [x] Password reset + email confirmation implemented: API endpoints + DB-backed tokens + SMTP delivery integration.
 - [x] Unified RBAC policy layer for API implemented: shared `app/api/rbac.py` helpers/dependencies adopted by admin + product-feedback routers.
 - [x] Audit log for admin operations baseline implemented: `admin_audit_events` table + `/api/v1/admin/audit/events` + write logging in mutating admin endpoints.
-- [~] Idempotency keys for critical write endpoints: baseline implemented (`Idempotency-Key` + Redis TTL replay) for auth recovery flows, critical admin writes, admin task enqueue endpoints, and product price-alert upsert; remaining non-critical writes can be migrated incrementally.
+- [x] Idempotency keys for critical write endpoints implemented (`Idempotency-Key` + Redis TTL replay) across auth recovery/session maintenance/logout, admin write/enqueue routes (including CRUD blocks), product price-alert upsert, product-feedback mutating routes, users mutating routes, and compare-share creation.
 - [x] Anti-bruteforce hardening for auth implemented (ip/email lockout + separate Redis buckets).
 - [x] Observability baseline implemented in API: optional Sentry integration (error + tracing), Prometheus-style `/api/v1/metrics`, and request timing header `X-Response-Time-Ms`.
 - [x] Expanded readiness/liveness checks implemented (`/live` + enriched `/ready` with DB/Redis/Celery checks).
@@ -24,9 +24,9 @@ This file aggregates items that are still not fully implemented based on explici
 - [x] Cleanup tasks for sessions/tokens/temporary entities baseline implemented (Redis auth sessions cleanup, Postgres token cleanup, ephemeral auth key TTL cleanup).
 - [x] Notifications pipeline for price/stock baseline implemented: queued delivery worker supports `telegram` + `email` channels with optional webhook fanout.
 - [x] Stage B dual-write transition implemented (`dual` writes to Redis+Postgres; reads remain Redis in transition mode).
-- [ ] Stage C cutover tasks:
-- [ ] switch reads to pure Postgres everywhere (`TODO` / `IN_PROGRESS`);
-- [ ] leave Redis only for cache/rate-limit (`TODO`);
+- [x] Stage C cutover tasks:
+- [x] switch reads to pure Postgres everywhere (core auth/user/session/token read paths in `AUTH_STORAGE_MODE=postgres` no longer depend on Redis auth keys);
+- [x] leave Redis only for cache/rate-limit (Redis auth storage keys are not required in postgres mode; Redis remains for rate-limit/lockout and ephemeral challenge/state keys);
 - [x] remove legacy auth keys from Redis after grace period (maintenance task + daily schedule implemented).
 
 ## 2) EK.UA MVP Features (`docs/EK_UA_MVP_FEATURES.md`)
@@ -53,38 +53,38 @@ Planned API:
 Planned model extensions:
 - [~] `is_verified_purchase` in reviews (field exposed; no purchase-proof pipeline yet).
 - [x] `helpful_votes` and `not_helpful_votes` counters.
-- [ ] Extended moderation/status fields for feedback entities.
+- [x] Extended moderation/status fields for feedback entities (reviews/questions/answers moderation + status fields in API).
 
 Planned client tasks:
 - [x] Helpful-vote UI for reviews.
 - [x] Report actions for reviews/questions.
 - [x] Pin/unpin UI for official answers.
-- [ ] Optimistic updates for votes/reports.
-- [~] Pagination for high-volume products (backend `limit/offset` added; frontend pagers pending).
+- [x] Optimistic updates for votes/reports.
+- [x] Pagination for high-volume products (frontend load-more pagers wired to backend `limit/offset`).
 
 ## 4) Business + Tech Scale Roadmap (`docs/BUSINESS_TECH_SCALE_ROADMAP_2026Q2.md`)
 
 High-priority initiatives still listed as roadmap work:
-- [ ] Data quality guardrails + auto-heal (A).
-- [ ] Price alerts MVP (Telegram/Email) (B).
-- [ ] Offer trust score and trust-aware ranking (C).
-- [~] Compare share links + entry points (D): backend share token endpoints + frontend share button implemented on 2026-02-26, needs final UX polish/telemetry.
-- [ ] Config-driven normalization rules (F).
-- [ ] SLO/observability hardening (G).
+- [x] Data quality guardrails + auto-heal (A): daily quality report + mismatch auto-heal + admin visibility and alerting baseline implemented.
+- [x] Price alerts MVP (Telegram/Email) (B): schema/API + worker delivery (telegram/email/webhook) implemented.
+- [x] Offer trust score and trust-aware ranking (C): offer trust fields added (`trust_score` + components), worker refresh task/schedule implemented, `best_value` ranking enabled in offers API/PDP, and trust badge shown in offer table.
+- [x] Compare share links + entry points (D): share UX polished on compare page (native share/clipboard + visible generated link/expiry), and API structured telemetry events added for share create/resolve.
+- [x] Config-driven normalization rules (F): YAML-based normalization rules source + runtime loader/cache wired in worker normalization service (brand aliases/spec-key mappings/placeholder values configurable without code edits).
+- [x] SLO/observability hardening (G): API metrics extended with SLO gauges/targets/breach flags (`5xx ratio`, `p95/p99` latency estimates) for direct alerting integration.
 
 Immediate backlog from roadmap:
 - [x] Quality report task + DB table implemented (worker task + `catalog_data_quality_reports` model/migration).
 - [x] Admin endpoint + dashboard panel for quality report implemented (admin quality API + frontend wiring).
 - [x] Telegram-first price alert schema + API + notification delivery worker implemented on 2026-02-26.
 - [x] Compare share link endpoint + frontend button.
-- [~] Unit tests for roadmap items are partially implemented (quality report routes and price-alert delivery routing/logic covered; broader integration coverage pending).
+- [~] Unit tests for roadmap items are partially implemented (quality report routes, price-alert delivery routing/logic, OpenAPI contract checks, and idempotency coverage checks for mutating API routes including auth/admin/users/product-feedback/compare are covered; broader integration coverage pending).
 
 ## 5) Canonical Matching (`docs/CANONICAL_MATCHING.md`)
 
 Scaling plan not yet implemented in full:
-- [ ] Move canonical indexes to Redis/Postgres mappings for large-scale matching.
+- [x] Move canonical indexes to Redis/Postgres mappings for large-scale matching (added `catalog_canonical_key_index` table + worker service with Redis cache + periodic rebuild task).
 - [ ] Batch embedding inference + vector DB ANN indexing strategy.
-- [ ] Replace O(N*C) scans with candidate blocking.
+- [x] Replace O(N*C) scans with candidate blocking (bucket index in `CanonicalMatchingEngine` limits candidate set by brand/model/storage).
 - [ ] Distributed workers with offset checkpoints for canonical pipeline.
 - [ ] Immutable match ledger + snapshot compaction.
 - [ ] Active learning loop for low-confidence/false-merge correction.

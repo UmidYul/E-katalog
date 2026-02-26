@@ -103,3 +103,25 @@ def test_price_alert_delivery_schedule_registered() -> None:
     schedule = celery_app.conf.beat_schedule.get("price-alert-delivery-every-5m")
     assert schedule is not None
     assert schedule["task"] == "app.tasks.maintenance_tasks.enqueue_price_alert_notifications"
+
+
+def test_offer_trust_refresh_task_routing() -> None:
+    route = celery_app.conf.task_routes.get("app.tasks.maintenance_tasks.refresh_offer_trust_scores")
+    assert route == {"queue": "maintenance", "routing_key": "maintenance"}
+
+
+def test_offer_trust_refresh_schedule_registered() -> None:
+    schedule = celery_app.conf.beat_schedule.get("offer-trust-score-refresh-every-30m")
+    assert schedule is not None
+    assert schedule["task"] == "app.tasks.maintenance_tasks.enqueue_refresh_offer_trust_scores"
+
+
+def test_canonical_key_index_refresh_task_routing() -> None:
+    route = celery_app.conf.task_routes.get("app.tasks.maintenance_tasks.refresh_canonical_key_index")
+    assert route == {"queue": "maintenance", "routing_key": "maintenance"}
+
+
+def test_canonical_key_index_refresh_schedule_registered() -> None:
+    schedule = celery_app.conf.beat_schedule.get("canonical-key-index-refresh-daily-0410")
+    assert schedule is not None
+    assert schedule["task"] == "app.tasks.maintenance_tasks.enqueue_refresh_canonical_key_index"

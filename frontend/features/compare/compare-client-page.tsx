@@ -172,6 +172,8 @@ export function CompareClientPage() {
   const clearHistory = useCompareStore((s) => s.clearHistory);
   const [onlyDiff, setOnlyDiff] = useState(false);
   const [shareStatus, setShareStatus] = useState<string | null>(null);
+  const [lastShareUrl, setLastShareUrl] = useState<string | null>(null);
+  const [lastShareExpiresAt, setLastShareExpiresAt] = useState<string | null>(null);
   const [appliedShareToken, setAppliedShareToken] = useState<string | null>(null);
   const productIds = useMemo(() => compareItems.map((item) => item.id), [compareItems]);
   const shareToken = useMemo(() => {
@@ -233,7 +235,7 @@ export function CompareClientPage() {
       }
       replace(nextItems);
       setAppliedShareToken(shareToken);
-      setShareStatus("Сравнение загружено по общей ссылке.");
+      setShareStatus(`Сравнение загружено по общей ссылке до ${formatDateTime(sharedCompareQuery.data.expires_at)}.`);
     };
     void hydrateSharedCompare();
     return () => {
@@ -275,15 +277,26 @@ export function CompareClientPage() {
       return;
     }
     try {
-      const response = await createShare.mutateAsync({ productIds, ttlDays: 30 });
+      const response = await createShare.mutateAsync({ productIds, ttlDays: 30, source: "compare_page" });
       const shareUrl = typeof window !== "undefined" ? `${window.location.origin}${response.share_path}` : response.share_path;
+      setLastShareUrl(shareUrl);
+      setLastShareExpiresAt(response.expires_at);
+      if (typeof navigator !== "undefined" && navigator.share) {
+        await navigator.share({ url: shareUrl, title: "Сравнение товаров" });
+        setShareStatus("Ссылка сравнения отправлена через системный share.");
+        return;
+      }
       if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(shareUrl);
         setShareStatus("Ссылка сравнения скопирована в буфер.");
-      } else {
-        setShareStatus(`Ссылка сравнения: ${shareUrl}`);
+        return;
       }
-    } catch {
+      setShareStatus(`Ссылка сравнения готова до ${formatDateTime(response.expires_at)}.`);
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        setShareStatus("Отправка ссылки отменена.");
+        return;
+      }
       setShareStatus("Не удалось создать ссылку сравнения.");
     }
   };
@@ -401,6 +414,15 @@ export function CompareClientPage() {
             <span>Подсветка лучшего значения рассчитывается по эвристике.</span>
           </div>
           {shareStatus ? <p className="text-xs text-primary">{shareStatus}</p> : null}
+          {lastShareUrl ? (
+            <p className="text-xs text-muted-foreground">
+              Ссылка:{" "}
+              <a href={lastShareUrl} className="text-primary underline underline-offset-2" target="_blank" rel="noreferrer">
+                открыть
+              </a>
+              {lastShareExpiresAt ? ` (действует до ${formatDateTime(lastShareExpiresAt)})` : ""}
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant={onlyDiff ? "default" : "outline"} size="sm" onClick={() => setOnlyDiff((prev) => !prev)}>

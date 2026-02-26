@@ -161,7 +161,7 @@ async def get_product(
     if not product:
         raise HTTPException(status_code=404, detail="product not found")
     target_product_id = int(product.get("legacy_id") or resolved_product_id)
-    offers_by_store = await repo.get_offers_by_store(product_id=target_product_id, limit=150, in_stock=None, sort="price")
+    offers_by_store = await repo.get_offers_by_store(product_id=target_product_id, limit=150, in_stock=None, sort="best_value")
 
     payload = {
         "id": product["id"],
@@ -263,7 +263,7 @@ async def get_product_offers(
     store_id: list[str] | None = Query(default=None),
     seller_id: list[str] | None = Query(default=None),
     max_delivery_days: int | None = Query(default=None, ge=0, le=30),
-    sort: str = Query(default="price", pattern="^(price|seller_rating|delivery)$"),
+    sort: str = Query(default="best_value", pattern="^(price|seller_rating|delivery|best_value)$"),
     limit: int = Query(default=50, ge=1, le=100),
     db: AsyncSession = Depends(get_db_session),
 ):

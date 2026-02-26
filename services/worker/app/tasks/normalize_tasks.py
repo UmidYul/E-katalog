@@ -30,6 +30,8 @@ from app.platform.services.normalization import (
 )
 from app.platform.services.pipeline_offsets import ensure_offsets_table, get_offset, set_offset
 from app.platform.services.ai_matching import ai_choose_canonical_candidate
+from app.platform.services.canonical_index import resolve_canonical_by_key, upsert_canonical_index_entry
+from app.platform.services.canonical_matching import canonical_key, extract_attributes
 from app.celery_app import celery_app
 
 _LOW_QUALITY_IMAGE_HINTS: tuple[str, ...] = (
@@ -204,6 +206,31 @@ def _choose_preferred_image(
 
 
 async def _resolve_or_create_canonical(session, *, title: str, category_id: int, brand_id: int | None, specs: dict, image: str | None):
+    canonical_attrs = extract_attributes(title)
+    key_value = canonical_key(canonical_attrs)
+    indexed_canonical_id = await resolve_canonical_by_key(session, canonical_key_value=key_value)
+    if indexed_canonical_id is not None:
+        indexed_canonical = (
+            await session.execute(
+                select(CatalogCanonicalProduct).where(
+                    CatalogCanonicalProduct.id == indexed_canonical_id,
+                    CatalogCanonicalProduct.category_id == category_id,
+                    CatalogCanonicalProduct.is_active.is_(True),
+                )
+            )
+        ).scalar_one_or_none()
+        if indexed_canonical is not None:
+            if brand_id is not None and indexed_canonical.brand_id is None:
+                indexed_canonical.brand_id = brand_id
+            if image and (
+                not indexed_canonical.main_image
+                or (_is_low_quality_image(indexed_canonical.main_image) and not _is_low_quality_image(image))
+            ):
+                indexed_canonical.main_image = image
+            if specs and (not isinstance(indexed_canonical.specs, dict) or not indexed_canonical.specs):
+                indexed_canonical.specs = specs
+            return indexed_canonical
+
     canonical = (
         await session.execute(
             select(CatalogCanonicalProduct).where(
@@ -451,6 +478,12 @@ async def _normalize_product_batch(limit: int, *, reset_offset: bool = False) ->
                 brand_id=brand_id,
                 specs=specs,
                 image=preferred_image,
+            )
+            await upsert_canonical_index_entry(
+                session,
+                canonical_product_id=int(canonical.id),
+                canonical_title=str(canonical.normalized_title or canonical_title),
+                source="normalize",
             )
 
             store_product.canonical_product_id = canonical.id

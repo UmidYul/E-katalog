@@ -48,13 +48,17 @@ const statusBadgeClass = (status: string) => {
 };
 
 export function ProductReviewsPanel({ productId }: { productId: string }) {
+  const PAGE_SIZE = 20;
   const authUserStore = authStore((s) => s.user);
-  const reviewsQuery = useProductReviews(productId);
+  const [reviewsLimit, setReviewsLimit] = useState(PAGE_SIZE);
+  const reviewsQuery = useProductReviews(productId, { limit: reviewsLimit, offset: 0 });
   const createReview = useCreateProductReview(productId);
   const voteReview = useVoteProductReview(productId);
   const reportReview = useReportProductReview(productId);
   const reviews = useMemo(() => reviewsQuery.data ?? [], [reviewsQuery.data]);
+  const hasMoreReviews = reviews.length >= reviewsLimit;
   const [mounted, setMounted] = useState(false);
+  const [reportedReviewIds, setReportedReviewIds] = useState<Record<string, boolean>>({});
 
   const [author, setAuthor] = useState("");
   const [rating, setRating] = useState(5);
@@ -123,10 +127,12 @@ export function ProductReviewsPanel({ productId }: { productId: string }) {
   const onReportReview = async (reviewId: string) => {
     const reason = window.prompt("Причина жалобы на отзыв (минимум 3 символа):", "Нарушение правил") ?? "";
     if (!reason.trim()) return;
+    setReportedReviewIds((prev) => ({ ...prev, [reviewId]: true }));
+    setStatus("Жалоба на отзыв отправлена.");
     try {
       await reportReview.mutateAsync({ reviewId, reason });
-      setStatus("Жалоба на отзыв отправлена.");
     } catch (error) {
+      setReportedReviewIds((prev) => ({ ...prev, [reviewId]: false }));
       setStatus(normalizeApiError(error, "Не удалось отправить жалобу."));
     }
   };
@@ -216,8 +222,13 @@ export function ProductReviewsPanel({ productId }: { productId: string }) {
                   <Button size="sm" variant="outline" onClick={() => onVoteReview(review.id, false)} disabled={voteReview.isPending}>
                     Не полезно ({review.not_helpful_votes ?? 0})
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => onReportReview(review.id)} disabled={reportReview.isPending}>
-                    Пожаловаться
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => onReportReview(review.id)}
+                    disabled={reportReview.isPending || Boolean(reportedReviewIds[review.id])}
+                  >
+                    {reportedReviewIds[review.id] ? "Жалоба отправлена" : "Пожаловаться"}
                   </Button>
                 </div>
                 {review.pros || review.cons ? (
@@ -239,19 +250,29 @@ export function ProductReviewsPanel({ productId }: { productId: string }) {
           ))}
         </div>
       )}
+      {reviews.length > 0 && hasMoreReviews ? (
+        <div className="flex justify-center">
+          <Button size="sm" variant="outline" onClick={() => setReviewsLimit((prev) => prev + PAGE_SIZE)} disabled={reviewsQuery.isFetching}>
+            {reviewsQuery.isFetching ? "Загрузка..." : "Загрузить ещё отзывы"}
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }
 
 export function ProductQuestionsPanel({ productId }: { productId: string }) {
+  const PAGE_SIZE = 20;
   const authUserStore = authStore((s) => s.user);
   const me = useAuthMe();
-  const questionsQuery = useProductQuestions(productId);
+  const [questionsLimit, setQuestionsLimit] = useState(PAGE_SIZE);
+  const questionsQuery = useProductQuestions(productId, { limit: questionsLimit, offset: 0 });
   const createQuestion = useCreateProductQuestion(productId);
   const createAnswer = useCreateQuestionAnswer(productId);
   const reportQuestion = useReportProductQuestion(productId);
   const pinAnswer = usePinProductAnswer(productId);
   const questions = useMemo(() => questionsQuery.data ?? [], [questionsQuery.data]);
+  const hasMoreQuestions = questions.length >= questionsLimit;
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -271,6 +292,7 @@ export function ProductQuestionsPanel({ productId }: { productId: string }) {
   const [questionText, setQuestionText] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [answerDrafts, setAnswerDrafts] = useState<Record<string, { text: string; isOfficial: boolean }>>({});
+  const [reportedQuestionIds, setReportedQuestionIds] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     const fallbackName = authUser?.full_name || (me.data as { full_name?: string } | undefined)?.full_name;
@@ -332,10 +354,12 @@ export function ProductQuestionsPanel({ productId }: { productId: string }) {
   const onReportQuestion = async (questionId: string) => {
     const reason = window.prompt("Причина жалобы на вопрос (минимум 3 символа):", "Нарушение правил") ?? "";
     if (!reason.trim()) return;
+    setReportedQuestionIds((prev) => ({ ...prev, [questionId]: true }));
+    setStatus("Жалоба на вопрос отправлена.");
     try {
       await reportQuestion.mutateAsync({ questionId, reason });
-      setStatus("Жалоба на вопрос отправлена.");
     } catch (error) {
+      setReportedQuestionIds((prev) => ({ ...prev, [questionId]: false }));
       setStatus(normalizeApiError(error, "Не удалось отправить жалобу."));
     }
   };
@@ -404,8 +428,13 @@ export function ProductQuestionsPanel({ productId }: { productId: string }) {
                     </div>
                     <div className="flex items-center gap-2">
                       <p className="text-xs text-muted-foreground">{formatDateTime(question.created_at)}</p>
-                      <Button size="sm" variant="ghost" onClick={() => onReportQuestion(question.id)} disabled={reportQuestion.isPending}>
-                        Пожаловаться
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onReportQuestion(question.id)}
+                        disabled={reportQuestion.isPending || Boolean(reportedQuestionIds[question.id])}
+                      >
+                        {reportedQuestionIds[question.id] ? "Жалоба отправлена" : "Пожаловаться"}
                       </Button>
                     </div>
                   </div>
@@ -470,6 +499,13 @@ export function ProductQuestionsPanel({ productId }: { productId: string }) {
           })}
         </div>
       )}
+      {questions.length > 0 && hasMoreQuestions ? (
+        <div className="flex justify-center">
+          <Button size="sm" variant="outline" onClick={() => setQuestionsLimit((prev) => prev + PAGE_SIZE)} disabled={questionsQuery.isFetching}>
+            {questionsQuery.isFetching ? "Загрузка..." : "Загрузить ещё вопросы"}
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }

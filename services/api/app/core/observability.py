@@ -52,6 +52,28 @@ class _HttpMetrics:
             by_route = dict(self._requests_by_route)
             bucket_counts = dict(self._duration_bucket_counts)
 
+        total_5xx = 0
+        for (_, _, status_class), count in by_route.items():
+            if status_class == "5xx":
+                total_5xx += int(count)
+
+        error_ratio_5xx = (float(total_5xx) / float(requests_total)) if requests_total > 0 else 0.0
+
+        def _estimate_quantile(quantile: float) -> float:
+            if duration_count <= 0:
+                return 0.0
+            for bound in self._duration_buckets:
+                cumulative = int(bucket_counts.get(bound, 0))
+                if (float(cumulative) / float(duration_count)) >= quantile:
+                    return float(bound)
+            return float(self._duration_buckets[-1])
+
+        p95_estimate = _estimate_quantile(0.95)
+        p99_estimate = _estimate_quantile(0.99)
+        p95_target = max(0.01, float(settings.slo_api_latency_p95_target_seconds))
+        p99_target = max(0.01, float(settings.slo_api_latency_p99_target_seconds))
+        error_ratio_target = max(0.0, min(1.0, float(settings.slo_api_5xx_target_ratio)))
+
         lines = [
             "# HELP api_http_requests_total Total HTTP requests served.",
             "# TYPE api_http_requests_total counter",
@@ -86,6 +108,33 @@ class _HttpMetrics:
                 "# HELP api_process_uptime_seconds API process uptime in seconds.",
                 "# TYPE api_process_uptime_seconds gauge",
                 f"api_process_uptime_seconds {uptime_seconds:.3f}",
+                "# HELP api_http_error_ratio_5xx_ratio Ratio of 5xx responses over total requests.",
+                "# TYPE api_http_error_ratio_5xx_ratio gauge",
+                f"api_http_error_ratio_5xx_ratio {error_ratio_5xx:.6f}",
+                "# HELP api_http_latency_p95_seconds_estimate Estimated p95 latency from histogram buckets.",
+                "# TYPE api_http_latency_p95_seconds_estimate gauge",
+                f"api_http_latency_p95_seconds_estimate {p95_estimate:.6f}",
+                "# HELP api_http_latency_p99_seconds_estimate Estimated p99 latency from histogram buckets.",
+                "# TYPE api_http_latency_p99_seconds_estimate gauge",
+                f"api_http_latency_p99_seconds_estimate {p99_estimate:.6f}",
+                "# HELP api_slo_target_5xx_ratio Target ratio for 5xx responses.",
+                "# TYPE api_slo_target_5xx_ratio gauge",
+                f"api_slo_target_5xx_ratio {error_ratio_target:.6f}",
+                "# HELP api_slo_target_latency_p95_seconds Target p95 latency in seconds.",
+                "# TYPE api_slo_target_latency_p95_seconds gauge",
+                f"api_slo_target_latency_p95_seconds {p95_target:.6f}",
+                "# HELP api_slo_target_latency_p99_seconds Target p99 latency in seconds.",
+                "# TYPE api_slo_target_latency_p99_seconds gauge",
+                f"api_slo_target_latency_p99_seconds {p99_target:.6f}",
+                "# HELP api_slo_breach_5xx Indicator 1 when current 5xx ratio breaches target.",
+                "# TYPE api_slo_breach_5xx gauge",
+                f"api_slo_breach_5xx {1 if error_ratio_5xx > error_ratio_target else 0}",
+                "# HELP api_slo_breach_latency_p95 Indicator 1 when current p95 latency breaches target.",
+                "# TYPE api_slo_breach_latency_p95 gauge",
+                f"api_slo_breach_latency_p95 {1 if p95_estimate > p95_target else 0}",
+                "# HELP api_slo_breach_latency_p99 Indicator 1 when current p99 latency breaches target.",
+                "# TYPE api_slo_breach_latency_p99 gauge",
+                f"api_slo_breach_latency_p99 {1 if p99_estimate > p99_target else 0}",
                 "",
             ]
         )
