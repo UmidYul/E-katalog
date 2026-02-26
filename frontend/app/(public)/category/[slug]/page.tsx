@@ -1,5 +1,6 @@
-﻿import type { Metadata } from "next";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
 
 import { env } from "@/config/env";
 import { CatalogClientPage } from "@/features/catalog/catalog-client-page";
@@ -109,7 +110,11 @@ export default async function CategoryPage({ params }: { params: { slug: string 
 
   const category = categories.find((item) => item.slug === params.slug);
   if (category) {
-    return <CatalogClientPage categoryId={category.id} pageTitle={category.name} />;
+    return (
+      <Suspense fallback={<div className="container py-8 text-sm text-muted-foreground">Загрузка каталога...</div>}>
+        <CatalogClientPage categoryId={category.id} pageTitle={category.name} />
+      </Suspense>
+    );
   }
 
   const virtual = resolveVirtualCategory(params.slug, categories, brands);
@@ -118,11 +123,13 @@ export default async function CategoryPage({ params }: { params: { slug: string 
   }
 
   return (
-    <CatalogClientPage
-      categoryId={virtual.categoryId}
-      presetBrandId={virtual.brandId}
-      presetQuery={virtual.presetQuery}
-      pageTitle={virtual.title}
-    />
+    <Suspense fallback={<div className="container py-8 text-sm text-muted-foreground">Загрузка каталога...</div>}>
+      <CatalogClientPage
+        categoryId={virtual.categoryId}
+        presetBrandId={virtual.brandId}
+        presetQuery={virtual.presetQuery}
+        pageTitle={virtual.title}
+      />
+    </Suspense>
   );
 }

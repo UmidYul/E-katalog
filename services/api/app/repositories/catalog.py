@@ -1081,7 +1081,9 @@ def _resolve_gallery_target_color(
         preferred_share = counts.get(preferred_key, 0) / total_votes
         if preferred_share >= 0.25:
             return preferred
-        if top_count >= 2 and top_share >= 0.45:
+        # Override preferred color only when the alternative has a clear, stable majority.
+        # Example: 2/4 votes is too weak (likely mixed variants), 3/4 is strong enough.
+        if top_count >= 3 and top_share >= 0.60:
             return top_label
         return None
 

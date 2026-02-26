@@ -1,9 +1,9 @@
-﻿FROM node:20-alpine AS deps
+FROM node:22-alpine AS deps
 WORKDIR /app
 COPY frontend/package*.json ./
 RUN npm ci
 
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY frontend .
@@ -20,7 +20,7 @@ ENV API_INTERNAL_ORIGIN=$API_INTERNAL_ORIGIN
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 WORKDIR /app
 ARG NEXT_PUBLIC_APP_URL=http://localhost
 ARG NEXT_PUBLIC_API_ORIGIN=
@@ -39,4 +39,5 @@ COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/.next/standalone ./
 EXPOSE 3000
 CMD ["node", "server.js"]
+
 
