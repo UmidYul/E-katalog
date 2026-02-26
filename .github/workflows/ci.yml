@@ -45,8 +45,50 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run tests
-        run: python -m pytest -q --maxfail=1 tests
+      - name: Run API unit tests
+        env:
+          PYTHONPATH: services/api:.
+        run: |
+          python -m pytest -q --maxfail=1 --confcutdir=tests/unit \
+            tests/unit/test_admin_analytics_helpers.py \
+            tests/unit/test_admin_quality_helpers.py \
+            tests/unit/test_catalog_schema.py \
+            tests/unit/test_gallery_image_selection.py \
+            tests/unit/test_openapi_contract.py \
+            tests/unit/test_title_formatting.py
+
+      - name: Run worker unit tests
+        env:
+          PYTHONPATH: services/worker:.
+        run: |
+          python -m pytest -q --maxfail=1 --confcutdir=tests/unit \
+            tests/unit/test_ai_copywriting.py \
+            tests/unit/test_canonical_engine.py \
+            tests/unit/test_celery_routes.py \
+            tests/unit/test_dedupe.py \
+            tests/unit/test_embeddings.py \
+            tests/unit/test_normalization.py \
+            tests/unit/test_normalize_image_selection.py \
+            tests/unit/test_quality_report.py
+
+      - name: Run scraper unit tests
+        env:
+          PYTHONPATH: services/scraper:.
+        run: |
+          python -m pytest -q --maxfail=1 --confcutdir=tests/unit \
+            tests/unit/test_alifshop_parser.py
+
+      - name: Run worker integration tests
+        env:
+          PYTHONPATH: services/worker:.
+        run: |
+          python -m pytest -q --maxfail=1 --confcutdir=tests/integration tests/integration
+
+      - name: Run AI validation tests
+        env:
+          PYTHONPATH: services/worker:.
+        run: |
+          python -m pytest -q --maxfail=1 --confcutdir=tests/ai_validation tests/ai_validation
 
   frontend:
     name: Frontend (lint, typecheck, test, build)
@@ -69,7 +111,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
