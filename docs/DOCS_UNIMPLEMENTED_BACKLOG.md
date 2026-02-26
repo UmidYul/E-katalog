@@ -85,8 +85,8 @@ Scaling plan not yet implemented in full:
 - [x] Move canonical indexes to Redis/Postgres mappings for large-scale matching (added `catalog_canonical_key_index` table + worker service with Redis cache + periodic rebuild task).
 - [ ] Batch embedding inference + vector DB ANN indexing strategy.
 - [x] Replace O(N*C) scans with candidate blocking (bucket index in `CanonicalMatchingEngine` limits candidate set by brand/model/storage).
-- [ ] Distributed workers with offset checkpoints for canonical pipeline.
-- [ ] Immutable match ledger + snapshot compaction.
+- [x] Distributed workers with offset checkpoints for canonical pipeline baseline: canonical index refresh now runs incrementally with `catalog_pipeline_offsets` watermark and auto follow-up chunks.
+- [x] Immutable match ledger + snapshot compaction baseline: added append-only `catalog_canonical_match_ledger` events and daily compaction into `catalog_canonical_match_snapshots`.
 - [ ] Active learning loop for low-confidence/false-merge correction.
 
 Tuning backlog:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from datetime import UTC, datetime
 from urllib.parse import unquote
@@ -205,7 +206,15 @@ def _choose_preferred_image(
     return scored[0][4]
 
 
-async def _resolve_or_create_canonical(session, *, title: str, category_id: int, brand_id: int | None, specs: dict, image: str | None):
+async def _resolve_or_create_canonical(
+    session,
+    *,
+    title: str,
+    category_id: int,
+    brand_id: int | None,
+    specs: dict,
+    image: str | None,
+) -> tuple[CatalogCanonicalProduct, str]:
     canonical_attrs = extract_attributes(title)
     key_value = canonical_key(canonical_attrs)
     indexed_canonical_id = await resolve_canonical_by_key(session, canonical_key_value=key_value)
@@ -229,7 +238,7 @@ async def _resolve_or_create_canonical(session, *, title: str, category_id: int,
                 indexed_canonical.main_image = image
             if specs and (not isinstance(indexed_canonical.specs, dict) or not indexed_canonical.specs):
                 indexed_canonical.specs = specs
-            return indexed_canonical
+            return indexed_canonical, "index"
 
     canonical = (
         await session.execute(
@@ -249,7 +258,7 @@ async def _resolve_or_create_canonical(session, *, title: str, category_id: int,
             canonical.main_image = image
         if specs and (not isinstance(canonical.specs, dict) or not canonical.specs):
             canonical.specs = specs
-        return canonical
+        return canonical, "exact"
 
     # Upgrade existing neutral canonical records once brand becomes known.
     if brand_id is not None:
@@ -272,7 +281,7 @@ async def _resolve_or_create_canonical(session, *, title: str, category_id: int,
                 neutral.main_image = image
             if specs and (not isinstance(neutral.specs, dict) or not neutral.specs):
                 neutral.specs = specs
-            return neutral
+            return neutral, "neutral_upgrade"
 
     ai_candidate_id = await _find_ai_canonical_candidate(
         session,
@@ -298,7 +307,7 @@ async def _resolve_or_create_canonical(session, *, title: str, category_id: int,
                 canonical.main_image = image
             if specs and (not isinstance(canonical.specs, dict) or not canonical.specs):
                 canonical.specs = specs
-            return canonical
+            return canonical, "ai_candidate"
 
     canonical = CatalogCanonicalProduct(
         normalized_title=title,
@@ -309,7 +318,40 @@ async def _resolve_or_create_canonical(session, *, title: str, category_id: int,
     )
     session.add(canonical)
     await session.flush()
-    return canonical
+    return canonical, "new"
+
+
+async def _append_canonical_match_ledger(
+    session,
+    *,
+    store_product_id: int,
+    canonical_product_id: int,
+    canonical_title: str,
+    match_type: str,
+    payload: dict,
+) -> None:
+    attrs = extract_attributes(canonical_title)
+    key_value = canonical_key(attrs).strip().lower()
+    await session.execute(
+        text(
+            """
+            insert into catalog_canonical_match_ledger
+              (store_product_id, canonical_product_id, canonical_key, action, match_type, confidence_score, engine_version, flags, payload, created_at)
+            values
+              (:store_product_id, :canonical_product_id, :canonical_key, :action, :match_type, null, :engine_version, cast(:flags as jsonb), cast(:payload as jsonb), now())
+            """
+        ),
+        {
+            "store_product_id": int(store_product_id),
+            "canonical_product_id": int(canonical_product_id),
+            "canonical_key": key_value,
+            "action": "upsert_match",
+            "match_type": str(match_type or "normalized")[:32],
+            "engine_version": 1,
+            "flags": "[]",
+            "payload": json.dumps(payload or {}, ensure_ascii=False),
+        },
+    )
 
 
 async def _find_ai_canonical_candidate(
@@ -471,7 +513,7 @@ async def _normalize_product_batch(limit: int, *, reset_offset: bool = False) ->
             else:
                 brand_id = product.brand_id if product else None
 
-            canonical = await _resolve_or_create_canonical(
+            canonical, match_type = await _resolve_or_create_canonical(
                 session,
                 title=canonical_title,
                 category_id=category_id,
@@ -484,6 +526,19 @@ async def _normalize_product_batch(limit: int, *, reset_offset: bool = False) ->
                 canonical_product_id=int(canonical.id),
                 canonical_title=str(canonical.normalized_title or canonical_title),
                 source="normalize",
+            )
+            await _append_canonical_match_ledger(
+                session,
+                store_product_id=int(store_product.id),
+                canonical_product_id=int(canonical.id),
+                canonical_title=str(canonical.normalized_title or canonical_title),
+                match_type=match_type,
+                payload={
+                    "store_id": int(store_product.store_id),
+                    "product_id": int(product.id) if product else None,
+                    "inferred_brand": inferred_brand,
+                    "category_id": int(category_id),
+                },
             )
 
             store_product.canonical_product_id = canonical.id

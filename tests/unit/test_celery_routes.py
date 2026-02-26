@@ -125,3 +125,14 @@ def test_canonical_key_index_refresh_schedule_registered() -> None:
     schedule = celery_app.conf.beat_schedule.get("canonical-key-index-refresh-daily-0410")
     assert schedule is not None
     assert schedule["task"] == "app.tasks.maintenance_tasks.enqueue_refresh_canonical_key_index"
+
+
+def test_canonical_match_snapshot_compaction_task_routing() -> None:
+    route = celery_app.conf.task_routes.get("app.tasks.maintenance_tasks.compact_canonical_match_snapshots")
+    assert route == {"queue": "maintenance", "routing_key": "maintenance"}
+
+
+def test_canonical_match_snapshot_compaction_schedule_registered() -> None:
+    schedule = celery_app.conf.beat_schedule.get("canonical-match-snapshot-compaction-daily-0445")
+    assert schedule is not None
+    assert schedule["task"] == "app.tasks.maintenance_tasks.enqueue_compact_canonical_match_snapshots"

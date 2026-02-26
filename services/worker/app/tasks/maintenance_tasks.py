@@ -16,7 +16,7 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 
 from app.platform.services.pipeline_offsets import ensure_offsets_table
-from app.platform.services.canonical_index import rebuild_canonical_key_index
+from app.platform.services.canonical_index import sync_canonical_key_index_batch
 from app.core.config import settings
 from app.core.logging import logger
 from app.db.session import AsyncSessionLocal
@@ -1836,20 +1836,35 @@ def enqueue_cleanup_auth_legacy_redis_keys(self) -> str:
 
 
 @celery_app.task(bind=True)
-def refresh_canonical_key_index(self, limit: int | None = None) -> dict[str, Any]:
-    return asyncio.run(_refresh_canonical_key_index(limit=limit))
+def refresh_canonical_key_index(
+    self,
+    limit: int | None = None,
+    reset_offset: bool = False,
+    followup: bool = True,
+) -> dict[str, Any]:
+    result = asyncio.run(_refresh_canonical_key_index(limit=limit, reset_offset=reset_offset))
+    if followup and bool(result.get("has_more")):
+        self.apply_async(kwargs={"limit": int(result.get("limit") or 100000), "reset_offset": False, "followup": True})
+    return result
 
 
-async def _refresh_canonical_key_index(*, limit: int | None = None) -> dict[str, Any]:
+async def _refresh_canonical_key_index(*, limit: int | None = None, reset_offset: bool = False) -> dict[str, Any]:
     effective_limit = int(limit) if isinstance(limit, int) and limit > 0 else 100000
     async with AsyncSessionLocal() as session:
-        result = await rebuild_canonical_key_index(session, limit=effective_limit)
+        result = await sync_canonical_key_index_batch(
+            session,
+            limit=effective_limit,
+            reset_offset=bool(reset_offset),
+        )
         await session.commit()
     return {
         "status": "ok",
         "indexed": int(result.get("indexed", 0)),
         "skipped": int(result.get("skipped", 0)),
+        "processed": int(result.get("processed", 0)),
         "limit": effective_limit,
+        "has_more": bool(result.get("has_more", False)),
+        "mode": "incremental",
         "at": datetime.now(UTC).isoformat(),
     }
 
@@ -1857,6 +1872,102 @@ async def _refresh_canonical_key_index(*, limit: int | None = None) -> dict[str,
 @celery_app.task(bind=True)
 def enqueue_refresh_canonical_key_index(self) -> str:
     return refresh_canonical_key_index.delay().id
+
+
+@celery_app.task(bind=True)
+def compact_canonical_match_snapshots(
+    self,
+    snapshot_date: str | None = None,
+    limit: int = 100000,
+) -> dict[str, Any]:
+    return asyncio.run(_compact_canonical_match_snapshots(snapshot_date=snapshot_date, limit=limit))
+
+
+async def _compact_canonical_match_snapshots(*, snapshot_date: str | None = None, limit: int = 100000) -> dict[str, Any]:
+    effective_limit = max(1000, int(limit))
+    snapshot_date_sql = str(snapshot_date).strip() if snapshot_date else None
+    async with AsyncSessionLocal() as session:
+        if snapshot_date_sql:
+            date_row = (
+                await session.execute(
+                    text("select cast(:snapshot_date as date) as d"),
+                    {"snapshot_date": snapshot_date_sql},
+                )
+            ).first()
+            target_date = date_row.d
+        else:
+            target_date = datetime.now(UTC).date()
+
+        compacted = await session.execute(
+            text(
+                """
+                with grouped as (
+                    select
+                        canonical_product_id,
+                        canonical_key,
+                        count(*)::int as offers_total,
+                        max(created_at) as last_match_at,
+                        jsonb_object_agg(match_type, type_count) as by_match_type
+                    from (
+                        select
+                            canonical_product_id,
+                            canonical_key,
+                            match_type,
+                            count(*)::int as type_count,
+                            max(created_at) as created_at
+                        from catalog_canonical_match_ledger
+                        where created_at::date = :target_date
+                        group by canonical_product_id, canonical_key, match_type
+                    ) typed
+                    group by canonical_product_id, canonical_key
+                    order by canonical_product_id asc
+                    limit :limit
+                )
+                insert into catalog_canonical_match_snapshots
+                  (snapshot_date, canonical_product_id, canonical_key, offers_total, last_match_at, payload, created_at, updated_at)
+                select
+                  :target_date,
+                  g.canonical_product_id,
+                  g.canonical_key,
+                  g.offers_total,
+                  g.last_match_at,
+                  jsonb_build_object(
+                    'source', 'ledger_compaction',
+                    'match_type_breakdown', coalesce(g.by_match_type, '{}'::jsonb)
+                  ) as payload,
+                  now(),
+                  now()
+                from grouped g
+                on conflict (snapshot_date, canonical_product_id, canonical_key) do update
+                  set offers_total = excluded.offers_total,
+                      last_match_at = excluded.last_match_at,
+                      payload = excluded.payload,
+                      updated_at = now()
+                """
+            ),
+            {"target_date": target_date, "limit": effective_limit},
+        )
+        await session.commit()
+
+    rows_affected = int(compacted.rowcount or 0)
+    logger.info(
+        "canonical_match_snapshot_compaction_completed",
+        snapshot_date=str(target_date),
+        rows_affected=rows_affected,
+        limit=effective_limit,
+    )
+    return {
+        "status": "ok",
+        "snapshot_date": str(target_date),
+        "rows_affected": rows_affected,
+        "limit": effective_limit,
+        "at": datetime.now(UTC).isoformat(),
+    }
+
+
+@celery_app.task(bind=True)
+def enqueue_compact_canonical_match_snapshots(self) -> str:
+    return compact_canonical_match_snapshots.delay().id
 
 
 async def _refresh_offer_trust_scores(*, limit: int, freshness_hours: int, stock_window_days: int) -> dict[str, Any]:
@@ -2121,7 +2232,7 @@ async def _prepare_full_catalog_rebuild() -> dict:
             text(
                 """
                 delete from catalog_pipeline_offsets
-                where job_name in ('normalize_store_products', 'reindex_product_search')
+                where job_name in ('normalize_store_products', 'reindex_product_search', 'canonical_key_index')
                 """
             )
         )

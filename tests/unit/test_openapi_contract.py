@@ -160,8 +160,17 @@ def test_compare_share_create_contract_includes_telemetry_source() -> None:
     component = schema.get("components", {}).get("schemas", {}).get(component_name, {})
     props = component.get("properties", {})
     telemetry_source = props.get("telemetry_source", {})
-    assert telemetry_source.get("type") == "string"
-    assert int(telemetry_source.get("maxLength", 0)) == 64
+    if telemetry_source.get("type") == "string":
+        assert int(telemetry_source.get("maxLength", 0)) == 64
+        assert int(telemetry_source.get("minLength", 0)) == 2
+        return
+
+    any_of = telemetry_source.get("anyOf")
+    assert isinstance(any_of, list) and any_of, "telemetry_source must be represented as string or nullable string"
+    string_variant = next((item for item in any_of if isinstance(item, dict) and item.get("type") == "string"), None)
+    assert isinstance(string_variant, dict), "telemetry_source anyOf must include string variant"
+    assert int(string_variant.get("maxLength", 0)) == 64
+    assert int(string_variant.get("minLength", 0)) == 2
 
 
 def test_product_offers_sort_contract_supports_best_value() -> None:

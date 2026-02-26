@@ -77,3 +77,5 @@
 - `DONE` Config-driven normalization baseline (Roadmap F): extracted normalization rules into YAML (`normalization_rules.yaml`) with runtime loader/cache + env-controlled path/reload, covering brand aliases, spec-key aliases, noise patterns, colors, and placeholder values.
 - `DONE` SLO/observability hardening baseline (Roadmap G): `/api/v1/metrics` now exposes SLO-oriented gauges and breach indicators (5xx error ratio + p95/p99 latency estimates + configured targets).
 - `DONE` Canonical matching scaling (partial baseline): introduced persistent canonical key index (`catalog_canonical_key_index`) with Redis cache-backed resolver and daily refresh task, plus candidate blocking buckets in matching engine to avoid full-corpus scans per offer.
+- `DONE` Canonical index processing now uses offset checkpoints (`catalog_pipeline_offsets`) with incremental chunk processing and auto follow-up task scheduling for large backfills.
+- `DONE` Canonical match ledger/snapshot baseline: normalize pipeline writes immutable match events to `catalog_canonical_match_ledger`; scheduled compaction task creates daily snapshots in `catalog_canonical_match_snapshots`.

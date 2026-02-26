@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.logging import logger
 from app.platform.services.canonical_matching import canonical_key, extract_attributes
+from app.platform.services.pipeline_offsets import ensure_offsets_table, get_offset, set_offset
 
 
 def _cache_key(canonical_key_value: str) -> str:
@@ -171,3 +172,84 @@ async def rebuild_canonical_key_index(session: AsyncSession, *, limit: int = 500
 
     logger.info("canonical_index_rebuilt", indexed=indexed, skipped=skipped, limit=max(1, int(limit)))
     return {"indexed": indexed, "skipped": skipped, "limit": max(1, int(limit))}
+
+
+async def sync_canonical_key_index_batch(
+    session: AsyncSession,
+    *,
+    limit: int = 5000,
+    reset_offset: bool = False,
+) -> dict[str, Any]:
+    await ensure_offsets_table(session)
+    job_name = "canonical_key_index"
+    if reset_offset:
+        last_ts = None
+        last_id = 0
+    else:
+        last_ts, last_id = await get_offset(session, job_name)
+
+    params: dict[str, Any] = {"limit": max(100, int(limit))}
+    where_clause = ""
+    if last_ts is not None:
+        where_clause = "and (cp.updated_at > :last_ts or (cp.updated_at = :last_ts and cp.id > :last_id))"
+        params["last_ts"] = last_ts
+        params["last_id"] = int(last_id)
+
+    rows = (
+        await session.execute(
+            text(
+                f"""
+                select cp.id, cp.normalized_title, cp.updated_at
+                from catalog_canonical_products cp
+                where cp.is_active = true
+                {where_clause}
+                order by cp.updated_at asc, cp.id asc
+                limit :limit
+                """
+            ),
+            params,
+        )
+    ).all()
+
+    indexed = 0
+    skipped = 0
+    watermark_ts = last_ts
+    watermark_id = int(last_id)
+    for row in rows:
+        canonical_id = int(row.id)
+        title = str(row.normalized_title or "").strip()
+        if not title:
+            skipped += 1
+        else:
+            key_value = await upsert_canonical_index_entry(
+                session,
+                canonical_product_id=canonical_id,
+                canonical_title=title,
+                source="sync",
+            )
+            if key_value:
+                indexed += 1
+            else:
+                skipped += 1
+        watermark_ts = row.updated_at
+        watermark_id = canonical_id
+
+    if rows:
+        await set_offset(session, job_name, last_ts=watermark_ts, last_id=watermark_id)
+
+    has_more = len(rows) >= int(params["limit"])
+    logger.info(
+        "canonical_index_sync_batch_completed",
+        indexed=indexed,
+        skipped=skipped,
+        limit=int(params["limit"]),
+        has_more=has_more,
+        reset_offset=bool(reset_offset),
+    )
+    return {
+        "indexed": indexed,
+        "skipped": skipped,
+        "processed": len(rows),
+        "limit": int(params["limit"]),
+        "has_more": has_more,
+    }

@@ -90,6 +90,8 @@ celery_app.conf.update(
         "app.tasks.maintenance_tasks.enqueue_refresh_offer_trust_scores": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.maintenance_tasks.refresh_canonical_key_index": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.maintenance_tasks.enqueue_refresh_canonical_key_index": {"queue": "maintenance", "routing_key": "maintenance"},
+        "app.tasks.maintenance_tasks.compact_canonical_match_snapshots": {"queue": "maintenance", "routing_key": "maintenance"},
+        "app.tasks.maintenance_tasks.enqueue_compact_canonical_match_snapshots": {"queue": "maintenance", "routing_key": "maintenance"},
     },
     beat_schedule={
         "scrape-every-6h": {
@@ -190,6 +192,11 @@ celery_app.conf.update(
         "canonical-key-index-refresh-daily-0410": {
             "task": "app.tasks.maintenance_tasks.enqueue_refresh_canonical_key_index",
             "schedule": crontab(minute=10, hour=4),
+            "options": {"queue": "maintenance", "routing_key": "maintenance"},
+        },
+        "canonical-match-snapshot-compaction-daily-0445": {
+            "task": "app.tasks.maintenance_tasks.enqueue_compact_canonical_match_snapshots",
+            "schedule": crontab(minute=45, hour=4),
             "options": {"queue": "maintenance", "routing_key": "maintenance"},
         },
     },
