@@ -4,6 +4,7 @@ import asyncio
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from statistics import median
 from typing import Any
 
@@ -461,6 +462,290 @@ async def _generate_catalog_quality_report() -> dict:
 @celery_app.task(bind=True)
 def enqueue_catalog_quality_reports(self) -> str:
     return generate_catalog_quality_report.delay().id
+
+
+def _format_price(value: Decimal | float | int | None) -> str:
+    if value is None:
+        return "n/a"
+    try:
+        numeric = Decimal(str(value))
+    except Exception:  # noqa: BLE001
+        return str(value)
+    return f"{numeric:.2f}"
+
+
+def _telegram_chat_id(raw_value: str | None) -> str | None:
+    normalized = str(raw_value or "").strip()
+    if not normalized:
+        return None
+    if normalized.lower().startswith("chatid:"):
+        chat_id = normalized.split(":", 1)[1].strip()
+        return chat_id or None
+    return normalized
+
+
+def _should_send_price_alert(
+    *,
+    current_price: Decimal | None,
+    target_price: Decimal | None,
+    baseline_price: Decimal | None,
+    last_notified_at: datetime | None,
+    cooldown_minutes: int,
+    now_dt: datetime,
+) -> bool:
+    if current_price is None:
+        return False
+    if target_price is not None:
+        trigger_hit = current_price <= target_price
+    elif baseline_price is not None:
+        trigger_hit = current_price < baseline_price
+    else:
+        trigger_hit = False
+    if not trigger_hit:
+        return False
+    if last_notified_at is None:
+        return True
+    cooldown = max(0, int(cooldown_minutes))
+    if cooldown <= 0:
+        return True
+    return now_dt >= (last_notified_at + timedelta(minutes=cooldown))
+
+
+def _build_price_alert_message(
+    *,
+    product_title: str,
+    product_uuid: str,
+    current_price: Decimal,
+    target_price: Decimal | None,
+    baseline_price: Decimal | None,
+) -> str:
+    public_base = str(settings.next_public_app_url or "").strip().rstrip("/")
+    product_url = f"{public_base}/products/{product_uuid}" if public_base else ""
+    lines = [
+        "Price alert triggered",
+        f"Product: {product_title}",
+        f"Current price: {_format_price(current_price)}",
+    ]
+    if target_price is not None:
+        lines.append(f"Target price: {_format_price(target_price)}")
+    elif baseline_price is not None:
+        lines.append(f"Baseline price: {_format_price(baseline_price)}")
+    if product_url:
+        lines.append(f"Open product: {product_url}")
+    return "\n".join(lines)
+
+
+async def _send_telegram_text(*, chat_id: str, text_value: str) -> tuple[bool, str | None]:
+    token = str(settings.price_alerts_telegram_bot_token or "").strip()
+    if not token:
+        return False, "missing telegram bot token"
+    api_base = str(settings.price_alerts_telegram_api_base or "https://api.telegram.org").strip().rstrip("/")
+    endpoint = f"{api_base}/bot{token}/sendMessage"
+    try:
+        timeout = httpx.Timeout(timeout=10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(
+                endpoint,
+                json={
+                    "chat_id": chat_id,
+                    "text": text_value,
+                    "disable_web_page_preview": True,
+                },
+            )
+        if response.status_code >= 400:
+            return False, f"http {response.status_code}: {response.text[:300]}"
+        payload = response.json()
+        if payload.get("ok") is not True:
+            return False, f"telegram error: {payload}"
+        return True, None
+    except Exception as exc:  # noqa: BLE001
+        return False, str(exc)
+
+
+async def _load_price_alert_candidates(session, *, limit: int) -> list[dict[str, Any]]:
+    rows = (
+        await session.execute(
+            text(
+                """
+                with current_prices as (
+                    select
+                        o.canonical_product_id as product_id,
+                        min(o.price_amount) as current_min_price
+                    from catalog_offers o
+                    where o.is_valid = true
+                      and o.in_stock = true
+                    group by o.canonical_product_id
+                )
+                select
+                    a.id,
+                    a.uuid,
+                    a.user_uuid,
+                    a.product_id,
+                    a.channel,
+                    a.baseline_price,
+                    a.target_price,
+                    a.last_seen_price,
+                    a.last_notified_at,
+                    cp.title as product_title,
+                    cp.uuid as product_uuid,
+                    cur.current_min_price,
+                    au.telegram as telegram_contact
+                from catalog_price_alerts a
+                join catalog_canonical_products cp on cp.id = a.product_id
+                left join current_prices cur on cur.product_id = a.product_id
+                left join auth_users au on cast(au.uuid as text) = cast(a.user_uuid as text)
+                where a.alerts_enabled = true
+                  and a.channel = 'telegram'
+                order by coalesce(a.last_notified_at, to_timestamp(0)) asc, a.updated_at asc, a.id asc
+                limit :limit
+                """
+            ),
+            {"limit": max(1, int(limit))},
+        )
+    ).mappings().all()
+    return [dict(row) for row in rows]
+
+
+async def _deliver_price_alert_notifications(*, limit: int) -> dict[str, Any]:
+    if not settings.price_alerts_delivery_enabled:
+        return {"status": "disabled", "reason": "price_alerts_delivery_disabled", "at": datetime.now(UTC).isoformat()}
+    if not str(settings.price_alerts_telegram_bot_token or "").strip():
+        return {"status": "disabled", "reason": "missing_telegram_bot_token", "at": datetime.now(UTC).isoformat()}
+
+    now_dt = datetime.now(UTC)
+    effective_limit = max(1, int(limit))
+    sent = 0
+    skipped_no_contact = 0
+    skipped_not_triggered = 0
+    skipped_cooldown = 0
+    failed = 0
+    seen_updates = 0
+
+    async with AsyncSessionLocal() as session:
+        candidates = await _load_price_alert_candidates(session, limit=effective_limit)
+        for row in candidates:
+            alert_id = int(row["id"])
+            current_price = row.get("current_min_price")
+            target_price = row.get("target_price")
+            baseline_price = row.get("baseline_price")
+            last_seen_price = row.get("last_seen_price")
+            last_notified_at = row.get("last_notified_at")
+
+            if current_price is not None and current_price != last_seen_price:
+                await session.execute(
+                    text(
+                        """
+                        update catalog_price_alerts
+                        set last_seen_price = :last_seen_price,
+                            updated_at = now()
+                        where id = :id
+                        """
+                    ),
+                    {
+                        "id": alert_id,
+                        "last_seen_price": current_price,
+                    },
+                )
+                seen_updates += 1
+
+            if current_price is None:
+                skipped_not_triggered += 1
+                continue
+
+            trigger_hit = False
+            if target_price is not None:
+                trigger_hit = current_price <= target_price
+            elif baseline_price is not None:
+                trigger_hit = current_price < baseline_price
+            if not trigger_hit:
+                skipped_not_triggered += 1
+                continue
+
+            if not _should_send_price_alert(
+                current_price=current_price,
+                target_price=target_price,
+                baseline_price=baseline_price,
+                last_notified_at=last_notified_at,
+                cooldown_minutes=settings.price_alerts_notify_cooldown_minutes,
+                now_dt=now_dt,
+            ):
+                skipped_cooldown += 1
+                continue
+
+            chat_id = _telegram_chat_id(row.get("telegram_contact"))
+            if chat_id is None:
+                skipped_no_contact += 1
+                continue
+
+            message = _build_price_alert_message(
+                product_title=str(row.get("product_title") or "Product"),
+                product_uuid=str(row.get("product_uuid") or ""),
+                current_price=current_price,
+                target_price=target_price,
+                baseline_price=baseline_price,
+            )
+            delivered, error = await _send_telegram_text(chat_id=chat_id, text_value=message)
+            if not delivered:
+                failed += 1
+                logger.warning(
+                    "price_alert_delivery_failed",
+                    alert_id=alert_id,
+                    chat_id=chat_id,
+                    error=str(error or "unknown"),
+                )
+                continue
+
+            await session.execute(
+                text(
+                    """
+                    update catalog_price_alerts
+                    set last_seen_price = :last_seen_price,
+                        last_notified_at = now(),
+                        updated_at = now()
+                    where id = :id
+                    """
+                ),
+                {
+                    "id": alert_id,
+                    "last_seen_price": current_price,
+                },
+            )
+            sent += 1
+
+        await session.commit()
+
+    logger.info(
+        "price_alert_delivery_completed",
+        scanned=effective_limit,
+        sent=sent,
+        failed=failed,
+        skipped_no_contact=skipped_no_contact,
+        skipped_not_triggered=skipped_not_triggered,
+        skipped_cooldown=skipped_cooldown,
+        seen_updates=seen_updates,
+    )
+    return {
+        "status": "ok",
+        "limit": effective_limit,
+        "sent": sent,
+        "failed": failed,
+        "skipped_no_contact": skipped_no_contact,
+        "skipped_not_triggered": skipped_not_triggered,
+        "skipped_cooldown": skipped_cooldown,
+        "seen_updates": seen_updates,
+        "at": datetime.now(UTC).isoformat(),
+    }
+
+
+@celery_app.task(bind=True)
+def deliver_price_alert_notifications(self, limit: int | None = None) -> dict[str, Any]:
+    effective_limit = int(limit) if isinstance(limit, int) and limit > 0 else int(settings.price_alerts_scan_limit)
+    return asyncio.run(_deliver_price_alert_notifications(limit=effective_limit))
+
+
+@celery_app.task(bind=True)
+def enqueue_price_alert_notifications(self) -> str:
+    return deliver_price_alert_notifications.delay().id
 
 
 async def _collect_order_alert_metrics(redis: Redis) -> dict[str, float]:

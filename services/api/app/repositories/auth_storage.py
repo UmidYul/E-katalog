@@ -61,6 +61,8 @@ def _format_auth_user_payload(user: AuthUser) -> dict[str, Any]:
         "twofa_recovery_codes_hash": ",".join(user.twofa_recovery_codes_hash or []),
         "twofa_pending_secret": str(user.twofa_pending_secret or ""),
         "twofa_pending_recovery_codes_hash": ",".join(user.twofa_pending_recovery_codes_hash or []),
+        "email_confirmed": bool(user.email_confirmed),
+        "email_confirmed_at": user.email_confirmed_at.astimezone(UTC).isoformat() if user.email_confirmed_at else "",
     }
 
 
@@ -142,6 +144,8 @@ async def pg_upsert_user_from_redis_mapping(db: AsyncSession, payload: dict[str,
         "twofa_pending_secret": str(payload.get("twofa_pending_secret") or "").strip() or None,
         "twofa_pending_recovery_codes_hash": _parse_hash_csv(payload.get("twofa_pending_recovery_codes_hash")),
         "auth_provider": str(payload.get("auth_provider") or "").strip() or None,
+        "email_confirmed": str(payload.get("email_confirmed", "0")).strip().lower() in {"1", "true", "yes"},
+        "email_confirmed_at": _parse_iso_datetime(payload.get("email_confirmed_at")),
         "created_at": _parse_iso_datetime(payload.get("created_at")) or datetime.now(UTC),
         "updated_at": _parse_iso_datetime(payload.get("updated_at")) or datetime.now(UTC),
         "last_seen_at": _parse_iso_datetime(payload.get("last_seen_at")),
@@ -168,6 +172,8 @@ async def pg_upsert_user_from_redis_mapping(db: AsyncSession, payload: dict[str,
         "twofa_pending_secret": insert_stmt.excluded.twofa_pending_secret,
         "twofa_pending_recovery_codes_hash": insert_stmt.excluded.twofa_pending_recovery_codes_hash,
         "auth_provider": insert_stmt.excluded.auth_provider,
+        "email_confirmed": insert_stmt.excluded.email_confirmed,
+        "email_confirmed_at": insert_stmt.excluded.email_confirmed_at,
         "updated_at": insert_stmt.excluded.updated_at,
         "last_seen_at": insert_stmt.excluded.last_seen_at,
     }
@@ -210,6 +216,10 @@ def _coerce_user_field_updates(fields: dict[str, str]) -> dict[str, Any]:
             updates["twofa_pending_recovery_codes_hash"] = _parse_hash_csv(value)
         elif key == "auth_provider":
             updates["auth_provider"] = value or None
+        elif key == "email_confirmed":
+            updates["email_confirmed"] = value.lower() in {"1", "true", "yes"}
+        elif key == "email_confirmed_at":
+            updates["email_confirmed_at"] = _parse_iso_datetime(value)
         elif key == "updated_at":
             updates["updated_at"] = _parse_iso_datetime(value) or datetime.now(UTC)
     return updates

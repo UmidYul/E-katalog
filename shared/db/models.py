@@ -404,6 +404,24 @@ class AdminAlertEvent(CatalogUuidMixin, Base):
     )
 
 
+class AdminAuditEvent(CatalogUuidMixin, Base):
+    __tablename__ = "admin_audit_events"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    actor_user_uuid: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    actor_role: Mapped[str] = mapped_column(String(32), nullable=False, default="admin", server_default="admin")
+    action: Mapped[str] = mapped_column(String(128), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    entity_id: Mapped[str | None] = mapped_column(String(255))
+    request_id: Mapped[str | None] = mapped_column(String(128))
+    method: Mapped[str] = mapped_column(String(16), nullable=False, default="", server_default="")
+    path: Mapped[str] = mapped_column(String(512), nullable=False, default="", server_default="")
+    ip_address: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown", server_default="unknown")
+    user_agent: Mapped[str] = mapped_column(String(512), nullable=False, default="", server_default="")
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class AuthUser(Base):
     __tablename__ = "auth_users"
     __table_args__ = (
@@ -436,6 +454,8 @@ class AuthUser(Base):
         JSONB, nullable=False, default=list, server_default="[]"
     )
     auth_provider: Mapped[str | None] = mapped_column(String(32))
+    email_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    email_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
@@ -559,6 +579,10 @@ Index("ix_catalog_price_alert_updated_at", CatalogPriceAlert.updated_at.desc())
 Index("ix_admin_alert_events_created_at", AdminAlertEvent.created_at.desc())
 Index("ix_admin_alert_events_status_severity_created", AdminAlertEvent.status, AdminAlertEvent.severity, AdminAlertEvent.created_at.desc())
 Index("ix_admin_alert_events_source_code", AdminAlertEvent.source, AdminAlertEvent.code)
+Index("ix_admin_audit_events_created_at", AdminAuditEvent.created_at.desc())
+Index("ix_admin_audit_events_actor_created", AdminAuditEvent.actor_user_uuid, AdminAuditEvent.created_at.desc())
+Index("ix_admin_audit_events_entity_created", AdminAuditEvent.entity_type, AdminAuditEvent.entity_id, AdminAuditEvent.created_at.desc())
+Index("ix_admin_audit_events_action_created", AdminAuditEvent.action, AdminAuditEvent.created_at.desc())
 Index("ix_catalog_crawl_jobs_store_started", CatalogCrawlJob.store_id, CatalogCrawlJob.started_at.desc())
 Index("ix_catalog_crawl_job_items_job_status", CatalogCrawlJobItem.crawl_job_id, CatalogCrawlJobItem.status)
 Index("ix_auth_users_email", AuthUser.email)

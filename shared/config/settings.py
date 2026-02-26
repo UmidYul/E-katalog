@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     admin_alert_order_cancel_rate_critical: float = 0.15
     admin_alert_operation_failed_rate_warn: float = 0.10
     admin_alert_operation_failed_rate_critical: float = 0.20
+    price_alerts_delivery_enabled: bool = True
+    price_alerts_scan_limit: int = 500
+    price_alerts_notify_cooldown_minutes: int = 720
+    price_alerts_telegram_bot_token: str | None = None
+    price_alerts_telegram_api_base: str = "https://api.telegram.org"
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000
@@ -89,6 +94,8 @@ class Settings(BaseSettings):
     auth_lockout_max_attempts_email: int = 8
     auth_password_reset_ttl_seconds: int = 1800
     auth_password_reset_debug_return_token: bool = False
+    auth_email_confirmation_ttl_seconds: int = 86400
+    auth_email_confirmation_debug_return_token: bool = False
     auth_token_cleanup_enabled: bool = True
     auth_password_reset_used_retention_days: int = 7
     auth_session_token_revoked_retention_days: int = 30

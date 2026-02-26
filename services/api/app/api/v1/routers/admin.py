@@ -13,15 +13,17 @@ from typing import Any, Literal
 from urllib.parse import urljoin
 from uuid import uuid4
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request, Response
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
-from sqlalchemy import text
+from sqlalchemy import select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db_session, get_redis
-from app.api.v1.routers.auth import _ensure_user_uuid, get_current_user
+from app.api.rbac import ADMIN_ROLE
+from app.api.rbac import require_roles
+from app.api.v1.routers.auth import _ensure_user_uuid
 from app.core.config import settings
 from app.repositories.catalog import CatalogRepository
 from app.services.worker_client import enqueue_dedupe_batches
@@ -34,16 +36,13 @@ from app.services.worker_client import enqueue_ingested_products_pipeline
 from app.services.worker_client import enqueue_reindex_batches
 from app.services.worker_client import enqueue_test_quality_alert
 from app.services.worker_client import get_task_status
+from shared.db.models import AuthUser
 
-
-def require_admin(user: dict = Depends(get_current_user)) -> dict:
-    role = str(user.get("role", "")).lower()
-    if role != "admin":
-        raise HTTPException(status_code=403, detail="admin access required")
-    return user
-
-
-router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
+router = APIRouter(
+    prefix="/admin",
+    tags=["admin"],
+    dependencies=[Depends(require_roles(ADMIN_ROLE, detail="admin access required"))],
+)
 
 
 VALID_USER_ROLES = {"user", "moderator", "seller_support", "admin"}
@@ -53,6 +52,10 @@ ANALYTICS_GRANULARITIES = {"day", "week"}
 ALERT_EVENT_STATUSES = {"open", "ack", "resolved"}
 ALERT_EVENT_SOURCES = {"revenue", "catalog_quality", "operations", "moderation", "users"}
 ALERT_EVENT_SEVERITIES = {"info", "warning", "critical"}
+
+
+def _auth_reads_from_postgres() -> bool:
+    return settings.auth_storage_mode == "postgres"
 
 
 def _to_float(value: Any, default: float = 0.0) -> float:
@@ -320,6 +323,98 @@ def _serialize_quality_no_offer_row(row: dict[str, Any]) -> dict[str, Any]:
         "category": {"id": str(category_id), "name": row.get("category_name")}
         if category_id and row.get("category_name")
         else None,
+    }
+
+
+def _request_ip(request: Request) -> str:
+    x_forwarded_for = str(request.headers.get("x-forwarded-for") or "").strip()
+    if x_forwarded_for:
+        ip = x_forwarded_for.split(",", maxsplit=1)[0].strip()
+        if ip:
+            return ip
+    x_real_ip = str(request.headers.get("x-real-ip") or "").strip()
+    if x_real_ip:
+        return x_real_ip
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+async def _audit_admin_action(
+    db: AsyncSession,
+    *,
+    current_user: dict,
+    request: Request,
+    action: str,
+    entity_type: str,
+    entity_id: str | None = None,
+    payload: dict[str, Any] | None = None,
+) -> None:
+    actor_uuid = str(current_user.get("id") or "").strip().lower() or None
+    actor_role = str(current_user.get("role") or "admin").strip().lower() or "admin"
+    req_id = getattr(getattr(request, "state", None), "request_id", None)
+    await db.execute(
+        text(
+            """
+            insert into admin_audit_events (
+                actor_user_uuid,
+                actor_role,
+                action,
+                entity_type,
+                entity_id,
+                request_id,
+                method,
+                path,
+                ip_address,
+                user_agent,
+                payload
+            )
+            values (
+                cast(:actor_user_uuid as uuid),
+                :actor_role,
+                :action,
+                :entity_type,
+                :entity_id,
+                :request_id,
+                :method,
+                :path,
+                :ip_address,
+                :user_agent,
+                cast(:payload as jsonb)
+            )
+            """
+        ),
+        {
+            "actor_user_uuid": actor_uuid,
+            "actor_role": actor_role,
+            "action": action,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "request_id": str(req_id) if req_id else None,
+            "method": request.method,
+            "path": request.url.path,
+            "ip_address": _request_ip(request),
+            "user_agent": str(request.headers.get("user-agent") or "")[:512],
+            "payload": json.dumps(payload or {}, ensure_ascii=False, default=str),
+        },
+    )
+
+
+def _serialize_admin_audit_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": row.get("id"),
+        "actor_user_uuid": row.get("actor_user_uuid"),
+        "actor_role": row.get("actor_role"),
+        "action": row.get("action"),
+        "entity_type": row.get("entity_type"),
+        "entity_id": row.get("entity_id"),
+        "request_id": row.get("request_id"),
+        "method": row.get("method"),
+        "path": row.get("path"),
+        "ip_address": row.get("ip_address"),
+        "user_agent": row.get("user_agent"),
+        "payload": row.get("payload") if isinstance(row.get("payload"), dict) else {},
+        "created_at": _serialize_datetime_value(row.get("created_at")),
     }
 
 
@@ -1127,7 +1222,39 @@ async def _load_orders_snapshot(redis: Redis) -> list[dict[str, Any]]:
     return orders.get("items", []) if isinstance(orders, dict) else []
 
 
-async def _load_users_snapshot(redis: Redis) -> list[dict[str, Any]]:
+def _serialize_admin_user_payload(*, user_uuid: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": user_uuid,
+        "email": payload.get("email"),
+        "full_name": payload.get("full_name", ""),
+        "role": payload.get("role", "user"),
+        "is_active": payload.get("is_active", "true") == "true" if isinstance(payload.get("is_active"), str) else bool(payload.get("is_active", True)),
+        "created_at": payload.get("created_at"),
+        "last_seen_at": payload.get("last_seen_at"),
+    }
+
+
+def _serialize_admin_user_from_pg(user: AuthUser) -> dict[str, Any]:
+    return {
+        "id": str(user.uuid),
+        "email": str(user.email or ""),
+        "full_name": str(user.full_name or ""),
+        "role": str(user.role or "user"),
+        "is_active": bool(user.is_active),
+        "created_at": user.created_at.astimezone(UTC).isoformat() if user.created_at else None,
+        "last_seen_at": user.last_seen_at.astimezone(UTC).isoformat() if user.last_seen_at else None,
+    }
+
+
+async def _load_users_snapshot(redis: Redis, db: AsyncSession) -> list[dict[str, Any]]:
+    if _auth_reads_from_postgres():
+        rows = (
+            await db.execute(
+                select(AuthUser).order_by(AuthUser.id.asc())
+            )
+        ).scalars().all()
+        return [_serialize_admin_user_from_pg(user) for user in rows]
+
     users: list[dict[str, Any]] = []
     async for key in redis.scan_iter(match="auth:user:*"):
         if key.count(":") != 2:
@@ -1138,17 +1265,7 @@ async def _load_users_snapshot(redis: Redis) -> list[dict[str, Any]]:
         if not payload:
             continue
         user_uuid = await _ensure_user_uuid(redis, user_key=key, payload=payload)
-        users.append(
-            {
-                "id": user_uuid,
-                "email": payload.get("email"),
-                "full_name": payload.get("full_name", ""),
-                "role": payload.get("role", "user"),
-                "is_active": payload.get("is_active", "true") == "true",
-                "created_at": payload.get("created_at"),
-                "last_seen_at": payload.get("last_seen_at"),
-            }
-        )
+        users.append(_serialize_admin_user_payload(user_uuid=user_uuid, payload=payload))
     return users
 
 
@@ -1749,7 +1866,21 @@ async def list_users(
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=20, ge=1, le=100),
     redis: Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
+    if _auth_reads_from_postgres():
+        rows = (
+            await db.execute(
+                select(AuthUser).order_by(AuthUser.id.asc())
+            )
+        ).scalars().all()
+        items = [_serialize_admin_user_from_pg(user) for user in rows]
+        if q:
+            q_norm = q.lower()
+            items = [row for row in items if q_norm in f"{row['email']} {row['full_name']}".lower()]
+        start = (page - 1) * limit
+        return {"items": items[start : start + limit], "next_cursor": None, "request_id": "admin-users"}
+
     ids = sorted([key async for key in redis.scan_iter(match="auth:user:*")], key=lambda key: key)
     rows: list[dict[str, Any]] = []
     for key in ids:
@@ -1762,15 +1893,9 @@ async def list_users(
         if not payload:
             continue
         user_uuid = await _ensure_user_uuid(redis, user_key=key, payload=payload)
-        row = {
-            "id": user_uuid,
-            "email": payload.get("email"),
-            "full_name": payload.get("full_name", ""),
-            "role": payload.get("role", "user"),
-            "is_active": payload.get("is_active", "true") == "true",
-            "created_at": payload.get("created_at", datetime.now(UTC).isoformat()),
-            "last_seen_at": payload.get("last_seen_at"),
-        }
+        row = _serialize_admin_user_payload(user_uuid=user_uuid, payload=payload)
+        if not row.get("created_at"):
+            row["created_at"] = datetime.now(UTC).isoformat()
         if q and q.lower() not in f"{row['email']} {row['full_name']}".lower():
             continue
         rows.append(row)
@@ -1797,26 +1922,78 @@ async def _get_user_by_uuid_or_404(redis: Redis, user_uuid: str) -> tuple[int, d
 
 
 @router.get("/users/{user_id}")
-async def get_user(user_id: str = Path(..., pattern=UUID_REF_PATTERN), redis: Redis = Depends(get_redis)) -> dict[str, Any]:
+async def get_user(
+    user_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    redis: Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    if _auth_reads_from_postgres():
+        normalized_uuid = _normalize_uuid_ref(user_id, field_name="user_id")
+        user = (
+            await db.execute(
+                select(AuthUser).where(AuthUser.uuid == normalized_uuid).limit(1)
+            )
+        ).scalars().first()
+        if user is None:
+            raise HTTPException(status_code=404, detail="user not found")
+        return _serialize_admin_user_from_pg(user)
+
     _, payload = await _get_user_by_uuid_or_404(redis, user_id)
     user_uuid = await _ensure_user_uuid(redis, user_key=f"auth:user:{payload['id']}", payload=payload)
-    return {
-        "id": user_uuid,
-        "email": payload.get("email"),
-        "full_name": payload.get("full_name", ""),
-        "role": payload.get("role", "user"),
-        "is_active": payload.get("is_active", "true") == "true",
-        "created_at": payload.get("created_at", datetime.now(UTC).isoformat()),
-        "last_seen_at": payload.get("last_seen_at"),
-    }
+    row = _serialize_admin_user_payload(user_uuid=user_uuid, payload=payload)
+    if not row.get("created_at"):
+        row["created_at"] = datetime.now(UTC).isoformat()
+    return row
 
 
 @router.patch("/users/{user_id}")
 async def patch_user(
+    request: Request,
     user_id: str = Path(..., pattern=UUID_REF_PATTERN),
     payload: dict[str, Any] | None = None,
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
     redis: Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
+    if _auth_reads_from_postgres():
+        normalized_uuid = _normalize_uuid_ref(user_id, field_name="user_id")
+        user = (
+            await db.execute(
+                select(AuthUser).where(AuthUser.uuid == normalized_uuid).limit(1)
+            )
+        ).scalars().first()
+        if user is None:
+            raise HTTPException(status_code=404, detail="user not found")
+
+        normalized_payload = payload or {}
+        updates: dict[str, Any] = {}
+        if "full_name" in normalized_payload:
+            updates["full_name"] = str(normalized_payload["full_name"])
+        if "role" in normalized_payload:
+            next_role = str(normalized_payload["role"]).strip().lower().replace("-", "_")
+            if next_role not in VALID_USER_ROLES:
+                raise HTTPException(status_code=422, detail="invalid role")
+            updates["role"] = next_role
+        if "is_active" in normalized_payload:
+            updates["is_active"] = bool(normalized_payload["is_active"])
+        if updates:
+            await db.execute(
+                update(AuthUser)
+                .where(AuthUser.id == user.id)
+                .values(**updates, updated_at=datetime.now(UTC))
+            )
+            await _audit_admin_action(
+                db,
+                current_user=current_user,
+                request=request,
+                action="users.patch",
+                entity_type="user",
+                entity_id=str(user.uuid),
+                payload={"updates": sorted(updates.keys())},
+            )
+            await db.commit()
+        return await get_user(user_id, redis, db)
+
     internal_user_id, _ = await _get_user_by_uuid_or_404(redis, user_id)
     key = f"auth:user:{internal_user_id}"
     updates: dict[str, str] = {}
@@ -1832,17 +2009,66 @@ async def patch_user(
         updates["is_active"] = "true" if bool(normalized_payload["is_active"]) else "false"
     if updates:
         await redis.hset(key, mapping=updates)
-    return await get_user(user_id, redis)
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="users.patch",
+            entity_type="user",
+            entity_id=user_id,
+            payload={"updates": sorted(updates.keys())},
+        )
+        await db.commit()
+    return await get_user(user_id, redis, db)
 
 
 @router.delete("/users/{user_id}")
-async def delete_user(user_id: str = Path(..., pattern=UUID_REF_PATTERN), redis: Redis = Depends(get_redis)) -> dict[str, bool]:
+async def delete_user(
+    request: Request,
+    user_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    redis: Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, bool]:
+    if _auth_reads_from_postgres():
+        normalized_uuid = _normalize_uuid_ref(user_id, field_name="user_id")
+        user = (
+            await db.execute(
+                select(AuthUser).where(AuthUser.uuid == normalized_uuid).limit(1)
+            )
+        ).scalars().first()
+        if user is None:
+            raise HTTPException(status_code=404, detail="user not found")
+        actor_uuid = str(user.uuid)
+        await db.delete(user)
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="users.delete",
+            entity_type="user",
+            entity_id=actor_uuid,
+            payload={},
+        )
+        await db.commit()
+        return {"ok": True}
+
     internal_user_id, payload = await _get_user_by_uuid_or_404(redis, user_id)
     key = f"auth:user:{internal_user_id}"
     email = payload.get("email")
     if email:
         await redis.delete(f"auth:user:email:{email}")
     await redis.delete(key)
+    await _audit_admin_action(
+        db,
+        current_user=current_user,
+        request=request,
+        action="users.delete",
+        entity_type="user",
+        entity_id=user_id,
+        payload={},
+    )
+    await db.commit()
     return {"ok": True}
 
 
@@ -1895,7 +2121,12 @@ async def list_stores(
 
 
 @router.post("/stores")
-async def create_store(payload: StoreCreate, db: AsyncSession = Depends(get_db_session)) -> dict[str, Any]:
+async def create_store(
+    request: Request,
+    payload: StoreCreate,
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
     slug = payload.slug or _slugify(payload.name)
     try:
         row = (
@@ -1922,17 +2153,32 @@ async def create_store(payload: StoreCreate, db: AsyncSession = Depends(get_db_s
                 },
             )
         ).mappings().first()
-        await db.commit()
     except IntegrityError:
         await db.rollback()
         raise HTTPException(status_code=409, detail="store with same id/slug already exists")
     if not row:
         raise HTTPException(status_code=500, detail="failed to create store")
+    await _audit_admin_action(
+        db,
+        current_user=current_user,
+        request=request,
+        action="stores.create",
+        entity_type="store",
+        entity_id=str(row["id"]),
+        payload={"slug": row["slug"], "provider": row["provider"]},
+    )
+    await db.commit()
     return {**dict(row), "sources_count": 0}
 
 
 @router.patch("/stores/{store_id}")
-async def patch_store(store_id: str = Path(..., pattern=UUID_REF_PATTERN), payload: StorePatch = None, db: AsyncSession = Depends(get_db_session)) -> dict[str, Any]:
+async def patch_store(
+    request: Request,
+    store_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    payload: StorePatch = None,
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
     internal_store_id = await _resolve_store_id_or_404(db, store_id)
     await db.execute(
         text(
@@ -1963,7 +2209,6 @@ async def patch_store(store_id: str = Path(..., pattern=UUID_REF_PATTERN), paylo
             "is_active": payload.is_active if payload else None,
         },
     )
-    await db.commit()
     row = (
         await db.execute(
             text(
@@ -1985,13 +2230,37 @@ async def patch_store(store_id: str = Path(..., pattern=UUID_REF_PATTERN), paylo
     ).mappings().first()
     if not row:
         raise HTTPException(status_code=404, detail="store not found")
+    await _audit_admin_action(
+        db,
+        current_user=current_user,
+        request=request,
+        action="stores.patch",
+        entity_type="store",
+        entity_id=str(row["id"]),
+        payload={"updates": sorted((payload.model_dump(exclude_unset=True) if payload else {}).keys())},
+    )
+    await db.commit()
     return dict(row)
 
 
 @router.delete("/stores/{store_id}")
-async def delete_store(store_id: str = Path(..., pattern=UUID_REF_PATTERN), db: AsyncSession = Depends(get_db_session)) -> dict[str, bool]:
+async def delete_store(
+    request: Request,
+    store_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, bool]:
     internal_store_id = await _resolve_store_id_or_404(db, store_id)
     await db.execute(text("delete from catalog_stores where id = :id"), {"id": internal_store_id})
+    await _audit_admin_action(
+        db,
+        current_user=current_user,
+        request=request,
+        action="stores.delete",
+        entity_type="store",
+        entity_id=store_id,
+        payload={},
+    )
     await db.commit()
     return {"ok": True}
 
@@ -2025,8 +2294,10 @@ async def list_store_sources(
 
 @router.post("/stores/{store_id}/sources")
 async def create_store_source(
+    request: Request,
     store_id: str = Path(..., pattern=UUID_REF_PATTERN),
     payload: ScrapeSourceCreate = None,
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     internal_store_id = await _resolve_store_id_or_404(db, store_id)
@@ -2057,17 +2328,28 @@ async def create_store_source(
             },
         )
     ).mappings().first()
-    await db.commit()
     if not row:
         raise HTTPException(status_code=500, detail="failed to create source")
+    await _audit_admin_action(
+        db,
+        current_user=current_user,
+        request=request,
+        action="store_sources.create",
+        entity_type="store_source",
+        entity_id=str(row["id"]),
+        payload={"store_id": str(row["store_id"]), "source_type": str(row["source_type"])},
+    )
+    await db.commit()
     return dict(row)
 
 
 @router.patch("/stores/{store_id}/sources/{source_id}")
 async def patch_store_source(
+    request: Request,
     store_id: str = Path(..., pattern=UUID_REF_PATTERN),
     source_id: str = Path(..., pattern=UUID_REF_PATTERN),
     payload: ScrapeSourcePatch = None,
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     internal_store_id = await _resolve_store_id_or_404(db, store_id)
@@ -2109,7 +2391,6 @@ async def patch_store_source(
             "priority": payload.priority if payload else None,
         },
     )
-    await db.commit()
     row = (
         await db.execute(
             text(
@@ -2125,13 +2406,25 @@ async def patch_store_source(
     ).mappings().first()
     if not row:
         raise HTTPException(status_code=404, detail="source not found")
+    await _audit_admin_action(
+        db,
+        current_user=current_user,
+        request=request,
+        action="store_sources.patch",
+        entity_type="store_source",
+        entity_id=str(row["id"]),
+        payload={"updates": sorted((payload.model_dump(exclude_unset=True) if payload else {}).keys())},
+    )
+    await db.commit()
     return dict(row)
 
 
 @router.delete("/stores/{store_id}/sources/{source_id}")
 async def delete_store_source(
+    request: Request,
     store_id: str = Path(..., pattern=UUID_REF_PATTERN),
     source_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, bool]:
     internal_store_id = await _resolve_store_id_or_404(db, store_id)
@@ -2140,12 +2433,26 @@ async def delete_store_source(
         text("delete from catalog_scrape_sources where id = :source_id and store_id = :store_id"),
         {"source_id": internal_source_id, "store_id": internal_store_id},
     )
+    await _audit_admin_action(
+        db,
+        current_user=current_user,
+        request=request,
+        action="store_sources.delete",
+        entity_type="store_source",
+        entity_id=source_id,
+        payload={"store_id": store_id},
+    )
     await db.commit()
     return {"ok": True}
 
 
 @router.post("/categories")
-async def create_category(payload: CategoryCreate, db: AsyncSession = Depends(get_db_session)) -> dict[str, Any]:
+async def create_category(
+    request: Request,
+    payload: CategoryCreate,
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
     resolved_parent_id: int | None = None
     if payload.parent_id is not None:
         resolved_parent_id = await _resolve_category_id_or_404(db, payload.parent_id)
@@ -2167,9 +2474,18 @@ async def create_category(payload: CategoryCreate, db: AsyncSession = Depends(ge
             {"slug": payload.slug, "name": payload.name, "parent_id": resolved_parent_id},
         )
     ).mappings().first()
-    await db.commit()
     if not inserted:
         raise HTTPException(status_code=500, detail="failed to create category")
+    await _audit_admin_action(
+        db,
+        current_user=current_user,
+        request=request,
+        action="categories.create",
+        entity_type="category",
+        entity_id=str(inserted["id"]),
+        payload={"slug": inserted["slug"], "parent_id": inserted["parent_id"]},
+    )
+    await db.commit()
     return {
         "id": inserted["id"],
         "slug": inserted["slug"],
@@ -2181,8 +2497,10 @@ async def create_category(payload: CategoryCreate, db: AsyncSession = Depends(ge
 
 @router.patch("/categories/{category_id}")
 async def patch_category(
+    request: Request,
     category_id: str = Path(..., pattern=UUID_REF_PATTERN),
     payload: CategoryPatch = Body(...),
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     internal_category_id = await _resolve_category_id_or_404(db, category_id)
@@ -2219,7 +2537,6 @@ async def patch_category(
             "parent_id": resolved_parent_id,
         },
     )
-    await db.commit()
     row = (
         await db.execute(
             text(
@@ -2240,22 +2557,49 @@ async def patch_category(
     ).mappings().first()
     if not row:
         raise HTTPException(status_code=404, detail="category not found")
+    await _audit_admin_action(
+        db,
+        current_user=current_user,
+        request=request,
+        action="categories.patch",
+        entity_type="category",
+        entity_id=str(row["id"]),
+        payload={"updates": sorted(payload.model_dump(exclude_unset=True).keys())},
+    )
+    await db.commit()
     return {"id": row["id"], "slug": row["slug"], "name": row["name_uz"], "parent_id": row["parent_id"], "is_active": row["is_active"]}
 
 
 @router.delete("/categories/{category_id}")
 async def delete_category(
+    request: Request,
     category_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, bool]:
     internal_category_id = await _resolve_category_id_or_404(db, category_id)
     await db.execute(text("delete from catalog_categories where id = :id"), {"id": internal_category_id})
+    await _audit_admin_action(
+        db,
+        current_user=current_user,
+        request=request,
+        action="categories.delete",
+        entity_type="category",
+        entity_id=category_id,
+        payload={},
+    )
     await db.commit()
     return {"ok": True}
 
 
 @router.patch("/products/{product_id}")
-async def patch_product(product_id: str, payload: dict[str, Any], db: AsyncSession = Depends(get_db_session)) -> dict[str, Any]:
+async def patch_product(
+    request: Request,
+    product_id: str,
+    payload: dict[str, Any],
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
     resolved_product_id = await _resolve_product_id_or_404(db, product_id)
     await db.execute(
         text(
@@ -2275,16 +2619,38 @@ async def patch_product(product_id: str, payload: dict[str, Any], db: AsyncSessi
             "specs": payload.get("specs"),
         },
     )
+    await _audit_admin_action(
+        db,
+        current_user=current_user,
+        request=request,
+        action="products.patch",
+        entity_type="product",
+        entity_id=product_id,
+        payload={"updates": sorted(payload.keys())},
+    )
     await db.commit()
     return {"ok": True}
 
 
 @router.delete("/products/{product_id}")
 async def delete_product(
-    product_id: str, db: AsyncSession = Depends(get_db_session), redis: Redis = Depends(get_redis)
+    request: Request,
+    product_id: str,
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),
 ) -> dict[str, bool]:
     resolved_product_id = await _resolve_product_id_or_404(db, product_id)
     await db.execute(text("delete from catalog_canonical_products where id = :id"), {"id": resolved_product_id})
+    await _audit_admin_action(
+        db,
+        current_user=current_user,
+        request=request,
+        action="products.delete",
+        entity_type="product",
+        entity_id=product_id,
+        payload={},
+    )
     await db.commit()
     await _invalidate_product_caches(redis)
     return {"ok": True}
@@ -2292,7 +2658,9 @@ async def delete_product(
 
 @router.post("/products/bulk-delete")
 async def bulk_delete_products(
+    request: Request,
     payload: ProductsBulkDeleteIn,
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),
 ) -> dict[str, Any]:
@@ -2311,6 +2679,15 @@ async def bulk_delete_products(
             {"product_ids": product_ids},
         )
     ).rowcount or 0
+    await _audit_admin_action(
+        db,
+        current_user=current_user,
+        request=request,
+        action="products.bulk_delete",
+        entity_type="product",
+        entity_id=None,
+        payload={"requested": len(product_ids), "deleted": int(deleted_count)},
+    )
     await db.commit()
     await _invalidate_product_caches(redis)
     return {"ok": True, "requested": len(product_ids), "deleted": int(deleted_count)}
@@ -2318,7 +2695,9 @@ async def bulk_delete_products(
 
 @router.post("/products/import")
 async def import_products(
+    request: Request,
     payload: ProductsImportIn,
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),
 ) -> dict[str, Any]:
@@ -2361,6 +2740,15 @@ async def import_products(
         await db.rollback()
         raise HTTPException(status_code=422, detail="no valid rows were imported")
 
+    await _audit_admin_action(
+        db,
+        current_user=current_user,
+        request=request,
+        action="products.import",
+        entity_type="product_import",
+        entity_id=None,
+        payload={"source": payload.source, "received_rows": len(rows), "imported_rows": imported_rows, "skipped_rows": skipped_rows},
+    )
     await db.commit()
     await _invalidate_product_caches(redis)
     task_id = enqueue_ingested_products_pipeline()
@@ -2488,9 +2876,12 @@ async def get_order(order_id: str = Path(..., pattern=UUID_REF_PATTERN), redis: 
 
 @router.patch("/orders/{order_id}")
 async def patch_order(
+    request: Request,
     order_id: str = Path(..., pattern=UUID_REF_PATTERN),
     payload: OrderStatusPatch = Body(...),
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
     redis: Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     normalized_order_id = _normalize_uuid_ref(order_id, field_name="order_id")
     key = "admin:orders"
@@ -2508,6 +2899,16 @@ async def patch_order(
     await redis.delete(key)
     if next_rows:
         await redis.rpush(key, *next_rows)
+    await _audit_admin_action(
+        db,
+        current_user=current_user,
+        request=request,
+        action="orders.patch",
+        entity_type="order",
+        entity_id=normalized_order_id,
+        payload={"status": payload.status},
+    )
+    await db.commit()
     return target
 
 
@@ -2831,7 +3232,6 @@ async def analytics_users(
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),
 ) -> dict[str, Any]:
-    _ = db
     days = _period_to_days(period)
     cache_key = _admin_analytics_cache_key("users", {"period": period})
     cached = await _get_cached_admin_analytics(redis, cache_key)
@@ -2840,7 +3240,7 @@ async def analytics_users(
 
     now = datetime.now(UTC)
     since = now - timedelta(days=days)
-    users = await _load_users_snapshot(redis)
+    users = await _load_users_snapshot(redis, db)
 
     new_users = 0
     active_users_30d = 0
@@ -2931,9 +3331,78 @@ async def analytics_alerts(
     return payload
 
 
+@router.get("/audit/events")
+async def list_admin_audit_events(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    action: str | None = Query(default=None),
+    entity_type: str | None = Query(default=None),
+    actor_user_id: str | None = Query(default=None, pattern=UUID_REF_PATTERN),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    where_parts = ["1=1"]
+    params: dict[str, Any] = {"limit": limit, "offset": offset}
+    if action:
+        where_parts.append("action = :action")
+        params["action"] = action
+    if entity_type:
+        where_parts.append("entity_type = :entity_type")
+        params["entity_type"] = entity_type
+    if actor_user_id:
+        where_parts.append("actor_user_uuid = cast(:actor_user_uuid as uuid)")
+        params["actor_user_uuid"] = _normalize_uuid_ref(actor_user_id, field_name="actor_user_id")
+
+    where_sql = " and ".join(where_parts)
+    total = int(
+        (
+            await db.execute(
+                text(f"select count(*)::int from admin_audit_events where {where_sql}"),
+                params,
+            )
+        ).scalar_one()
+        or 0
+    )
+    rows = (
+        await db.execute(
+            text(
+                f"""
+                select
+                    uuid as id,
+                    cast(actor_user_uuid as text) as actor_user_uuid,
+                    actor_role,
+                    action,
+                    entity_type,
+                    entity_id,
+                    request_id,
+                    method,
+                    path,
+                    ip_address,
+                    user_agent,
+                    payload,
+                    created_at
+                from admin_audit_events
+                where {where_sql}
+                order by created_at desc, id desc
+                limit :limit
+                offset :offset
+                """
+            ),
+            params,
+        )
+    ).mappings().all()
+    return {
+        "items": [_serialize_admin_audit_row(dict(row)) for row in rows],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
 @router.patch("/analytics/alerts/{alert_id}/ack")
 async def acknowledge_alert_event(
+    request: Request,
     alert_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),
 ) -> dict[str, Any]:
@@ -2967,6 +3436,15 @@ async def acknowledge_alert_event(
     ).mappings().first()
     if not row:
         raise HTTPException(status_code=404, detail="alert event not found")
+    await _audit_admin_action(
+        db,
+        current_user=current_user,
+        request=request,
+        action="alerts.ack",
+        entity_type="alert_event",
+        entity_id=normalized,
+        payload={"status": "ack"},
+    )
     await db.commit()
     await _invalidate_admin_analytics_cache(redis)
     return _serialize_alert_event_row(dict(row))
@@ -2974,7 +3452,9 @@ async def acknowledge_alert_event(
 
 @router.patch("/analytics/alerts/{alert_id}/resolve")
 async def resolve_alert_event(
+    request: Request,
     alert_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),
 ) -> dict[str, Any]:
@@ -3008,15 +3488,39 @@ async def resolve_alert_event(
     ).mappings().first()
     if not row:
         raise HTTPException(status_code=404, detail="alert event not found")
+    await _audit_admin_action(
+        db,
+        current_user=current_user,
+        request=request,
+        action="alerts.resolve",
+        entity_type="alert_event",
+        entity_id=normalized,
+        payload={"status": "resolved"},
+    )
     await db.commit()
     await _invalidate_admin_analytics_cache(redis)
     return _serialize_alert_event_row(dict(row))
 
 
 @router.post("/analytics/alerts/evaluate")
-async def enqueue_alert_evaluation(redis: Redis = Depends(get_redis)) -> dict[str, Any]:
+async def enqueue_alert_evaluation(
+    request: Request,
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    redis: Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
     task_id = enqueue_admin_alert_evaluation()
     await _invalidate_admin_analytics_cache(redis)
+    await _audit_admin_action(
+        db,
+        current_user=current_user,
+        request=request,
+        action="alerts.evaluate.enqueue",
+        entity_type="task",
+        entity_id=task_id,
+        payload={"queued": "maintenance"},
+    )
+    await db.commit()
     return {"task_id": task_id, "queued": "maintenance"}
 
 
@@ -3042,7 +3546,13 @@ async def get_settings(redis: Redis = Depends(get_redis)) -> dict[str, Any]:
 
 
 @router.patch("/settings")
-async def patch_settings(payload: SettingsPatch, redis: Redis = Depends(get_redis)) -> dict[str, Any]:
+async def patch_settings(
+    request: Request,
+    payload: SettingsPatch,
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    redis: Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
     key = "admin:settings"
     updates: dict[str, str] = {}
     if payload.site_name is not None:
@@ -3055,36 +3565,116 @@ async def patch_settings(payload: SettingsPatch, redis: Redis = Depends(get_redi
         updates["feature_ai_enabled"] = "true" if payload.feature_ai_enabled else "false"
     if updates:
         await redis.hset(key, mapping=updates)
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="settings.patch",
+            entity_type="settings",
+            entity_id="admin:settings",
+            payload={"updates": sorted(updates.keys())},
+        )
+        await db.commit()
     return await get_settings(redis)
 
 
 @router.post("/reindex/products")
-async def reindex_products() -> dict:
+async def reindex_products(
+    request: Request,
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
     task_id = enqueue_reindex_batches()
+    await _audit_admin_action(
+        db,
+        current_user=current_user,
+        request=request,
+        action="tasks.reindex.enqueue",
+        entity_type="task",
+        entity_id=task_id,
+        payload={"queued": "reindex"},
+    )
+    await db.commit()
     return {"task_id": task_id, "queued": "reindex"}
 
 
 @router.post("/embeddings/rebuild")
-async def rebuild_embeddings() -> dict:
+async def rebuild_embeddings(
+    request: Request,
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
     task_id = enqueue_embedding_batches()
+    await _audit_admin_action(
+        db,
+        current_user=current_user,
+        request=request,
+        action="tasks.embedding.enqueue",
+        entity_type="task",
+        entity_id=task_id,
+        payload={"queued": "embedding"},
+    )
+    await db.commit()
     return {"task_id": task_id, "queued": "embedding"}
 
 
 @router.post("/dedupe/run")
-async def run_dedupe() -> dict:
+async def run_dedupe(
+    request: Request,
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
     task_id = enqueue_dedupe_batches()
+    await _audit_admin_action(
+        db,
+        current_user=current_user,
+        request=request,
+        action="tasks.dedupe.enqueue",
+        entity_type="task",
+        entity_id=task_id,
+        payload={"queued": "dedupe"},
+    )
+    await db.commit()
     return {"task_id": task_id, "queued": "dedupe"}
 
 
 @router.post("/scrape/run")
-async def run_scrape() -> dict:
+async def run_scrape(
+    request: Request,
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
     task_id = enqueue_full_crawl()
+    await _audit_admin_action(
+        db,
+        current_user=current_user,
+        request=request,
+        action="tasks.scrape.enqueue",
+        entity_type="task",
+        entity_id=task_id,
+        payload={"queued": "scrape"},
+    )
+    await db.commit()
     return {"task_id": task_id, "queued": "scrape"}
 
 
 @router.post("/catalog/rebuild")
-async def run_catalog_rebuild() -> dict:
+async def run_catalog_rebuild(
+    request: Request,
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
     task_id = enqueue_full_catalog_rebuild()
+    await _audit_admin_action(
+        db,
+        current_user=current_user,
+        request=request,
+        action="tasks.catalog_rebuild.enqueue",
+        entity_type="task",
+        entity_id=task_id,
+        payload={"queued": "catalog_rebuild"},
+    )
+    await db.commit()
     return {"task_id": task_id, "queued": "catalog_rebuild"}
 
 
@@ -3258,7 +3848,9 @@ async def list_quality_products_without_valid_offers(
 
 @router.post("/quality/products/without-valid-offers/deactivate")
 async def deactivate_quality_products_without_valid_offers(
+    request: Request,
     payload: QualityProductsBulkDeactivateIn,
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),
 ) -> dict[str, Any]:
@@ -3301,6 +3893,15 @@ async def deactivate_quality_products_without_valid_offers(
         )
     ).scalars().all()
 
+    await _audit_admin_action(
+        db,
+        current_user=current_user,
+        request=request,
+        action="quality.products.deactivate",
+        entity_type="product",
+        entity_id=None,
+        payload={"requested": len(product_ids), "deactivated": len(deactivated_ids)},
+    )
     await db.commit()
     await _invalidate_product_caches(redis)
     return {
@@ -3312,14 +3913,42 @@ async def deactivate_quality_products_without_valid_offers(
 
 
 @router.post("/quality/reports/run")
-async def run_quality_report() -> dict:
+async def run_quality_report(
+    request: Request,
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
     task_id = enqueue_catalog_quality_report()
+    await _audit_admin_action(
+        db,
+        current_user=current_user,
+        request=request,
+        action="quality.report.enqueue",
+        entity_type="task",
+        entity_id=task_id,
+        payload={"queued": "maintenance"},
+    )
+    await db.commit()
     return {"task_id": task_id, "queued": "maintenance"}
 
 
 @router.post("/quality/alerts/test")
-async def run_quality_alert_test() -> dict:
+async def run_quality_alert_test(
+    request: Request,
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
     task_id = enqueue_test_quality_alert()
+    await _audit_admin_action(
+        db,
+        current_user=current_user,
+        request=request,
+        action="quality.alert_test.enqueue",
+        entity_type="task",
+        entity_id=task_id,
+        payload={"queued": "maintenance"},
+    )
+    await db.commit()
     return {"task_id": task_id, "queued": "maintenance"}
 
 

@@ -90,12 +90,23 @@ class PasswordResetRequestResponse(BaseModel):
     reset_token: str | None = None
 
 
+class EmailConfirmationConfirmRequest(BaseModel):
+    token: str = Field(min_length=20, max_length=255)
+
+
+class EmailConfirmationRequestResponse(BaseModel):
+    ok: bool = True
+    expires_in: int | None = None
+    confirmation_token: str | None = None
+
+
 class AuthUserResponse(BaseModel):
     id: str
     email: str
     full_name: str
     role: str = "user"
     twofa_enabled: bool = False
+    email_confirmed: bool = False
 
 
 class TwoFactorChallengeResponse(BaseModel):
@@ -347,6 +358,10 @@ def _challenge_key(token: str) -> str:
     return f"auth:2fa:challenge:{token}"
 
 
+def _email_confirmation_key(token: str) -> str:
+    return f"auth:email-confirmation:{token}"
+
+
 def _oauth_state_key(provider: str, state: str) -> str:
     return f"auth:oauth:state:{provider}:{state}"
 
@@ -537,6 +552,8 @@ async def _load_user(redis: Redis, user_id: int, db: AsyncSession | None = None)
             "twofa_recovery_codes_hash": str(payload.get("twofa_recovery_codes_hash", "")),
             "twofa_pending_secret": str(payload.get("twofa_pending_secret", "")),
             "twofa_pending_recovery_codes_hash": str(payload.get("twofa_pending_recovery_codes_hash", "")),
+            "email_confirmed": str(payload.get("email_confirmed", "0")).strip().lower() in {"1", "true", "yes"},
+            "email_confirmed_at": str(payload.get("email_confirmed_at", "")).strip(),
         }
     if db is None or not _auth_writes_to_postgres():
         return None
@@ -597,6 +614,8 @@ async def _create_user(
         "twofa_pending_secret": "",
         "twofa_pending_recovery_codes_hash": "",
         "notification_preferences": "",
+        "email_confirmed": "0",
+        "email_confirmed_at": "",
     }
     if extra_fields:
         mapping.update({key: str(value) for key, value in extra_fields.items()})
@@ -991,6 +1010,7 @@ async def register(
         full_name=user["full_name"],
         role=user["role"],
         twofa_enabled=bool(user["twofa_enabled"]),
+        email_confirmed=bool(user.get("email_confirmed")),
     )
 
 
@@ -1044,6 +1064,7 @@ async def login(
         full_name=user["full_name"],
         role=user["role"],
         twofa_enabled=bool(user["twofa_enabled"]),
+        email_confirmed=bool(user.get("email_confirmed")),
     )
 
 
@@ -1135,6 +1156,7 @@ async def me(
         full_name=user["full_name"],
         role=user["role"],
         twofa_enabled=bool(user.get("twofa_enabled")),
+        email_confirmed=bool(user.get("email_confirmed")),
     )
 
 
@@ -1234,6 +1256,67 @@ async def confirm_password_reset(
     await db.commit()
     _clear_auth_cookies(response)
     return {"ok": True, "revoked_sessions": revoked}
+
+
+@router.post("/email-confirmation/request", response_model=EmailConfirmationRequestResponse)
+async def request_email_confirmation(
+    request: Request,
+    redis: Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db_session),
+):
+    await enforce_rate_limit(request, redis, bucket="auth-email-confirm-request", limit=20)
+    current = await _resolve_user_from_access(request, redis, touch=True, db=db)
+    user_id = int(current["internal_id"])
+    user = await _load_user(redis, user_id, db)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found")
+
+    ttl_seconds = max(300, int(settings.auth_email_confirmation_ttl_seconds))
+    if bool(user.get("email_confirmed")):
+        return EmailConfirmationRequestResponse(ok=True, expires_in=ttl_seconds)
+
+    confirmation_token = _issue_token()
+    await redis.setex(_email_confirmation_key(confirmation_token), ttl_seconds, str(user_id))
+
+    debug_token: str | None = None
+    if settings.environment == "local" or settings.auth_email_confirmation_debug_return_token:
+        debug_token = confirmation_token
+    return EmailConfirmationRequestResponse(ok=True, expires_in=ttl_seconds, confirmation_token=debug_token)
+
+
+@router.post("/email-confirmation/confirm")
+async def confirm_email(
+    payload: EmailConfirmationConfirmRequest,
+    request: Request,
+    redis: Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db_session),
+):
+    await enforce_rate_limit(request, redis, bucket="auth-email-confirm", limit=30)
+    token = payload.token.strip()
+    if not token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid email confirmation token")
+
+    raw_user_id = await redis.get(_email_confirmation_key(token))
+    if not raw_user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid or expired email confirmation token")
+    try:
+        user_id = int(raw_user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid email confirmation token") from exc
+
+    now_iso = _now_iso()
+    await redis.hset(
+        f"auth:user:{user_id}",
+        mapping={
+            "email_confirmed": "1",
+            "email_confirmed_at": now_iso,
+            "updated_at": now_iso,
+        },
+    )
+    await redis.delete(_email_confirmation_key(token))
+    await _sync_user_from_redis(redis, db, user_id=user_id)
+    await db.commit()
+    return {"ok": True, "email_confirmed": True}
 
 
 @router.get("/sessions", response_model=list[SessionInfo])
@@ -1421,6 +1504,7 @@ async def verify_twofa(
             full_name=user["full_name"],
             role=user["role"],
             twofa_enabled=bool(user["twofa_enabled"]),
+            email_confirmed=bool(user.get("email_confirmed")),
         )
 
     current = await _resolve_user_from_access(request, redis, touch=True, db=db)
@@ -1671,7 +1755,7 @@ async def _resolve_or_create_oauth_user(
         full_name=full_name,
         password_hash=_hash_password(secrets.token_urlsafe(48)),
         role="user",
-        extra_fields={"auth_provider": provider},
+        extra_fields={"auth_provider": provider, "email_confirmed": "1", "email_confirmed_at": _now_iso()},
     )
     await _link_oauth_identity(
         redis,

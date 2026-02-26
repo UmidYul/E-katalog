@@ -70,3 +70,14 @@ def test_admin_alert_evaluation_schedule_registered() -> None:
     schedule = celery_app.conf.beat_schedule.get("admin-alert-evaluation-every-5m")
     assert schedule is not None
     assert schedule["task"] == "app.tasks.maintenance_tasks.enqueue_admin_alert_evaluation"
+
+
+def test_price_alert_delivery_task_routing() -> None:
+    route = celery_app.conf.task_routes.get("app.tasks.maintenance_tasks.deliver_price_alert_notifications")
+    assert route == {"queue": "maintenance", "routing_key": "maintenance"}
+
+
+def test_price_alert_delivery_schedule_registered() -> None:
+    schedule = celery_app.conf.beat_schedule.get("price-alert-delivery-every-5m")
+    assert schedule is not None
+    assert schedule["task"] == "app.tasks.maintenance_tasks.enqueue_price_alert_notifications"

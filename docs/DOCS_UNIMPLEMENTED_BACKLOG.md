@@ -11,10 +11,10 @@ This file aggregates items that are still not fully implemented based on explici
 
 ## 1) Backend Prod Tasks (`docs/BACKEND_PROD_TASKS.md`)
 
-- [ ] Auth storage migration Redis -> Postgres is not finished (`IN_PROGRESS`).
-- [ ] Password reset + email confirmation is not fully finished (`IN_PROGRESS` / `TODO`).
-- [ ] Unified RBAC policy layer for API (`TODO`).
-- [ ] Audit log for admin operations (`TODO`).
+- [~] Auth storage migration Redis -> Postgres: auth router + user profile/notification + admin user-management reads/writes now support `AUTH_STORAGE_MODE=postgres`; remaining cleanup/cutover tasks still pending.
+- [~] Password reset + email confirmation: password-reset API is implemented; email confirmation API/token flow added, but external delivery/provider integration is still pending.
+- [~] Unified RBAC policy layer for API: shared `app/api/rbac.py` added and adopted by admin + product-feedback routers; remaining routers should migrate to the same policy helpers.
+- [x] Audit log for admin operations baseline implemented: `admin_audit_events` table + `/api/v1/admin/audit/events` + write logging in mutating admin endpoints.
 - [ ] Idempotency keys for critical write endpoints (`TODO`).
 - [ ] Anti-bruteforce hardening for auth (`TODO` in P0 list; later update marks this as `DONE`, needs status reconciliation).
 - [ ] Observability hardening (Sentry + metrics + tracing) (`TODO`).
@@ -73,11 +73,11 @@ High-priority initiatives still listed as roadmap work:
 - [ ] SLO/observability hardening (G).
 
 Immediate backlog from roadmap:
-- [ ] Quality report task + DB table.
-- [ ] Admin endpoint + dashboard panel for quality report.
-- [~] Telegram-first price alert schema + API: DB table + API endpoints + frontend API wiring implemented on 2026-02-26; notification delivery worker is pending.
+- [x] Quality report task + DB table implemented (worker task + `catalog_data_quality_reports` model/migration).
+- [x] Admin endpoint + dashboard panel for quality report implemented (admin quality API + frontend wiring).
+- [x] Telegram-first price alert schema + API + notification delivery worker implemented on 2026-02-26.
 - [x] Compare share link endpoint + frontend button.
-- [ ] Unit tests for all above.
+- [~] Unit tests for roadmap items are partially implemented (quality report routes and price-alert delivery routing/logic covered; broader integration coverage pending).
 
 ## 5) Canonical Matching (`docs/CANONICAL_MATCHING.md`)
 

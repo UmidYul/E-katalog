@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db_session, get_redis
@@ -14,7 +14,7 @@ from app.api.v1.routers.auth import _ensure_user_uuid, get_current_user
 from app.core.config import settings
 from app.repositories.catalog import CatalogRepository
 from app.schemas.catalog import ProductPriceAlertOut
-from shared.db.models import CatalogCanonicalProduct, CatalogPriceAlert
+from shared.db.models import AuthUser, CatalogCanonicalProduct, CatalogPriceAlert
 
 router = APIRouter(prefix="/users", tags=["users"])
 UUID_REF_PATTERN = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
@@ -144,6 +144,10 @@ def _current_user_uuid(current_user: dict) -> str:
     return user_uuid
 
 
+def _auth_reads_from_postgres() -> bool:
+    return settings.auth_storage_mode == "postgres"
+
+
 def _to_float_or_none(value) -> float | None:
     if value is None:
         return None
@@ -254,8 +258,43 @@ async def _persist_recently_viewed(redis: Redis, user_id: int, items: list[Recen
     await pipe.execute()
 
 
+async def _load_pg_user_or_404(db: AsyncSession, *, user_id: int) -> AuthUser:
+    user = (
+        await db.execute(
+            select(AuthUser).where(AuthUser.id == user_id).limit(1)
+        )
+    ).scalars().first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="user not found")
+    return user
+
+
+def _build_profile_response_from_pg(user: AuthUser) -> UserProfileOut:
+    full_name = str(user.full_name or "").strip()
+    display_name = str(user.display_name or "").strip() or full_name
+    updated_at = user.updated_at.astimezone(UTC).isoformat() if user.updated_at else None
+    return UserProfileOut(
+        id=str(user.uuid),
+        email=str(user.email),
+        full_name=full_name,
+        display_name=display_name,
+        phone=str(user.phone or "").strip(),
+        city=str(user.city or "").strip(),
+        telegram=str(user.telegram or "").strip(),
+        about=str(user.about or "").strip(),
+        updated_at=updated_at,
+    )
+
+
 @router.get("/me/profile", response_model=UserProfileOut)
-async def get_my_profile(current_user: dict = Depends(get_current_user), redis: Redis = Depends(get_redis)):
+async def get_my_profile(
+    current_user: dict = Depends(get_current_user),
+    redis: Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if _auth_reads_from_postgres():
+        user = await _load_pg_user_or_404(db, user_id=_current_user_internal_id(current_user))
+        return _build_profile_response_from_pg(user)
     payload = await _load_user_payload(redis, _current_user_internal_id(current_user))
     return _build_profile_response(payload)
 
@@ -265,8 +304,38 @@ async def patch_my_profile(
     profile_patch: UserProfilePatch,
     current_user: dict = Depends(get_current_user),
     redis: Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db_session),
 ):
     current_user_id = _current_user_internal_id(current_user)
+    if _auth_reads_from_postgres():
+        user = await _load_pg_user_or_404(db, user_id=current_user_id)
+        updates: dict[str, str] = {}
+
+        if profile_patch.display_name is not None:
+            display_name = _clean_optional_text(profile_patch.display_name, max_length=120) or ""
+            if len(display_name) < 2:
+                raise HTTPException(status_code=422, detail="display_name must be at least 2 characters")
+            updates["display_name"] = display_name
+            updates["full_name"] = display_name
+
+        for field, max_length in (("phone", 32), ("city", 120), ("telegram", 64), ("about", 600)):
+            incoming = getattr(profile_patch, field)
+            if incoming is None:
+                continue
+            updates[field] = _clean_optional_text(incoming, max_length=max_length) or ""
+
+        if not updates:
+            return _build_profile_response_from_pg(user)
+
+        await db.execute(
+            update(AuthUser)
+            .where(AuthUser.id == current_user_id)
+            .values(**updates, updated_at=datetime.now(UTC))
+        )
+        await db.commit()
+        user = await _load_pg_user_or_404(db, user_id=current_user_id)
+        return _build_profile_response_from_pg(user)
+
     payload = await _load_user_payload(redis, current_user_id)
     updates: dict[str, str] = {}
 
@@ -343,8 +412,28 @@ async def toggle_favorite(
 
 
 @router.get("/me/notification-preferences", response_model=NotificationPreferences)
-async def get_notification_preferences(current_user: dict = Depends(get_current_user), redis: Redis = Depends(get_redis)):
+async def get_notification_preferences(
+    current_user: dict = Depends(get_current_user),
+    redis: Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db_session),
+):
     user_id = _current_user_internal_id(current_user)
+    if _auth_reads_from_postgres():
+        user = await _load_pg_user_or_404(db, user_id=user_id)
+        decoded = user.notification_preferences if isinstance(user.notification_preferences, dict) else None
+        normalized = _normalize_notification_preferences(decoded)
+        if not decoded:
+            await db.execute(
+                update(AuthUser)
+                .where(AuthUser.id == user_id)
+                .values(
+                    notification_preferences=normalized.model_dump(),
+                    updated_at=datetime.now(UTC),
+                )
+            )
+            await db.commit()
+        return normalized
+
     payload = await _load_user_payload(redis, user_id)
     raw = str(payload.get(NOTIFICATION_PREFERENCES_FIELD, "")).strip()
     decoded: dict | None = None
@@ -366,8 +455,25 @@ async def patch_notification_preferences(
     patch: NotificationPreferencesPatch,
     current_user: dict = Depends(get_current_user),
     redis: Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db_session),
 ):
     user_id = _current_user_internal_id(current_user)
+    if _auth_reads_from_postgres():
+        user = await _load_pg_user_or_404(db, user_id=user_id)
+        decoded = user.notification_preferences if isinstance(user.notification_preferences, dict) else None
+        current_preferences = _normalize_notification_preferences(decoded)
+        next_preferences = _merge_notification_preferences(current_preferences, patch)
+        await db.execute(
+            update(AuthUser)
+            .where(AuthUser.id == user_id)
+            .values(
+                notification_preferences=next_preferences.model_dump(),
+                updated_at=datetime.now(UTC),
+            )
+        )
+        await db.commit()
+        return next_preferences
+
     payload = await _load_user_payload(redis, user_id)
     raw = str(payload.get(NOTIFICATION_PREFERENCES_FIELD, "")).strip()
     decoded: dict | None = None

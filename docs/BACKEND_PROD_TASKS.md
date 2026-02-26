@@ -7,7 +7,7 @@
 1. `IN_PROGRESS` Перенести auth-хранилище из Redis в Postgres.
 2. `TODO` Password reset + подтверждение email.
 3. `TODO` Единый RBAC policy layer для API.
-4. `TODO` Audit log для админ-операций.
+4. `DONE` Audit log baseline для админ-операций (таблица + endpoint + write-hooks).
 5. `TODO` Idempotency keys для критичных write-эндпоинтов.
 6. `TODO` Усиленный anti-bruteforce для auth (ip/email lockout + отдельные buckets).
 7. `TODO` Observability: Sentry + метрики + tracing.
@@ -50,6 +50,7 @@
 - `DONE` Seed admin now syncs to Postgres on startup (`services/api/app/main.py` + `ensure_seed_admin`).
 - `TODO` Stage C read cutover to pure Postgres for all user/profile/admin flows.
 - `IN_PROGRESS` Password reset API endpoints added (`/auth/password-reset/request`, `/auth/password-reset/confirm`) with DB tokens in `auth_password_reset_tokens`.
+- `IN_PROGRESS` Email confirmation API added (`/auth/email-confirmation/request`, `/auth/email-confirmation/confirm`) with Redis token flow + Postgres-backed `email_confirmed` fields; external mail delivery integration pending.
 - `DONE` Anti-bruteforce hardening: login/2FA lockout by IP and email with separate Redis buckets and configurable thresholds/TTL.
 - `DONE` Expanded readiness/liveness endpoints: `/live` + enriched `/ready` with DB/Redis/Celery checks and 503 on not-ready.
 - `DONE` Added maintenance cleanup for auth token tables in Postgres (`cleanup_auth_token_tables`): expired/used reset tokens, expired/revoked session tokens, old revoked sessions.
@@ -57,3 +58,7 @@
 - `IN_PROGRESS` OpenAPI contract coverage started: added `tests/unit/test_openapi_contract.py` (core auth endpoints, `/api/v1` prefix, unique `operationId`, API version header check).
 - `DONE` API version response header added for all API routes: `X-API-Version` (configurable via `API_VERSION_HEADER_VALUE`, default `v1`).
 - `IN_PROGRESS` Stage C auth read cutover: in `AUTH_STORAGE_MODE=postgres`, user/email/session reads now prefer Postgres, and session revocation covers Postgres-only sessions.
+- `DONE` User profile + notification preferences read/write now use Postgres in `AUTH_STORAGE_MODE=postgres` (`services/api/app/api/v1/routers/users.py`); Redis path remains for `redis|dual`.
+- `DONE` Admin users management (`/admin/users` list/get/patch/delete + analytics users snapshot) now reads/writes Postgres in `AUTH_STORAGE_MODE=postgres`.
+- `IN_PROGRESS` Unified RBAC policy layer started: shared role helpers/dependencies in `services/api/app/api/rbac.py` adopted by admin and product-feedback routers.
+- `DONE` Audit log baseline for admin operations: `admin_audit_events` table + `/api/v1/admin/audit/events` + write-audit hooks across mutating admin endpoints.
