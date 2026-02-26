@@ -50,3 +50,10 @@
 - `DONE` Seed admin now syncs to Postgres on startup (`services/api/app/main.py` + `ensure_seed_admin`).
 - `TODO` Stage C read cutover to pure Postgres for all user/profile/admin flows.
 - `IN_PROGRESS` Password reset API endpoints added (`/auth/password-reset/request`, `/auth/password-reset/confirm`) with DB tokens in `auth_password_reset_tokens`.
+- `DONE` Anti-bruteforce hardening: login/2FA lockout by IP and email with separate Redis buckets and configurable thresholds/TTL.
+- `DONE` Expanded readiness/liveness endpoints: `/live` + enriched `/ready` with DB/Redis/Celery checks and 503 on not-ready.
+- `DONE` Added maintenance cleanup for auth token tables in Postgres (`cleanup_auth_token_tables`): expired/used reset tokens, expired/revoked session tokens, old revoked sessions.
+- `DONE` Registered `cleanup_auth_token_tables` in Celery routing + daily beat schedule (`cleanup-auth-token-tables-daily-0355`), with route/schedule tests.
+- `IN_PROGRESS` OpenAPI contract coverage started: added `tests/unit/test_openapi_contract.py` (core auth endpoints, `/api/v1` prefix, unique `operationId`, API version header check).
+- `DONE` API version response header added for all API routes: `X-API-Version` (configurable via `API_VERSION_HEADER_VALUE`, default `v1`).
+- `IN_PROGRESS` Stage C auth read cutover: in `AUTH_STORAGE_MODE=postgres`, user/email/session reads now prefer Postgres, and session revocation covers Postgres-only sessions.

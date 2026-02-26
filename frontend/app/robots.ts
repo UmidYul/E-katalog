@@ -9,6 +9,7 @@ export default function robots(): MetadataRoute.Robots {
       allow: "/",
       disallow: ["/api", "/dashboard", "/login", "/register", "/profile", "/favorites", "/recently-viewed"]
     },
+    host: env.appUrl,
     sitemap: `${env.appUrl}/sitemap.xml`
   };
 }

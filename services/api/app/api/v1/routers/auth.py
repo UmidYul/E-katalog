@@ -28,6 +28,7 @@ from app.repositories.auth_storage import (
     pg_get_session,
     pg_get_user_id_by_email,
     pg_list_active_sessions,
+    pg_patch_user_fields,
     pg_consume_password_reset_token,
     pg_create_password_reset_token,
     pg_load_user_by_email,
@@ -354,8 +355,78 @@ def _oauth_identity_key(provider: str, provider_user_id: str) -> str:
     return f"auth:oauth:{provider}:{provider_user_id}"
 
 
+def _login_lock_scope_key(scope: Literal["ip", "email"], value: str, kind: Literal["fail", "block"]) -> str:
+    subject = str(value or "").strip().lower()
+    if not subject:
+        return ""
+    digest = hashlib.sha256(subject.encode("utf-8")).hexdigest()[:32]
+    return f"auth:login:{kind}:{scope}:{digest}"
+
+
+async def _enforce_login_lockout(redis: Redis, *, email: str, client_ip: str) -> None:
+    if not settings.auth_lockout_enabled:
+        return
+    targets: list[tuple[Literal["ip", "email"], str]] = [
+        ("ip", client_ip),
+        ("email", email),
+    ]
+    max_retry_after = 0
+    for scope, value in targets:
+        block_key = _login_lock_scope_key(scope, value, "block")
+        if not block_key:
+            continue
+        ttl = int(await redis.ttl(block_key) or 0)
+        if ttl > max_retry_after:
+            max_retry_after = ttl
+    if max_retry_after > 0:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"too many login attempts; retry in {max_retry_after}s",
+        )
+
+
+async def _register_failed_login_attempt(redis: Redis, *, email: str, client_ip: str) -> None:
+    if not settings.auth_lockout_enabled:
+        return
+    window_seconds = max(60, int(settings.auth_lockout_window_seconds))
+    block_seconds = max(60, int(settings.auth_lockout_block_seconds))
+    limits: list[tuple[Literal["ip", "email"], str, int]] = [
+        ("ip", client_ip, max(1, int(settings.auth_lockout_max_attempts_ip))),
+        ("email", email, max(1, int(settings.auth_lockout_max_attempts_email))),
+    ]
+    for scope, value, limit in limits:
+        fail_key = _login_lock_scope_key(scope, value, "fail")
+        block_key = _login_lock_scope_key(scope, value, "block")
+        if not fail_key or not block_key:
+            continue
+        attempts = int(await redis.incr(fail_key))
+        if attempts == 1:
+            await redis.expire(fail_key, window_seconds)
+        if attempts >= limit:
+            await redis.setex(block_key, block_seconds, str(attempts))
+
+
+async def _clear_failed_login_attempts(redis: Redis, *, email: str, client_ip: str) -> None:
+    if not settings.auth_lockout_enabled:
+        return
+    keys: list[str] = []
+    for scope, value in (("ip", client_ip), ("email", email)):
+        fail_key = _login_lock_scope_key(scope, value, "fail")
+        block_key = _login_lock_scope_key(scope, value, "block")
+        if fail_key:
+            keys.append(fail_key)
+        if block_key:
+            keys.append(block_key)
+    if keys:
+        await redis.delete(*keys)
+
+
 def _auth_writes_to_postgres() -> bool:
     return settings.auth_storage_mode in {"dual", "postgres"}
+
+
+def _auth_reads_from_postgres() -> bool:
+    return settings.auth_storage_mode == "postgres"
 
 
 async def _sync_user_from_redis(redis: Redis, db: AsyncSession | None, *, user_id: int) -> int | None:
@@ -440,6 +511,11 @@ async def _ensure_user_uuid(redis: Redis, *, user_key: str, payload: dict[str, s
 
 
 async def _load_user(redis: Redis, user_id: int, db: AsyncSession | None = None) -> dict | None:
+    if db is not None and _auth_reads_from_postgres():
+        pg_user = await pg_load_user_by_id(db, user_id)
+        if pg_user is not None:
+            return pg_user
+
     user_key = f"auth:user:{user_id}"
     payload = await redis.hgetall(user_key)
     if payload:
@@ -468,11 +544,17 @@ async def _load_user(redis: Redis, user_id: int, db: AsyncSession | None = None)
 
 
 async def _get_user_by_email(redis: Redis, email: str, db: AsyncSession | None = None) -> dict | None:
-    user_id = await redis.get(f"auth:user:email:{email.lower()}")
+    normalized_email = email.lower().strip()
+    if db is not None and _auth_reads_from_postgres():
+        pg_user = await pg_load_user_by_email(db, normalized_email)
+        if pg_user is not None:
+            return pg_user
+
+    user_id = await redis.get(f"auth:user:email:{normalized_email}")
     if not user_id:
         if db is None or not _auth_writes_to_postgres():
             return None
-        return await pg_load_user_by_email(db, email)
+        return await pg_load_user_by_email(db, normalized_email)
     try:
         return await _load_user(redis, int(user_id), db)
     except ValueError:
@@ -629,6 +711,10 @@ async def _set_auth_cookies(
     encoded = _encode_token_payload(user_id, session_id)
     role_payload = await redis.hgetall(f"auth:user:{user_id}")
     role = str(role_payload.get("role", "user")) if role_payload else "user"
+    if role == "user" and db is not None and _auth_reads_from_postgres():
+        pg_user = await pg_load_user_by_id(db, user_id)
+        if pg_user is not None:
+            role = str(pg_user.get("role") or "user")
 
     pipe = redis.pipeline()
     pipe.setex(f"auth:access:{access}", ACCESS_TTL_SECONDS, encoded)
@@ -717,7 +803,17 @@ async def _resolve_user_from_access(
     if touch:
         await redis.hset(f"auth:user:{user_id}", mapping={"last_seen_at": _now_iso()})
         if db is not None and _auth_writes_to_postgres():
-            await _sync_user_from_redis(redis, db, user_id=user_id)
+            if _auth_reads_from_postgres():
+                await pg_patch_user_fields(
+                    db,
+                    user_id=int(user["id"]),
+                    fields={
+                        "last_seen_at": _now_iso(),
+                        "updated_at": _now_iso(),
+                    },
+                )
+            else:
+                await _sync_user_from_redis(redis, db, user_id=user_id)
             await db.commit()
 
     return {
@@ -773,11 +869,27 @@ async def _revoke_all_sessions_except(
     db: AsyncSession | None = None,
 ) -> int:
     revoked = 0
+    processed: set[str] = set()
     for session_id in await redis.smembers(_user_sessions_key(user_id)):
         if keep_session_id and session_id == keep_session_id:
             continue
         if await _revoke_session(redis, user_id=user_id, session_id=session_id, db=db):
             revoked += 1
+        processed.add(session_id)
+    if db is not None and _auth_writes_to_postgres():
+        pg_user_id = await _resolve_pg_user_id(redis, db, user_id=user_id)
+        if pg_user_id is not None:
+            for payload in await pg_list_active_sessions(db, user_id=pg_user_id):
+                session_id = str(payload.get("id") or "").strip()
+                if not session_id:
+                    continue
+                if keep_session_id and session_id == keep_session_id:
+                    continue
+                if session_id in processed:
+                    continue
+                if await _revoke_session(redis, user_id=user_id, session_id=session_id, db=db):
+                    revoked += 1
+                processed.add(session_id)
     return revoked
 
 
@@ -891,8 +1003,13 @@ async def login(
     db: AsyncSession = Depends(get_db_session),
 ):
     await enforce_rate_limit(request, redis, bucket="auth-login", limit=20)
-    user = await _get_user_by_email(redis, payload.email.lower().strip(), db)
+    normalized_email = payload.email.lower().strip()
+    client_ip = _extract_client_ip(request)
+    await _enforce_login_lockout(redis, email=normalized_email, client_ip=client_ip)
+
+    user = await _get_user_by_email(redis, normalized_email, db)
     if user is None or not _verify_password(payload.password, str(user["password_hash"])):
+        await _register_failed_login_attempt(redis, email=normalized_email, client_ip=client_ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials")
 
     if _password_needs_rehash(str(user["password_hash"])):
@@ -913,10 +1030,13 @@ async def login(
                 recovery_code=payload.recovery_code,
                 db=db,
             ):
+                await _register_failed_login_attempt(redis, email=normalized_email, client_ip=client_ip)
                 raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid 2fa code")
         else:
+            await _clear_failed_login_attempts(redis, email=normalized_email, client_ip=client_ip)
             return TwoFactorChallengeResponse(challenge_token=await _create_2fa_challenge(redis, user_id=int(user["id"])))
 
+    await _clear_failed_login_attempts(redis, email=normalized_email, client_ip=client_ip)
     await _set_auth_cookies(response, user_id=int(user["id"]), redis=redis, request=request, db=db)
     return AuthUserResponse(
         id=str(user["uuid"]),
@@ -1128,6 +1248,27 @@ async def list_sessions(
     sessions: list[SessionInfo] = []
     stale: list[str] = []
 
+    if _auth_reads_from_postgres() and _auth_writes_to_postgres():
+        pg_user_id = await _resolve_pg_user_id(redis, db, user_id=user_id)
+        if pg_user_id is not None:
+            for payload in await pg_list_active_sessions(db, user_id=pg_user_id):
+                session_value = str(payload.get("id") or "")
+                created_at = str(payload.get("created_at") or _now_iso())
+                last_seen_at = str(payload.get("last_seen_at") or created_at)
+                sessions.append(
+                    SessionInfo(
+                        id=session_value,
+                        device=str(payload.get("device") or "unknown device"),
+                        ip_address=str(payload.get("ip_address") or "unknown"),
+                        location=str(payload.get("location") or "unknown"),
+                        created_at=created_at,
+                        last_seen_at=last_seen_at,
+                        is_current=bool(current_session_id and session_value == current_session_id),
+                    )
+                )
+            sessions.sort(key=lambda item: (item.last_seen_at, item.created_at, item.id), reverse=True)
+            return sessions
+
     for session_id in await redis.smembers(_user_sessions_key(user_id)):
         payload = await redis.hgetall(_session_key(session_id))
         if not payload or str(payload.get("user_id", "")) != str(user_id):
@@ -1248,23 +1389,30 @@ async def verify_twofa(
     redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db_session),
 ):
+    await enforce_rate_limit(request, redis, bucket="auth-2fa-verify", limit=60)
+    client_ip = _extract_client_ip(request)
     if payload.challenge_token:
         challenge_raw = await redis.get(_challenge_key(payload.challenge_token.strip()))
         if not challenge_raw:
+            await _register_failed_login_attempt(redis, email="", client_ip=client_ip)
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid 2fa challenge")
         try:
             user_id = int(challenge_raw)
         except ValueError as exc:
+            await _register_failed_login_attempt(redis, email="", client_ip=client_ip)
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid 2fa challenge") from exc
 
         user = await _load_user(redis, user_id, db)
         if user is None or not user["twofa_enabled"]:
+            await _register_failed_login_attempt(redis, email="", client_ip=client_ip)
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="2fa not enabled")
         if not (payload.code or payload.recovery_code):
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="code or recovery_code is required")
         if not await _verify_user_2fa(redis, user=user, code=payload.code, recovery_code=payload.recovery_code, db=db):
+            await _register_failed_login_attempt(redis, email=str(user["email"]), client_ip=client_ip)
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid 2fa code")
 
+        await _clear_failed_login_attempts(redis, email=str(user["email"]), client_ip=client_ip)
         await redis.delete(_challenge_key(payload.challenge_token.strip()))
         await _set_auth_cookies(response, user_id=user_id, redis=redis, request=request, db=db)
         return AuthUserResponse(

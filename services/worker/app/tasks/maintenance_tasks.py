@@ -1040,6 +1040,141 @@ def enqueue_cleanup_auth_sessions(self) -> str:
     return cleanup_auth_sessions.delay().id
 
 
+async def _cleanup_auth_token_tables(
+    *,
+    reset_used_retention_days: int,
+    revoked_token_retention_days: int,
+    revoked_session_retention_days: int,
+) -> dict[str, Any]:
+    if not settings.auth_token_cleanup_enabled:
+        return {"status": "disabled", "at": datetime.now(UTC).isoformat()}
+
+    effective_reset_used_retention_days = max(1, int(reset_used_retention_days))
+    effective_revoked_token_retention_days = max(1, int(revoked_token_retention_days))
+    effective_revoked_session_retention_days = max(1, int(revoked_session_retention_days))
+
+    now_dt = datetime.now(UTC)
+    reset_used_cutoff = now_dt - timedelta(days=effective_reset_used_retention_days)
+    revoked_token_cutoff = now_dt - timedelta(days=effective_revoked_token_retention_days)
+    revoked_session_cutoff = now_dt - timedelta(days=effective_revoked_session_retention_days)
+
+    async with AsyncSessionLocal() as session:
+        reset_expired = await session.execute(
+            text(
+                """
+                delete from auth_password_reset_tokens
+                where expires_at < now()
+                """
+            )
+        )
+        reset_used = await session.execute(
+            text(
+                """
+                delete from auth_password_reset_tokens
+                where used_at is not null
+                  and used_at < :cutoff
+                """
+            ),
+            {"cutoff": reset_used_cutoff},
+        )
+        session_tokens_expired = await session.execute(
+            text(
+                """
+                delete from auth_session_tokens
+                where expires_at < now()
+                """
+            )
+        )
+        session_tokens_revoked = await session.execute(
+            text(
+                """
+                delete from auth_session_tokens
+                where revoked_at is not null
+                  and revoked_at < :cutoff
+                """
+            ),
+            {"cutoff": revoked_token_cutoff},
+        )
+        sessions_revoked = await session.execute(
+            text(
+                """
+                delete from auth_sessions
+                where revoked_at is not null
+                  and revoked_at < :cutoff
+                """
+            ),
+            {"cutoff": revoked_session_cutoff},
+        )
+        await session.commit()
+
+    deleted_reset_expired = int(reset_expired.rowcount or 0)
+    deleted_reset_used = int(reset_used.rowcount or 0)
+    deleted_session_tokens_expired = int(session_tokens_expired.rowcount or 0)
+    deleted_session_tokens_revoked = int(session_tokens_revoked.rowcount or 0)
+    deleted_sessions_revoked = int(sessions_revoked.rowcount or 0)
+
+    logger.info(
+        "cleanup_auth_token_tables_completed",
+        reset_used_retention_days=effective_reset_used_retention_days,
+        revoked_token_retention_days=effective_revoked_token_retention_days,
+        revoked_session_retention_days=effective_revoked_session_retention_days,
+        deleted_reset_expired=deleted_reset_expired,
+        deleted_reset_used=deleted_reset_used,
+        deleted_session_tokens_expired=deleted_session_tokens_expired,
+        deleted_session_tokens_revoked=deleted_session_tokens_revoked,
+        deleted_sessions_revoked=deleted_sessions_revoked,
+    )
+
+    return {
+        "status": "ok",
+        "reset_used_retention_days": effective_reset_used_retention_days,
+        "revoked_token_retention_days": effective_revoked_token_retention_days,
+        "revoked_session_retention_days": effective_revoked_session_retention_days,
+        "deleted_reset_expired": deleted_reset_expired,
+        "deleted_reset_used": deleted_reset_used,
+        "deleted_session_tokens_expired": deleted_session_tokens_expired,
+        "deleted_session_tokens_revoked": deleted_session_tokens_revoked,
+        "deleted_sessions_revoked": deleted_sessions_revoked,
+        "at": datetime.now(UTC).isoformat(),
+    }
+
+
+@celery_app.task(bind=True)
+def cleanup_auth_token_tables(
+    self,
+    reset_used_retention_days: int | None = None,
+    revoked_token_retention_days: int | None = None,
+    revoked_session_retention_days: int | None = None,
+) -> dict[str, Any]:
+    effective_reset_used_retention_days = (
+        int(reset_used_retention_days)
+        if isinstance(reset_used_retention_days, int) and reset_used_retention_days > 0
+        else int(settings.auth_password_reset_used_retention_days)
+    )
+    effective_revoked_token_retention_days = (
+        int(revoked_token_retention_days)
+        if isinstance(revoked_token_retention_days, int) and revoked_token_retention_days > 0
+        else int(settings.auth_session_token_revoked_retention_days)
+    )
+    effective_revoked_session_retention_days = (
+        int(revoked_session_retention_days)
+        if isinstance(revoked_session_retention_days, int) and revoked_session_retention_days > 0
+        else int(settings.auth_session_revoked_retention_days)
+    )
+    return asyncio.run(
+        _cleanup_auth_token_tables(
+            reset_used_retention_days=effective_reset_used_retention_days,
+            revoked_token_retention_days=effective_revoked_token_retention_days,
+            revoked_session_retention_days=effective_revoked_session_retention_days,
+        )
+    )
+
+
+@celery_app.task(bind=True)
+def enqueue_cleanup_auth_token_tables(self) -> str:
+    return cleanup_auth_token_tables.delay().id
+
+
 @celery_app.task(bind=True)
 def cleanup_stale_offers(self, days: int = 14) -> dict:
     return asyncio.run(_cleanup(days))

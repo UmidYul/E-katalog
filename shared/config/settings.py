@@ -70,6 +70,7 @@ class Settings(BaseSettings):
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000
+    api_version_header_value: str = "v1"
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000", "http://localhost:5173"])
     cursor_secret: str = "change-me-cursor-secret"
     admin_seed_enabled: bool = True
@@ -81,8 +82,19 @@ class Settings(BaseSettings):
     auth_session_cleanup_enabled: bool = True
     auth_session_cleanup_max_age_days: int = 90
     auth_session_cleanup_scan_limit: int = 50000
+    auth_lockout_enabled: bool = True
+    auth_lockout_window_seconds: int = 900
+    auth_lockout_block_seconds: int = 900
+    auth_lockout_max_attempts_ip: int = 25
+    auth_lockout_max_attempts_email: int = 8
     auth_password_reset_ttl_seconds: int = 1800
     auth_password_reset_debug_return_token: bool = False
+    auth_token_cleanup_enabled: bool = True
+    auth_password_reset_used_retention_days: int = 7
+    auth_session_token_revoked_retention_days: int = 30
+    auth_session_revoked_retention_days: int = 30
+    health_check_timeout_seconds: float = 2.0
+    health_require_celery_worker: bool = False
     next_public_app_url: str = "http://localhost"
     oauth_totp_issuer: str = "ZincMarket"
     oauth_google_client_id: str | None = None

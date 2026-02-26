@@ -50,6 +50,17 @@ def test_quality_alert_test_task_routing() -> None:
     assert route == {"queue": "maintenance", "routing_key": "maintenance"}
 
 
+def test_cleanup_auth_token_tables_task_routing() -> None:
+    route = celery_app.conf.task_routes.get("app.tasks.maintenance_tasks.cleanup_auth_token_tables")
+    assert route == {"queue": "maintenance", "routing_key": "maintenance"}
+
+
+def test_cleanup_auth_token_tables_schedule_registered() -> None:
+    schedule = celery_app.conf.beat_schedule.get("cleanup-auth-token-tables-daily-0355")
+    assert schedule is not None
+    assert schedule["task"] == "app.tasks.maintenance_tasks.enqueue_cleanup_auth_token_tables"
+
+
 def test_admin_alert_evaluation_task_routing() -> None:
     route = celery_app.conf.task_routes.get("app.tasks.maintenance_tasks.evaluate_admin_alert_events")
     assert route == {"queue": "maintenance", "routing_key": "maintenance"}

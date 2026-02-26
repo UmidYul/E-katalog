@@ -31,6 +31,8 @@ async def request_context(request: Request, call_next):
     request.state.request_id = request_id
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
+    if request.url.path.startswith("/api/"):
+        response.headers["X-API-Version"] = str(settings.api_version_header_value or "v1")
     return response
 
 

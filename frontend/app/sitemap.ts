@@ -24,8 +24,6 @@ const slugify = (value: string) =>
     .replace(/^-+|-+$/g, "");
 
 const baseUrl = env.appUrl.endsWith("/") ? env.appUrl.slice(0, -1) : env.appUrl;
-const normalizeOrigin = (value: string) => String(value || "").trim().replace(/\/+$/g, "");
-const apiOrigins = Array.from(new Set([env.apiInternalOrigin, env.apiOrigin, baseUrl].map(normalizeOrigin).filter(Boolean)));
 let preferredApiOrigin: string | null = null;
 
 const absoluteUrl = (route: string) => {
@@ -35,7 +33,9 @@ const absoluteUrl = (route: string) => {
 
 async function fetchApi<T>(path: string): Promise<T | null> {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  const candidates = preferredApiOrigin ? [preferredApiOrigin, ...apiOrigins.filter((origin) => origin !== preferredApiOrigin)] : apiOrigins;
+  const candidates = preferredApiOrigin
+    ? [preferredApiOrigin, ...env.apiServerOrigins.filter((origin) => origin !== preferredApiOrigin)]
+    : env.apiServerOrigins;
 
   for (const origin of candidates) {
     const controller = new AbortController();
