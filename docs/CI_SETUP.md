@@ -3,6 +3,7 @@
 This repository uses:
 
 - `.github/workflows/ci.yml`
+- `.github/workflows/promote-dev-to-main.yml`
 
 The workflow runs:
 
@@ -15,6 +16,8 @@ The workflow runs:
    - `typecheck`
    - `test`
    - `build`
+3. Auto-promotion mode:
+   - when CI on `dev` is green, workflow fast-forwards `main` to `dev`
 
 Trigger policy:
 - `push` on `dev`
@@ -26,50 +29,43 @@ Trigger policy:
 2. Running all tests under one `PYTHONPATH` causes import conflicts.
 3. Frontend tests require Node `22+` because of `--experimental-strip-types`.
 4. `ADMIN_SEED_ENABLED=false` avoids startup seed side effects in backend CI.
+5. `dev` can be used as a single integration branch, with automatic publish to `main`.
 
 ## Enable CI in GitHub
 
 1. Open `Settings -> Actions -> General`:
    - `Actions permissions`: `Allow all actions and reusable workflows`
-   - `Workflow permissions`: `Read repository contents permission`
-2. Open `Settings -> Rules -> Rulesets` and create/edit a ruleset for `main`.
-3. Enable:
-   - `Require a pull request before merging`
+   - `Workflow permissions`: `Read and write permissions`
+2. Open `Settings -> Rules -> Rulesets` and create/edit a ruleset for `dev`.
+3. Enable on `dev`:
    - `Require status checks to pass before merging`
    - `Require branches to be up to date before merging` (recommended)
-4. Add required checks:
+4. Add required checks for `dev`:
    - `Backend (pytest)`
    - `Frontend (lint, typecheck, test, build)`
-5. Solo maintainer setup (recommended):
-   - `Required approving reviews`: `0`
-   - keep required status checks enabled
+5. For `main`, use one of these options:
+   - Option A (auto-publish direct): no PR requirement on `main`; allow GitHub Actions to push.
+   - Option B (strict): keep PR requirement on `main` and do manual PR `dev -> main`.
 6. Open `Settings -> General -> Pull Requests` and enable:
    - `Automatically delete head branches`
 
-## Git workflow (main + feature branches)
+## Git workflow (single `dev` branch)
 
-1. Always branch from latest `main`:
-
-```bash
-git checkout main
-git pull origin main
-git checkout -b feat/<short-task-name>
-```
-
-2. Push feature branch and open PR into `main`:
+1. Work only in `dev`:
 
 ```bash
-git push -u origin feat/<short-task-name>
+git checkout dev
+git pull origin dev
 ```
 
-3. Merge only after required checks are green.
-4. After merge, GitHub auto-deletes remote feature branch (if enabled above).
-5. Periodically clean local merged branches:
+2. Commit and push to `dev`:
 
 ```bash
-git fetch -p
-git branch --merged main
+git push origin dev
 ```
+
+3. CI runs on `dev`.
+4. If CI is green, `promote-dev-to-main.yml` publishes the same commit to `main`.
 
 ## Local pre-push smoke check
 
