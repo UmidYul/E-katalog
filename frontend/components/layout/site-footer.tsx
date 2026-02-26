@@ -20,9 +20,18 @@ const footerColumns = [
   {
     title: "Сервис",
     links: [
-      { href: "/robots.txt", label: "Robots" },
-      { href: "/sitemap.xml", label: "Sitemap" },
+      { href: "/for-shops", label: "Для магазинов" },
+      { href: "/status", label: "Статус сервиса" },
+      { href: "/contacts", label: "Контакты" },
       { href: "/", label: "Главная" }
+    ]
+  },
+  {
+    title: "Правовая информация",
+    links: [
+      { href: "/privacy", label: "Privacy Policy" },
+      { href: "/terms", label: "Terms of Service" },
+      { href: "/cookies", label: "Cookie Policy" }
     ]
   }
 ];
@@ -33,7 +42,7 @@ export function SiteFooter() {
   return (
     <footer className="mt-20 border-t border-border/80 bg-background/70 py-10 backdrop-blur">
       <div className="container space-y-8">
-        <div className="grid gap-6 md:grid-cols-[1.4fr_repeat(3,minmax(0,1fr))]">
+        <div className="grid gap-6 md:grid-cols-[1.4fr_repeat(4,minmax(0,1fr))]">
           <div className="space-y-2">
             <p className="font-heading text-xl font-extrabold tracking-tight">E-katalog</p>
             <p className="text-sm text-muted-foreground">Строгое и прозрачное сравнение цен по проверенным магазинам.</p>

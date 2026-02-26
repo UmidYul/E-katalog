@@ -130,6 +130,48 @@ def test_api_version_header_not_added_outside_api_prefix() -> None:
     assert payload.get("version") is None
 
 
+def test_security_headers_are_set_for_api_routes() -> None:
+    script = (
+        "import json,sys;"
+        f"sys.path.insert(0,{str(API_ROOT)!r});"
+        "from fastapi.testclient import TestClient;"
+        "from app.main import app;"
+        "client=TestClient(app);"
+        "response=client.get('/api/v1/health');"
+        "print(json.dumps({"
+        "'status': response.status_code,"
+        "'x_frame_options': response.headers.get('X-Frame-Options'),"
+        "'x_content_type_options': response.headers.get('X-Content-Type-Options'),"
+        "'referrer_policy': response.headers.get('Referrer-Policy'),"
+        "'permissions_policy': response.headers.get('Permissions-Policy'),"
+        "'content_security_policy': response.headers.get('Content-Security-Policy')"
+        "}))"
+    )
+    payload = json.loads(_run_api_python(script))
+    assert int(payload.get("status", 0)) == 200
+    assert payload.get("x_frame_options") == "DENY"
+    assert payload.get("x_content_type_options") == "nosniff"
+    assert str(payload.get("referrer_policy", "")).strip()
+    assert str(payload.get("permissions_policy", "")).strip()
+    assert str(payload.get("content_security_policy", "")).strip()
+
+
+def test_hsts_header_is_set_in_production_environment() -> None:
+    script = (
+        "import json,os,sys;"
+        "os.environ['ENVIRONMENT']='production';"
+        f"sys.path.insert(0,{str(API_ROOT)!r});"
+        "from fastapi.testclient import TestClient;"
+        "from app.main import app;"
+        "client=TestClient(app);"
+        "response=client.get('/api/v1/health');"
+        "print(json.dumps({'status': response.status_code, 'hsts': response.headers.get('Strict-Transport-Security')}))"
+    )
+    payload = json.loads(_run_api_python(script))
+    assert int(payload.get("status", 0)) == 200
+    assert str(payload.get("hsts", "")).strip()
+
+
 def test_openapi_contract_operations_have_tags_and_responses() -> None:
     schema = _load_openapi_schema()
     paths = schema.get("paths", {})

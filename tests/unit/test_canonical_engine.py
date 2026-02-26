@@ -90,3 +90,25 @@ def test_candidate_blocking_reduces_scan_scope() -> None:
     assert decision.match_type == "exact"
     assert engine.last_candidate_count > 0
     assert engine.last_candidate_count < total_canonicals
+
+
+def test_cross_variant_penalty_is_applied_for_same_model_family() -> None:
+    engine = CanonicalMatchingEngine()
+    pro_attrs = extract_attributes("Apple iPhone 13 Pro 128GB Graphite")
+    pro_max_attrs = extract_attributes("Apple iPhone 13 Pro Max 128GB Graphite")
+    same_attrs = extract_attributes("Apple iPhone 13 Pro 128GB Silver")
+
+    assert engine._variant_penalty(pro_attrs, pro_max_attrs) > 0.0
+    assert engine._variant_penalty(pro_attrs, same_attrs) == 0.0
+
+
+def test_confidence_calibration_is_separate_from_similarity_score() -> None:
+    engine = CanonicalMatchingEngine()
+    raw = 0.91
+    fuzzy_conf = engine._calibrate_confidence(raw, match_type="fuzzy")
+    emb_conf = engine._calibrate_confidence(raw, match_type="embedding")
+
+    assert 0.0 <= fuzzy_conf <= 1.0
+    assert 0.0 <= emb_conf <= 1.0
+    assert fuzzy_conf != raw
+    assert emb_conf != raw

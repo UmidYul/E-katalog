@@ -377,6 +377,44 @@ class CatalogCanonicalMatchSnapshot(CatalogUuidMixin, Base):
     )
 
 
+class CatalogCanonicalReviewCase(CatalogUuidMixin, Base):
+    __tablename__ = "catalog_canonical_review_cases"
+    __table_args__ = (
+        UniqueConstraint(
+            "store_product_id",
+            "canonical_product_id",
+            "signal_type",
+            name="uq_catalog_canonical_review_case_signal",
+        ),
+        CheckConstraint(
+            "confidence_score is null or (confidence_score >= 0 and confidence_score <= 1)",
+            name="ck_catalog_review_case_confidence",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    store_product_id: Mapped[int] = mapped_column(ForeignKey("catalog_store_products.id", ondelete="CASCADE"), nullable=False)
+    canonical_product_id: Mapped[int] = mapped_column(
+        ForeignKey("catalog_canonical_products.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    candidate_canonical_id: Mapped[int | None] = mapped_column(
+        ForeignKey("catalog_canonical_products.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    canonical_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    signal_type: Mapped[str] = mapped_column(String(32), nullable=False, default="low_confidence", server_default="low_confidence")
+    confidence_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="open", server_default="open")
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    reviewed_by: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class CatalogCanonicalKeyIndex(CatalogUuidMixin, Base):
     __tablename__ = "catalog_canonical_key_index"
     __table_args__ = (
@@ -677,6 +715,9 @@ Index("ix_catalog_match_ledger_canonical_created", CatalogCanonicalMatchLedger.c
 Index("ix_catalog_match_ledger_key_created", CatalogCanonicalMatchLedger.canonical_key, CatalogCanonicalMatchLedger.created_at.desc())
 Index("ix_catalog_match_snapshot_date", CatalogCanonicalMatchSnapshot.snapshot_date.desc())
 Index("ix_catalog_match_snapshot_canonical", CatalogCanonicalMatchSnapshot.canonical_product_id)
+Index("ix_catalog_review_case_status_created", CatalogCanonicalReviewCase.status, CatalogCanonicalReviewCase.created_at.desc())
+Index("ix_catalog_review_case_signal_status", CatalogCanonicalReviewCase.signal_type, CatalogCanonicalReviewCase.status)
+Index("ix_catalog_review_case_canonical_created", CatalogCanonicalReviewCase.canonical_product_id, CatalogCanonicalReviewCase.created_at.desc())
 Index("ix_catalog_canonical_key_index_product", CatalogCanonicalKeyIndex.canonical_product_id)
 Index("ix_catalog_canonical_key_index_brand_model_storage", CatalogCanonicalKeyIndex.brand, CatalogCanonicalKeyIndex.model, CatalogCanonicalKeyIndex.storage)
 Index("ix_catalog_canonical_key_index_updated_at", CatalogCanonicalKeyIndex.updated_at.desc())

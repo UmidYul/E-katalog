@@ -34,13 +34,13 @@ This file aggregates items that are still not fully implemented based on explici
 - [~] Advanced feedback workflow (votes, report-abuse, pinned answers): API + UI baseline implemented on 2026-02-26, needs extra polishing/tests.  
 
 Phase 2 / post-MVP backlog from this file:
-- [ ] Full comparison matrix improvements.
-- [ ] Reviews, Q&A, discussions/forum extension.
-- [ ] Category ratings, popular requests, encyclopedic sections.
-- [ ] Editorial content sections (articles, selections).
-- [ ] Advanced server-synced notifications (price drop / stock).
-- [ ] Advanced profile security hardening.
-- [ ] B2B store cabinet and ad tools.
+- [x] Full comparison matrix improvements (compare page now supports characteristic search, key-spec focus mode, and live row/diff counters for faster side-by-side analysis).
+- [~] Reviews, Q&A, discussions/forum extension (reviews/Q&A baseline implemented; forum/discussion extension intentionally deferred for now).
+- [x] Category ratings, popular requests, encyclopedic sections (home page now includes category pulse/rating cards, popular query shortcuts, and encyclopedic buying-guide blocks linked to prefiltered catalog routes).
+- [x] Editorial content sections (articles, selections) baseline: home page now has dedicated editorial selection cards (curated picks/guides/trends) with direct links into preconfigured catalog scenarios.
+- [x] Advanced server-synced notifications (price drop / stock) baseline: added global client hydration of server price-alert metadata in app providers, so alert state syncs across screens immediately after auth/session restore.
+- [x] Advanced profile security hardening baseline: profile security center now includes posture scoring, session risk badges (unknown/stale sessions), and password-strength guardrails before password update.
+- [~] B2B store cabinet and ad tools (public baseline `/for-shops` and B2B contact/tariff presentation added; full merchant cabinet + ad tooling still pending).
 
 ## 3) Product Feedback Future (`docs/PRODUCT_FEEDBACK_FUTURE_FEATURES.md`)
 
@@ -83,30 +83,30 @@ Immediate backlog from roadmap:
 
 Scaling plan not yet implemented in full:
 - [x] Move canonical indexes to Redis/Postgres mappings for large-scale matching (added `catalog_canonical_key_index` table + worker service with Redis cache + periodic rebuild task).
-- [ ] Batch embedding inference + vector DB ANN indexing strategy.
+- [x] Batch embedding inference + vector DB ANN indexing strategy (incremental embedding batches now use `catalog_pipeline_offsets` with auto-followup chunking; ANN maintenance task `refresh_embedding_ann_indexes` added with daily `ANALYZE` and optional concurrent reindex flow for pgvector indexes).
 - [x] Replace O(N*C) scans with candidate blocking (bucket index in `CanonicalMatchingEngine` limits candidate set by brand/model/storage).
 - [x] Distributed workers with offset checkpoints for canonical pipeline baseline: canonical index refresh now runs incrementally with `catalog_pipeline_offsets` watermark and auto follow-up chunks.
 - [x] Immutable match ledger + snapshot compaction baseline: added append-only `catalog_canonical_match_ledger` events and daily compaction into `catalog_canonical_match_snapshots`.
-- [ ] Active learning loop for low-confidence/false-merge correction.
+- [x] Active learning loop for low-confidence/false-merge correction baseline: low-confidence AI canonical matches now produce review cases (`catalog_canonical_review_cases`), with admin APIs to list and resolve cases (`open/applied/rejected`) for feedback-driven correction.
 
 Tuning backlog:
-- [ ] Tune fuzzy threshold via validation PR curve.
-- [ ] Calibrate embedding thresholds by brand family.
-- [ ] Penalize cross-variant candidates before final scoring.
-- [ ] Separate confidence calibration model from similarity model.
+- [x] Tune fuzzy threshold via validation PR curve baseline: added reproducible PR-curve tuning utility (`scripts/tune_canonical_fuzzy_threshold.py`) backed by engine-level evaluator (`build_fuzzy_threshold_pr_curve`).
+- [x] Calibrate embedding thresholds by brand family baseline: added brand-family calibration utility (`scripts/calibrate_embedding_thresholds_by_brand.py`) backed by engine evaluator (`calibrate_embedding_thresholds_by_brand`) with per-brand recommended high/low thresholds.
+- [x] Penalize cross-variant candidates before final scoring: canonical matcher now applies variant-family penalties before fuzzy/embedding tie-break scoring to reduce risky cross-variant merges.
+- [x] Separate confidence calibration model from similarity model baseline: canonical matcher now uses dedicated confidence calibration (`_calibrate_confidence`) independent from raw fuzzy/embedding similarity used for candidate selection/threshold gating.
 
 ## 6) EK.UA Full Audit (`docs/EK_UA_FUNCTIONALITY_FULL_AUDIT.md`)
 
 This file is a capability audit/reference and does not use explicit `TODO` markers.  
 Action item:
-- [ ] Create a strict parity matrix: `implemented / partial / missing` for audited EK.UA feature blocks, then convert missing blocks into tracked dev tasks.
+- [x] Create a strict parity matrix: `implemented / partial / missing` for audited EK.UA feature blocks, then convert missing blocks into tracked dev tasks (`docs/EK_UA_PARITY_MATRIX.md` + `PARITY-*` tasks in `docs/BACKEND_PROD_TASKS.md`).
 
 ## 7) Profile Future Features (`docs/PROFILE_FUTURE_FEATURES.md`)
 
 Most planned items in this file are already listed as implemented.
 
 Action item:
-- [ ] Refresh this document to remove outdated "Planned API" sections and leave only real future gaps.
+- [x] Refresh this document to remove outdated "Planned API" sections and leave only real future gaps (completed in `docs/PROFILE_FUTURE_FEATURES.md`, updated 2026-02-26).
 
 ## 8) Operational Docs (not feature backlog)
 
@@ -118,7 +118,7 @@ These docs are operational runbooks/checklists and do not define product-feature
 ## 9) Additional Prod Readiness Gaps (manual additions)
 
 These items are important for production quality but are not explicitly tracked as TODOs in the source docs above:
-- [ ] Security baseline hardening checklist (strict CORS, security headers, HTTPS-only assumptions, secret rotation policy).
-- [ ] Queue reliability standards (DLQ, retry/backoff policy, stuck-job monitoring, idempotent worker handlers).
-- [ ] Release management hardening (staging parity, post-deploy smoke tests, rollback runbook).
-- [ ] Legal/compliance storefront baseline (privacy policy, terms, cookie policy, contacts, status page).
+- [x] Security baseline hardening checklist (strict CORS, security headers, HTTPS-only assumptions, secret rotation policy) documented in `docs/SECURITY_BASELINE_CHECKLIST.md` and baseline security headers enforced in API middleware.
+- [x] Queue reliability standards (DLQ, retry/backoff policy, stuck-job monitoring, idempotent worker handlers) documented in `docs/QUEUE_RELIABILITY_STANDARDS.md` with current baseline + follow-ups.
+- [x] Release management hardening (staging parity, post-deploy smoke tests, rollback runbook) documented in `docs/RELEASE_MANAGEMENT_HARDENING.md`.
+- [x] Legal/compliance storefront baseline (privacy policy, terms, cookie policy, contacts, status page) added to frontend routes (`/privacy`, `/terms`, `/cookies`, `/contacts`, `/status`) and linked in site footer.

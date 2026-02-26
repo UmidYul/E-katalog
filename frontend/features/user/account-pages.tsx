@@ -71,6 +71,34 @@ const getErrorMessage = (error: unknown, fallback: string): string => {
   return fallback;
 };
 
+const parseDateMs = (value?: string) => {
+  if (!value) return 0;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const evaluatePasswordStrength = (value: string) => {
+  const password = value.trim();
+  const checks = {
+    minLength12: password.length >= 12,
+    hasUpper: /[A-Z]/.test(password),
+    hasLower: /[a-z]/.test(password),
+    hasDigit: /\d/.test(password),
+    hasSpecial: /[^A-Za-z0-9]/.test(password),
+  };
+  const score = Object.values(checks).filter(Boolean).length;
+  const label = score >= 5 ? "strong" : score >= 3 ? "medium" : "weak";
+  return { score, label, checks };
+};
+
+const isHighRiskSession = (session: { ip_address: string; location: string; last_seen_at: string }) => {
+  const location = String(session.location || "").trim().toLowerCase();
+  const ip = String(session.ip_address || "").trim().toLowerCase();
+  const staleMs = Date.now() - parseDateMs(session.last_seen_at);
+  const staleDays = staleMs > 0 ? staleMs / (1000 * 60 * 60 * 24) : 0;
+  return location === "unknown" || ip === "unknown" || staleDays >= 45;
+};
+
 export function ProfileClient() {
   const queryClient = useQueryClient();
   const me = useAuthMe();
@@ -262,6 +290,22 @@ export function ProfileClient() {
   const recentPreview = recentItems.slice(0, 5);
   const favoritesCount = favorites.data?.length ?? 0;
   const recentCount = recentItems.length;
+  const newPasswordStrength = useMemo(() => evaluatePasswordStrength(newPassword), [newPassword]);
+  const sessionRiskSummary = useMemo(() => {
+    const sessions = sessionsQuery.data ?? [];
+    const highRisk = sessions.filter((session) => isHighRiskSession(session)).length;
+    return { total: sessions.length, highRisk };
+  }, [sessionsQuery.data]);
+  const securityScore = useMemo(() => {
+    let score = 0;
+    if (twoFactorEnabled) score += 45;
+    if (sessionRiskSummary.total > 0) {
+      const safeShare = (sessionRiskSummary.total - sessionRiskSummary.highRisk) / sessionRiskSummary.total;
+      score += Math.round(safeShare * 35);
+      if (sessionRiskSummary.total <= 2) score += 20;
+    }
+    return Math.max(0, Math.min(100, score));
+  }, [sessionRiskSummary.highRisk, sessionRiskSummary.total, twoFactorEnabled]);
 
   const onDraftFieldChange = (field: keyof LocalProfileDraft, value: string) => {
     setProfileForm((prev) => ({ ...prev, [field]: value }));
@@ -295,6 +339,10 @@ export function ProfileClient() {
     }
     if (newPassword !== confirmNewPassword) {
       setStatus("New password confirmation does not match.");
+      return;
+    }
+    if (newPasswordStrength.score < 3) {
+      setStatus("Use a stronger password: 12+ chars, mixed case, digits and special symbols.");
       return;
     }
     try {
@@ -658,6 +706,19 @@ export function ProfileClient() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
+              <div className="rounded-xl border border-border p-3">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-medium">Security posture</p>
+                  <Badge className={securityScore >= 80 ? "bg-emerald-600 text-white" : securityScore >= 55 ? "bg-warning text-warning-foreground" : "bg-destructive text-destructive-foreground"}>
+                    {securityScore}/100
+                  </Badge>
+                </div>
+                <div className="grid gap-2 text-xs text-muted-foreground">
+                  <p>2FA: {twoFactorEnabled ? "включена" : "выключена"}</p>
+                  <p>Активные сессии: {sessionRiskSummary.total}</p>
+                  <p>Риск-сессии: {sessionRiskSummary.highRisk}</p>
+                </div>
+              </div>
               <div className="flex items-center justify-between gap-2 rounded-xl border border-border p-3">
                 <div>
                   <p className="text-sm font-medium">ID аккаунта</p>
@@ -699,6 +760,22 @@ export function ProfileClient() {
                   value={confirmNewPassword}
                   onChange={(event) => setConfirmNewPassword(event.target.value)}
                 />
+                <div className="rounded-lg border border-border/70 p-2">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <span className="text-xs text-muted-foreground">Password strength</span>
+                    <Badge className={newPasswordStrength.label === "strong" ? "bg-emerald-600 text-white" : newPasswordStrength.label === "medium" ? "bg-warning text-warning-foreground" : "bg-secondary text-foreground"}>
+                      {newPasswordStrength.label}
+                    </Badge>
+                  </div>
+                  <div className="grid grid-cols-5 gap-1">
+                    {Array.from({ length: 5 }).map((_, index) => (
+                      <div
+                        key={index}
+                        className={index < newPasswordStrength.score ? "h-1.5 rounded bg-primary" : "h-1.5 rounded bg-secondary"}
+                      />
+                    ))}
+                  </div>
+                </div>
                 <div className="flex items-center justify-between gap-2 rounded-lg border border-border/70 p-2">
                   <span className="text-xs text-muted-foreground">Revoke other sessions after password change</span>
                   <Switch checked={revokeOtherSessionsOnPasswordChange} onCheckedChange={setRevokeOtherSessionsOnPasswordChange} />
@@ -783,7 +860,10 @@ export function ProfileClient() {
                     <div key={session.id} className="rounded-lg border border-border/70 p-2">
                       <div className="flex items-center justify-between gap-2">
                         <div>
-                          <p className="text-xs font-medium">{session.device}</p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-xs font-medium">{session.device}</p>
+                            {isHighRiskSession(session) ? <Badge className="bg-warning text-warning-foreground">Risk</Badge> : <Badge className="bg-emerald-600 text-white">Safe</Badge>}
+                          </div>
                           <p className="text-xs text-muted-foreground">
                             {session.ip_address} | {session.location}
                           </p>

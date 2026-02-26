@@ -19,7 +19,7 @@ from app.platform.services.pipeline_offsets import ensure_offsets_table
 from app.platform.services.canonical_index import sync_canonical_key_index_batch
 from app.core.config import settings
 from app.core.logging import logger
-from app.db.session import AsyncSessionLocal
+from app.db.session import AsyncSessionLocal, engine
 from app.celery_app import celery_app
 
 
@@ -1872,6 +1872,85 @@ async def _refresh_canonical_key_index(*, limit: int | None = None, reset_offset
 @celery_app.task(bind=True)
 def enqueue_refresh_canonical_key_index(self) -> str:
     return refresh_canonical_key_index.delay().id
+
+
+@celery_app.task(bind=True)
+def refresh_embedding_ann_indexes(self, force_reindex: bool = False) -> dict[str, Any]:
+    return asyncio.run(_refresh_embedding_ann_indexes(force_reindex=force_reindex))
+
+
+async def _refresh_embedding_ann_indexes(*, force_reindex: bool = False) -> dict[str, Any]:
+    ann_indexes = [
+        ("catalog_canonical_products", "ix_catalog_canonical_products_embedding_vector"),
+        ("catalog_product_embeddings", "ix_catalog_product_embeddings_vector"),
+    ]
+    indexed = 0
+    analyzed_tables: set[str] = set()
+    index_profiles: list[dict[str, Any]] = []
+
+    async with AsyncSessionLocal() as session:
+        for table_name, index_name in ann_indexes:
+            index_row = (
+                await session.execute(
+                    text(
+                        """
+                        select indexdef
+                        from pg_indexes
+                        where schemaname = current_schema()
+                          and tablename = :table_name
+                          and indexname = :index_name
+                        """
+                    ),
+                    {"table_name": table_name, "index_name": index_name},
+                )
+            ).mappings().first()
+            if index_row is None:
+                continue
+            indexed += 1
+            await session.execute(text(f"analyze {table_name}"))
+            analyzed_tables.add(table_name)
+            index_profiles.append(
+                {
+                    "table": table_name,
+                    "index": index_name,
+                    "definition": str(index_row.get("indexdef") or ""),
+                }
+            )
+        await session.commit()
+
+    reindex_enabled = bool(settings.embedding_ann_maintenance_reindex_enabled) or bool(force_reindex)
+    reindexed = 0
+    if reindex_enabled and indexed > 0:
+        async with engine.connect() as connection:
+            autocommit_conn = await connection.execution_options(isolation_level="AUTOCOMMIT")
+            for _, index_name in ann_indexes:
+                exists = any(profile["index"] == index_name for profile in index_profiles)
+                if not exists:
+                    continue
+                await autocommit_conn.execute(text(f"reindex index concurrently {index_name}"))
+                reindexed += 1
+
+    logger.info(
+        "embedding_ann_indexes_refreshed",
+        indexed=indexed,
+        analyzed_tables=sorted(analyzed_tables),
+        reindex_enabled=reindex_enabled,
+        reindexed=reindexed,
+    )
+    return {
+        "status": "ok",
+        "indexed": indexed,
+        "analyzed_tables": sorted(analyzed_tables),
+        "reindex_enabled": reindex_enabled,
+        "reindexed": reindexed,
+        "index_profiles": index_profiles,
+        "at": datetime.now(UTC).isoformat(),
+    }
+
+
+@celery_app.task(bind=True)
+def enqueue_refresh_embedding_ann_indexes(self) -> str:
+    return refresh_embedding_ann_indexes.delay().id
 
 
 @celery_app.task(bind=True)

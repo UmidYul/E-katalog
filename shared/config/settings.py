@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     ai_product_copy_enabled: bool = False
     ai_product_copy_min_compare_confidence: float = 0.70
     ai_product_copy_batch_limit: int = 300
+    embedding_batch_limit: int = 400
+    embedding_ann_maintenance_reindex_enabled: bool = False
     quality_report_enabled: bool = True
     quality_report_stale_offer_hours: int = 48
     quality_report_active_without_offers_warn_ratio: float = 0.20
@@ -98,6 +100,16 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     api_version_header_value: str = "v1"
+    api_security_headers_enabled: bool = True
+    api_cors_allow_credentials: bool = True
+    api_cors_allow_methods: list[str] = Field(default_factory=lambda: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+    api_cors_allow_headers: list[str] = Field(
+        default_factory=lambda: ["Authorization", "Content-Type", "Idempotency-Key", "X-Request-ID"]
+    )
+    api_strict_transport_security: str = "max-age=31536000; includeSubDomains"
+    api_content_security_policy: str = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+    api_referrer_policy: str = "strict-origin-when-cross-origin"
+    api_permissions_policy: str = "camera=(), microphone=(), geolocation=()"
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000", "http://localhost:5173"])
     cursor_secret: str = "change-me-cursor-secret"
     admin_seed_enabled: bool = True

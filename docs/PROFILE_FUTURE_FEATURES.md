@@ -1,109 +1,33 @@
 # Profile Future Features
 
-This file tracks profile capabilities that are designed but not yet implementable with the current backend API.
+Updated: 2026-02-26
 
-## Implemented
+This document keeps only real profile-related future gaps.
+Already implemented API blocks were removed from planning sections.
 
-- On February 23, 2026, profile editing was implemented with:
-  - `GET /api/v1/users/me/profile`
-  - `PATCH /api/v1/users/me/profile`
-- Profile fields now persist server-side in the current auth storage (Redis).
-- On February 25, 2026, security and sync features were implemented:
-  - `POST /api/v1/auth/change-password`
-  - `GET /api/v1/auth/sessions`
-  - `DELETE /api/v1/auth/sessions/{session_id}`
-  - `DELETE /api/v1/auth/sessions`
-  - `POST /api/v1/auth/2fa/setup`
-  - `POST /api/v1/auth/2fa/verify`
-  - `DELETE /api/v1/auth/2fa`
-  - `GET /api/v1/users/me/notification-preferences`
-  - `PATCH /api/v1/users/me/notification-preferences`
-  - `GET /api/v1/users/me/recently-viewed`
-  - `POST /api/v1/users/me/recently-viewed`
-  - `DELETE /api/v1/users/me/recently-viewed`
-- Social login was added for common end-user providers:
-  - `GET /api/v1/auth/oauth/providers`
-  - `GET /api/v1/auth/oauth/google`
-  - `GET /api/v1/auth/oauth/facebook`
-  - `GET /api/v1/auth/oauth/{provider}/callback`
+## Implemented baseline
 
-## 2) Password Change and Session Management
+- Profile read/update via `/api/v1/users/me/profile`.
+- Password change and active session management.
+- 2FA setup/verify/disable.
+- Notification preferences sync via API.
+- Recently viewed cloud sync via API.
+- OAuth login provider flow baseline.
 
-### Goal
-- Let users rotate password and revoke active sessions.
+## Real future gaps
 
-### Planned API
-- `POST /api/v1/auth/change-password`
-- `GET /api/v1/auth/sessions`
-- `DELETE /api/v1/auth/sessions/{session_id}`
-- `DELETE /api/v1/auth/sessions` (revoke all except current)
+1. `PROFILE-01` Security events timeline in account UI  
+Scope: user-visible stream for login/password/2FA/session events with risk labels and filtering.
+2. `PROFILE-02` Device trust management  
+Scope: trusted-device UX, forced re-auth flow for risky devices, and per-device challenge policy.
+3. `PROFILE-03` Recovery hardening  
+Scope: backup/recovery codes rotation UI, recovery attempt limits, and suspicious recovery alerts.
+4. `PROFILE-04` Data export and account privacy controls  
+Scope: profile data export request/status/download and granular consent controls.
+5. `PROFILE-05` Account deletion/self-service closure workflow  
+Scope: multi-step closure flow with cooldown window, export reminder, and restore grace period.
 
-### Planned session model
-```json
-{
-  "id": "sess_123",
-  "device": "Chrome on Windows",
-  "ip_address": "203.0.113.42",
-  "location": "Tashkent, UZ",
-  "created_at": "2026-02-23T10:22:00Z",
-  "last_seen_at": "2026-02-23T14:06:00Z",
-  "is_current": true
-}
-```
+## Notes
 
-## 3) Two-Factor Authentication (2FA)
-
-### Goal
-- Increase account security with TOTP.
-
-### Planned API
-- `POST /api/v1/auth/2fa/setup`
-- `POST /api/v1/auth/2fa/verify`
-- `DELETE /api/v1/auth/2fa`
-
-### Planned setup response
-```json
-{
-  "secret": "BASE32SECRET",
-  "qr_svg": "<svg>...</svg>",
-  "recovery_codes": ["code1", "code2", "code3"]
-}
-```
-
-## 4) Notification Channels
-
-### Goal
-- Sync notification preferences with backend.
-
-### Planned API
-- `GET /api/v1/users/me/notification-preferences`
-- `PATCH /api/v1/users/me/notification-preferences`
-
-### Planned payload
-```json
-{
-  "price_drop_alerts": true,
-  "stock_alerts": true,
-  "weekly_digest": false,
-  "marketing_emails": false,
-  "channels": {
-    "email": true,
-    "telegram": false
-  }
-}
-```
-
-## 5) Cloud Sync for Recently Viewed
-
-### Goal
-- Keep recently viewed products consistent across devices.
-
-### Planned API
-- `GET /api/v1/users/me/recently-viewed`
-- `POST /api/v1/users/me/recently-viewed`
-- `DELETE /api/v1/users/me/recently-viewed`
-
-### Planned client migration
-- Keep local store as fallback cache.
-- On login, merge local and remote history.
-- On logout, preserve local cache for guest mode.
+- Reviews/Q&A/forum roadmap is tracked separately in `docs/EK_UA_PARITY_MATRIX.md` (`PARITY-*`).
+- Security platform controls (headers/CORS/secret rotation) are tracked in prod-readiness backlog docs.

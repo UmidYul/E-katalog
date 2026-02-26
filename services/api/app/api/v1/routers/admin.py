@@ -269,6 +269,11 @@ class QualityProductsBulkDeactivateIn(BaseModel):
     product_ids: list[str]
 
 
+class CanonicalReviewCasePatch(BaseModel):
+    status: str = Field(pattern="^(open|applied|rejected)$")
+    note: str | None = Field(default=None, max_length=400)
+
+
 def _hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -324,6 +329,27 @@ def _serialize_quality_no_offer_row(row: dict[str, Any]) -> dict[str, Any]:
         "category": {"id": str(category_id), "name": row.get("category_name")}
         if category_id and row.get("category_name")
         else None,
+    }
+
+
+def _serialize_canonical_review_case_row(row: dict[str, Any]) -> dict[str, Any]:
+    payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+    return {
+        "id": row.get("id"),
+        "store_product_id": _to_int(row.get("store_product_id")),
+        "canonical_product_id": _to_int(row.get("canonical_product_id")),
+        "candidate_canonical_id": _to_int(row.get("candidate_canonical_id")) if row.get("candidate_canonical_id") is not None else None,
+        "canonical_key": str(row.get("canonical_key") or ""),
+        "signal_type": str(row.get("signal_type") or ""),
+        "confidence_score": _to_float(row.get("confidence_score"), default=0.0) if row.get("confidence_score") is not None else None,
+        "status": str(row.get("status") or "open"),
+        "reviewed_by": row.get("reviewed_by"),
+        "reviewed_at": _serialize_datetime_value(row.get("reviewed_at")),
+        "created_at": _serialize_datetime_value(row.get("created_at")),
+        "updated_at": _serialize_datetime_value(row.get("updated_at")),
+        "canonical_title": row.get("canonical_title"),
+        "candidate_title": row.get("candidate_title"),
+        "payload": payload,
     }
 
 
@@ -4001,6 +4027,123 @@ async def deactivate_quality_products_without_valid_offers(
         }
 
     return await execute_idempotent_json(request, redis, scope="admin.quality.products.deactivate", handler=_op)
+
+
+@router.get("/canonical/review-cases")
+async def list_canonical_review_cases(
+    status: str | None = Query(default=None, pattern="^(open|applied|rejected)$"),
+    signal_type: str | None = Query(default=None, pattern="^[a-z_]{2,32}$"),
+    limit: int = Query(default=50, ge=1, le=300),
+    offset: int = Query(default=0, ge=0, le=20000),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    rows = (
+        await db.execute(
+            text(
+                """
+                select
+                    c.uuid as id,
+                    c.store_product_id,
+                    c.canonical_product_id,
+                    c.candidate_canonical_id,
+                    c.canonical_key,
+                    c.signal_type,
+                    c.confidence_score,
+                    c.status,
+                    c.payload,
+                    c.reviewed_by,
+                    c.reviewed_at,
+                    c.created_at,
+                    c.updated_at,
+                    cp.normalized_title as canonical_title,
+                    ccp.normalized_title as candidate_title
+                from catalog_canonical_review_cases c
+                join catalog_canonical_products cp on cp.id = c.canonical_product_id
+                left join catalog_canonical_products ccp on ccp.id = c.candidate_canonical_id
+                where (cast(:status as text) is null or c.status = cast(:status as text))
+                  and (cast(:signal_type as text) is null or c.signal_type = cast(:signal_type as text))
+                order by c.created_at desc, c.id desc
+                limit :limit
+                offset :offset
+                """
+            ),
+            {"status": status, "signal_type": signal_type, "limit": limit, "offset": offset},
+        )
+    ).mappings().all()
+    return {
+        "items": [_serialize_canonical_review_case_row(dict(row)) for row in rows],
+        "limit": limit,
+        "offset": offset,
+        "request_id": "admin-canonical-review-cases",
+    }
+
+
+@router.patch("/canonical/review-cases/{case_id}")
+async def patch_canonical_review_case(
+    request: Request,
+    payload: CanonicalReviewCasePatch,
+    case_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    db: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),
+) -> dict[str, Any]:
+    async def _op():
+        actor_uuid = _ensure_user_uuid(current_user)
+        row = (
+            await db.execute(
+                text(
+                    """
+                    update catalog_canonical_review_cases
+                    set status = cast(:status as text),
+                        reviewed_by = cast(:reviewed_by as uuid),
+                        reviewed_at = now(),
+                        payload = case
+                            when cast(:note as text) is null or btrim(cast(:note as text)) = '' then payload
+                            else payload || jsonb_build_object('review_note', cast(:note as text))
+                        end,
+                        updated_at = now()
+                    where uuid = cast(:case_id as uuid)
+                    returning
+                      uuid as id,
+                      store_product_id,
+                      canonical_product_id,
+                      candidate_canonical_id,
+                      canonical_key,
+                      signal_type,
+                      confidence_score,
+                      status,
+                      payload,
+                      reviewed_by,
+                      reviewed_at,
+                      created_at,
+                      updated_at
+                    """
+                ),
+                {
+                    "case_id": case_id,
+                    "status": payload.status,
+                    "reviewed_by": actor_uuid,
+                    "note": payload.note,
+                },
+            )
+        ).mappings().first()
+        if not row:
+            raise HTTPException(status_code=404, detail="canonical review case not found")
+
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="canonical.review_case.patch",
+            entity_type="canonical_review_case",
+            entity_id=str(case_id).lower(),
+            payload={"status": payload.status, "has_note": bool((payload.note or "").strip())},
+        )
+        await db.commit()
+        return _serialize_canonical_review_case_row(dict(row))
+
+    scope = f"admin.canonical.review_case.patch:{case_id.lower()}:{payload.status}"
+    return await execute_idempotent_json(request, redis, scope=scope, handler=_op)
 
 
 @router.post("/quality/reports/run")

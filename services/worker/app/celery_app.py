@@ -90,6 +90,11 @@ celery_app.conf.update(
         "app.tasks.maintenance_tasks.enqueue_refresh_offer_trust_scores": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.maintenance_tasks.refresh_canonical_key_index": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.maintenance_tasks.enqueue_refresh_canonical_key_index": {"queue": "maintenance", "routing_key": "maintenance"},
+        "app.tasks.maintenance_tasks.refresh_embedding_ann_indexes": {"queue": "maintenance", "routing_key": "maintenance"},
+        "app.tasks.maintenance_tasks.enqueue_refresh_embedding_ann_indexes": {
+            "queue": "maintenance",
+            "routing_key": "maintenance",
+        },
         "app.tasks.maintenance_tasks.compact_canonical_match_snapshots": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.maintenance_tasks.enqueue_compact_canonical_match_snapshots": {"queue": "maintenance", "routing_key": "maintenance"},
     },
@@ -192,6 +197,11 @@ celery_app.conf.update(
         "canonical-key-index-refresh-daily-0410": {
             "task": "app.tasks.maintenance_tasks.enqueue_refresh_canonical_key_index",
             "schedule": crontab(minute=10, hour=4),
+            "options": {"queue": "maintenance", "routing_key": "maintenance"},
+        },
+        "embedding-ann-index-maintenance-daily-0430": {
+            "task": "app.tasks.maintenance_tasks.enqueue_refresh_embedding_ann_indexes",
+            "schedule": crontab(minute=30, hour=4),
             "options": {"queue": "maintenance", "routing_key": "maintenance"},
         },
         "canonical-match-snapshot-compaction-daily-0445": {

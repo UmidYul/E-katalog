@@ -79,3 +79,19 @@
 - `DONE` Canonical matching scaling (partial baseline): introduced persistent canonical key index (`catalog_canonical_key_index`) with Redis cache-backed resolver and daily refresh task, plus candidate blocking buckets in matching engine to avoid full-corpus scans per offer.
 - `DONE` Canonical index processing now uses offset checkpoints (`catalog_pipeline_offsets`) with incremental chunk processing and auto follow-up task scheduling for large backfills.
 - `DONE` Canonical match ledger/snapshot baseline: normalize pipeline writes immutable match events to `catalog_canonical_match_ledger`; scheduled compaction task creates daily snapshots in `catalog_canonical_match_snapshots`.
+- `DONE` Canonical scaling embedding baseline: `generate_embeddings_batch` migrated to incremental offset-driven processing with auto-followup chunk scheduling, and ANN vector index maintenance task (`refresh_embedding_ann_indexes`) added for daily `ANALYZE` plus optional concurrent reindex.
+- `DONE` Active-learning baseline for canonical matching: low-confidence AI matches are captured into `catalog_canonical_review_cases` with admin triage endpoints (`/api/v1/admin/canonical/review-cases`) to mark `open/applied/rejected`.
+
+## 2026-02-26 EK.UA parity tracking (from strict matrix)
+
+Reference matrix: `docs/EK_UA_PARITY_MATRIX.md`
+
+- [ ] `PARITY-01` Reviews/Q&A/discussions extension (threaded forum-level discussions + moderation UX + unresolved filters).
+- [ ] `PARITY-02` Category ratings parity (dedicated ranking pages, methodology block, top-N + parameter analytics slices).
+- [ ] `PARITY-03` Popular requests parity (intent pages with persisted filter presets and SEO routes).
+- [ ] `PARITY-04` Encyclopedia/descriptions parity (knowledge pages with brand-model trees and buying glossary).
+- [ ] `PARITY-05` Editorial hub parity (article listing/detail pages with metadata and product insert cards).
+- [ ] `PARITY-06` Brands catalog parity (A-Z directory + brand landing pages with counters).
+- [ ] `PARITY-07` Personal lists parity (named lists, save-search/list states, sharing/export baseline).
+- [ ] `PARITY-08` B2B cabinet and ad tools parity (merchant onboarding, tariffing, click stats, bid controls, ads).
+- [x] `PARITY-09` Legal/compliance storefront baseline (privacy/terms/cookie/contact/status pages + footer links).

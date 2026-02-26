@@ -89,6 +89,12 @@
 - [x] Сохранение минимальной цены в `Recently viewed`.
 - [x] Базовый flow сравнения товаров (локальный список + страница `/compare` + матрица характеристик).
 - [x] Расширенный comparison flow (категорийные ограничения, heuristic highlight лучших значений, история сравнений).
+- [x] Улучшения comparison matrix: поиск по характеристикам, режим ключевых параметров и счётчики строк/отличий.
+- [x] Server-synced price/stock alert hydration на уровне app providers (состояние алертов подхватывается глобально после auth).
+- [x] Home-информеры категории/запросов: рейтинг категорий, популярные поисковые сценарии и энциклопедические guide-блоки.
+- [x] Редакционные контент-блоки на главной: подборки/гайды/тренды с переходом в релевантные каталожные сценарии.
+- [x] Hardening профиля: security posture score, risk-сессии и индикатор силы пароля в кабинете.
 - [x] Базовые Reviews/Q&A на PDP (локальный MVP mode + формы + списки + ответы).
 - [x] Серверная синхронизация Reviews/Q&A и базовая модерация status через API.
 - [ ] Advanced feedback workflow (votes/report-abuse/pinned answers; admin queue done at `/dashboard/feedback`).
+- [~] B2B baseline: добавлена публичная страница `/for-shops` с тарифными пакетами и каналом подключения; полноценный merchant cabinet и ad tooling остаются в backlog.

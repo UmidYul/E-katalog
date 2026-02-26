@@ -19,8 +19,6 @@ import { formatPrice } from "@/lib/utils/format";
 import { usePriceAlertsStore } from "@/store/priceAlerts.store";
 import { useRecentlyViewedStore } from "@/store/recentlyViewed.store";
 
-const brands = ["Apple", "Samsung", "Xiaomi", "HP", "Lenovo", "Sony"];
-
 const trustItems = [
   {
     icon: ShieldCheck,
@@ -36,6 +34,45 @@ const trustItems = [
     icon: Sparkles,
     title: "Умное сравнение",
     description: "Быстро сравнивайте цену, характеристики и доступность в одном интерфейсе."
+  }
+];
+
+const encyclopediaSections = [
+  {
+    title: "Как выбрать смартфон",
+    description: "Разбор ключевых параметров: камера, экран, автономность, производительность.",
+    href: "/catalog?q=смартфон"
+  },
+  {
+    title: "Гид по ноутбукам",
+    description: "Для учебы, работы и игр: что важно в CPU, RAM, накопителе и экране.",
+    href: "/catalog?q=ноутбук"
+  },
+  {
+    title: "Наушники и звук",
+    description: "Сравнение TWS, полноразмерных моделей, шумоподавления и кодеков.",
+    href: "/catalog?q=наушники"
+  }
+];
+
+const editorialSelections = [
+  {
+    title: "Топ смартфонов до 8 млн",
+    description: "Подборка моделей с лучшим балансом камеры, автономности и производительности.",
+    href: "/catalog?q=смартфон&max_price=8000000&sort=price_asc",
+    tag: "Подборка"
+  },
+  {
+    title: "Ноутбуки для учебы 2026",
+    description: "Легкие и надежные модели с хорошей автономностью и комфортной клавиатурой.",
+    href: "/catalog?q=ноутбук+для+учебы&sort=popular",
+    tag: "Гид"
+  },
+  {
+    title: "Игровые решения месяца",
+    description: "Актуальные устройства с акцентом на производительность и охлаждение.",
+    href: "/catalog?q=игровой&sort=popular",
+    tag: "Тренд"
   }
 ];
 
@@ -57,6 +94,16 @@ export function HomeClient() {
   const favorites = useFavorites();
   const trending = useCatalogProducts({ limit: 6, sort: "popular" });
   const categories = useCategories();
+  const brands = useMemo(() => {
+    const values = new Set<string>();
+    for (const item of trending.data?.items ?? []) {
+      const raw = item.brand?.name;
+      const normalized = typeof raw === "string" ? raw.trim() : "";
+      if (!normalized) continue;
+      values.add(normalized);
+    }
+    return Array.from(values).slice(0, 8);
+  }, [trending.data?.items]);
   const recentItems = useRecentlyViewedStore((s) => s.items);
   const recent = recentItems.slice(0, 6);
   const priceAlertMetas = usePriceAlertsStore((s) => s.metas);
@@ -104,6 +151,44 @@ export function HomeClient() {
     [favoriteIds, favoriteProductQueries, priceAlertMetas]
   );
   const showWatchlistTeaser = Boolean(me.data?.id && priceDropItems.length > 0);
+  const categoryPulse = useMemo(() => {
+    const grouped = new Map<string, { count: number; storeCount: number; pricedSum: number; pricedItems: number }>();
+    for (const item of trending.data?.items ?? []) {
+      const categoryName = item.category?.name?.trim() || "Прочее";
+      const bucket = grouped.get(categoryName) ?? { count: 0, storeCount: 0, pricedSum: 0, pricedItems: 0 };
+      bucket.count += 1;
+      bucket.storeCount += Number(item.store_count ?? 0);
+      const price = typeof item.min_price === "number" && Number.isFinite(item.min_price) ? item.min_price : null;
+      if (price !== null) {
+        bucket.pricedSum += price;
+        bucket.pricedItems += 1;
+      }
+      grouped.set(categoryName, bucket);
+    }
+
+    return Array.from(grouped.entries())
+      .map(([category, bucket]) => {
+        const coverage = Math.round((bucket.storeCount / Math.max(bucket.count, 1)) * 10) / 10;
+        const avgPrice = bucket.pricedItems > 0 ? bucket.pricedSum / bucket.pricedItems : null;
+        const score = Math.min(5, Math.max(1, Math.round((coverage / 2) * 10) / 10));
+        return { category, score, coverage, avgPrice, sampleSize: bucket.count };
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 6);
+  }, [trending.data?.items]);
+
+  const popularRequests = useMemo(() => {
+    const suggestions: Array<{ label: string; href: string }> = [];
+    for (const category of categories.data ?? []) {
+      if (suggestions.length >= 4) break;
+      suggestions.push({ label: `${category.name} до 10 млн`, href: `/catalog?q=${encodeURIComponent(category.name)}&max_price=10000000` });
+    }
+    for (const brand of brands) {
+      if (suggestions.length >= 8) break;
+      suggestions.push({ label: `${brand} выгодные предложения`, href: `/catalog?q=${encodeURIComponent(brand)}&sort=price_asc` });
+    }
+    return suggestions;
+  }, [brands, categories.data]);
 
   return (
     <div className="container space-y-12 py-6">
@@ -170,6 +255,77 @@ export function HomeClient() {
             <Link key={category.id} href={`/category/${category.slug}`}>
               <Card className="h-full transition-colors hover:border-primary/50">
                 <CardContent className="p-4 text-sm font-semibold">{category.name}</CardContent>
+              </Card>
+            </Link>
+          ))}
+        </div>
+      </section>
+
+      {categoryPulse.length ? (
+        <section>
+          <SectionHeading title="Рейтинг категорий" description="Оценка интереса и насыщенности предложений по популярным товарам." />
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+            {categoryPulse.map((item) => (
+              <Card key={item.category}>
+                <CardContent className="space-y-2 p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold">{item.category}</p>
+                    <Badge className="border-primary/40 bg-primary/15 text-primary">{item.score.toFixed(1)} / 5</Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    В среднем {item.coverage.toFixed(1)} магазина на товар.
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {item.avgPrice != null ? `Средняя минимальная цена: ${formatPrice(item.avgPrice)}` : "Цена уточняется"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Основано на {item.sampleSize} карточках в трендах.</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {popularRequests.length ? (
+        <section>
+          <SectionHeading title="Популярные запросы" description="Быстрые сценарии поиска, которыми часто пользуются покупатели." />
+          <div className="flex flex-wrap gap-2">
+            {popularRequests.map((item) => (
+              <Link key={item.label} href={item.href} className="rounded-2xl border border-border bg-card px-4 py-2 text-sm transition-colors hover:border-primary/50 hover:bg-secondary/40">
+                {item.label}
+              </Link>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      <section>
+        <SectionHeading title="Энциклопедия выбора" description="Короткие тематические гиды для более осознанной покупки." />
+        <div className="grid gap-3 md:grid-cols-3">
+          {encyclopediaSections.map((section) => (
+            <Link key={section.title} href={section.href}>
+              <Card className="h-full transition-colors hover:border-primary/50">
+                <CardContent className="space-y-2 p-4">
+                  <p className="text-sm font-semibold">{section.title}</p>
+                  <p className="text-xs text-muted-foreground">{section.description}</p>
+                </CardContent>
+              </Card>
+            </Link>
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <SectionHeading title="Редакционные подборки" description="Кураторские сценарии выбора: что смотреть в первую очередь в популярных сегментах." />
+        <div className="grid gap-3 md:grid-cols-3">
+          {editorialSelections.map((item) => (
+            <Link key={item.title} href={item.href}>
+              <Card className="h-full transition-colors hover:border-primary/50">
+                <CardContent className="space-y-2 p-4">
+                  <Badge className="w-fit border-primary/30 bg-primary/15 text-primary">{item.tag}</Badge>
+                  <p className="text-sm font-semibold">{item.title}</p>
+                  <p className="text-xs text-muted-foreground">{item.description}</p>
+                </CardContent>
               </Card>
             </Link>
           ))}

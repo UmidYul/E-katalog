@@ -10,6 +10,7 @@ import { ErrorState } from "@/components/common/error-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { useCompareProducts, useCreateCompareShare, useResolveCompareShare } from "@/features/compare/use-compare";
 import { catalogApi } from "@/lib/api/openapi-client";
 import { formatColorValue } from "@/lib/utils/color-name";
@@ -142,6 +143,23 @@ const normalizeCategory = (value: unknown) => {
 };
 
 const rowPriorityOrder = ["price_min", "price_max", "store_count"];
+const keySpecHints = [
+  "price",
+  "store_count",
+  "display",
+  "screen",
+  "cpu",
+  "chip",
+  "ram",
+  "storage",
+  "battery",
+  "camera",
+  "network",
+  "wifi",
+  "bluetooth",
+  "weight",
+  "dimensions"
+];
 
 const formatInteger = (value: number) => Math.round(value).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 
@@ -171,6 +189,8 @@ export function CompareClientPage() {
   const restoreSnapshot = useCompareStore((s) => s.restoreSnapshot);
   const clearHistory = useCompareStore((s) => s.clearHistory);
   const [onlyDiff, setOnlyDiff] = useState(false);
+  const [specQuery, setSpecQuery] = useState("");
+  const [focusMode, setFocusMode] = useState<"all" | "key">("all");
   const [shareStatus, setShareStatus] = useState<string | null>(null);
   const [lastShareUrl, setLastShareUrl] = useState<string | null>(null);
   const [lastShareExpiresAt, setLastShareExpiresAt] = useState<string | null>(null);
@@ -267,9 +287,22 @@ export function CompareClientPage() {
       return { key, label: formatSpecLabel(key), values, bestCellIndexes: getBestCellIndexes(key, values) };
     });
 
-    if (!onlyDiff) return allRows;
-    return allRows.filter((row) => hasDiffInRow(row.values));
-  }, [compareQuery.data?.items, onlyDiff]);
+    const normalizedQuery = specQuery.trim().toLowerCase();
+
+    return allRows.filter((row) => {
+      if (onlyDiff && !hasDiffInRow(row.values)) return false;
+      if (
+        focusMode === "key" &&
+        !keySpecHints.some((hint) => row.key.toLowerCase().includes(hint) || row.label.toLowerCase().includes(hint))
+      ) {
+        return false;
+      }
+      if (!normalizedQuery) return true;
+      return row.key.toLowerCase().includes(normalizedQuery) || row.label.toLowerCase().includes(normalizedQuery);
+    });
+  }, [compareQuery.data?.items, focusMode, onlyDiff, specQuery]);
+
+  const diffRowsCount = useMemo(() => rows.filter((row) => hasDiffInRow(row.values)).length, [rows]);
 
   const onCreateShareLink = async () => {
     if (productIds.length < 2) {
@@ -428,6 +461,9 @@ export function CompareClientPage() {
           <Button variant={onlyDiff ? "default" : "outline"} size="sm" onClick={() => setOnlyDiff((prev) => !prev)}>
             {onlyDiff ? "Показаны отличия" : "Показать только отличия"}
           </Button>
+          <Button variant={focusMode === "key" ? "default" : "outline"} size="sm" onClick={() => setFocusMode((prev) => (prev === "all" ? "key" : "all"))}>
+            {focusMode === "key" ? "Ключевые характеристики" : "Фокус: ключевые"}
+          </Button>
           <Button variant="outline" size="sm" onClick={onCreateShareLink} disabled={createShare.isPending || productIds.length < 2}>
             {createShare.isPending ? "Готовим ссылку..." : "Поделиться"}
           </Button>
@@ -440,6 +476,18 @@ export function CompareClientPage() {
             </Button>
           ) : null}
         </div>
+      </div>
+      <div className="grid gap-2 md:grid-cols-[minmax(280px,420px)_1fr] md:items-center">
+        <Input
+          value={specQuery}
+          onChange={(event) => setSpecQuery(event.target.value)}
+          placeholder="Поиск по характеристикам: например, камера, ram, wifi"
+          aria-label="Поиск характеристики в матрице сравнения"
+          className="h-9"
+        />
+        <p className="text-xs text-muted-foreground">
+          Строк в матрице: {rows.length}, отличий: {diffRowsCount}.
+        </p>
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">

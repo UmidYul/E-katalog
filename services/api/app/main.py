@@ -22,9 +22,9 @@ app = FastAPI(title="E-katalog API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_credentials=settings.api_cors_allow_credentials,
+    allow_methods=settings.api_cors_allow_methods,
+    allow_headers=settings.api_cors_allow_headers,
 )
 
 
@@ -39,6 +39,14 @@ async def request_context(request: Request, call_next):
         status_code = int(response.status_code)
         response.headers["X-Request-ID"] = request_id
         response.headers["X-Response-Time-Ms"] = f"{(perf_counter() - started_at) * 1000:.2f}"
+        if settings.api_security_headers_enabled:
+            response.headers["X-Frame-Options"] = "DENY"
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["Referrer-Policy"] = settings.api_referrer_policy
+            response.headers["Permissions-Policy"] = settings.api_permissions_policy
+            response.headers["Content-Security-Policy"] = settings.api_content_security_policy
+            if settings.environment in {"staging", "production"}:
+                response.headers["Strict-Transport-Security"] = settings.api_strict_transport_security
         if request.url.path.startswith("/api/"):
             response.headers["X-API-Version"] = str(settings.api_version_header_value or "v1")
         return response

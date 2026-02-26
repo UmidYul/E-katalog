@@ -91,6 +91,7 @@ _CYRILLIC_CONFUSABLE_TRANSLATION = str.maketrans(
         "х": "x",
     }
 )
+_MODEL_VARIANT_SUFFIXES: tuple[str, ...] = ("promax", "ultra", "plus", "mini", "max", "pro", "fe", "lite")
 
 
 def _apply_aliases(value: str) -> str:
@@ -394,6 +395,7 @@ class CanonicalMatchingEngine:
         fuzzy_threshold: float = 0.95,
         dry_run: bool = False,
         version: int = 1,
+        confidence_calibration_version: int = 1,
     ) -> None:
         self.embedding_service = EmbeddingService()
         self.embedding_high_threshold = embedding_high_threshold
@@ -401,6 +403,7 @@ class CanonicalMatchingEngine:
         self.fuzzy_threshold = fuzzy_threshold
         self.dry_run = dry_run
         self.version = version
+        self.confidence_calibration_version = confidence_calibration_version
         self._sequence = 0
         self.canonicals: dict[str, CanonicalProduct] = {}
         self.key_index: dict[str, str] = {}
@@ -408,11 +411,36 @@ class CanonicalMatchingEngine:
         self.audit_log: list[AuditEvent] = []
         self.last_candidate_count: int = 0
 
+    def _calibrate_confidence(self, raw_score: float, *, match_type: str) -> float:
+        score = max(0.0, min(1.0, float(raw_score)))
+        kind = str(match_type or "").strip().lower()
+        if kind == "exact":
+            return 1.0
+        if kind == "fuzzy":
+            return max(0.0, min(1.0, 0.05 + 0.95 * (score**1.10)))
+        if kind == "embedding":
+            return max(0.0, min(1.0, 0.02 + 0.98 * (score**1.05)))
+        if kind in {"new", "review", "low_confidence"}:
+            return max(0.0, min(1.0, 0.50 * score))
+        return score
+
+    @staticmethod
+    def _model_root(model: str) -> str:
+        value = str(model or "").strip().lower()
+        if not value or value == "unknown":
+            return "unknown"
+        for suffix in _MODEL_VARIANT_SUFFIXES:
+            if value.endswith(suffix) and len(value) > len(suffix):
+                return value[: -len(suffix)]
+        return value
+
     @staticmethod
     def _is_model_compatible(incoming: ExtractedAttributes, candidate: ExtractedAttributes) -> bool:
         if incoming.model == "unknown" or candidate.model == "unknown":
             return False
-        return incoming.model == candidate.model
+        if incoming.model == candidate.model:
+            return True
+        return CanonicalMatchingEngine._model_root(incoming.model) == CanonicalMatchingEngine._model_root(candidate.model)
 
     @staticmethod
     def _is_storage_compatible(incoming: ExtractedAttributes, candidate: ExtractedAttributes) -> bool:
@@ -430,6 +458,18 @@ class CanonicalMatchingEngine:
         if not self._is_storage_compatible(incoming, candidate):
             return False
         return True
+
+    @staticmethod
+    def _variant_penalty(incoming: ExtractedAttributes, candidate: ExtractedAttributes) -> float:
+        incoming_root = CanonicalMatchingEngine._model_root(incoming.model)
+        candidate_root = CanonicalMatchingEngine._model_root(candidate.model)
+        if incoming_root == "unknown" or candidate_root == "unknown" or incoming_root != candidate_root:
+            return 0.0
+        if incoming.variant == candidate.variant:
+            return 0.0
+        if incoming.variant == "unknown" or candidate.variant == "unknown":
+            return 0.05
+        return 0.12
 
     def _storage_is_ambiguous(self, attrs: ExtractedAttributes) -> bool:
         if attrs.storage != "unknown" or attrs.brand == "unknown" or attrs.model == "unknown":
@@ -544,20 +584,24 @@ class CanonicalMatchingEngine:
                 continue
             if not self._is_merge_compatible(attrs, canonical.attributes):
                 continue
+            variant_penalty = self._variant_penalty(attrs, canonical.attributes)
             candidate_key = canonical.canonical_key
-            fuzzy = fuzzy_similarity(offer_key, candidate_key)
+            fuzzy = max(0.0, fuzzy_similarity(offer_key, candidate_key) - variant_penalty)
             if fuzzy > best_fuzzy:
                 best_fuzzy = fuzzy
                 best_canonical = canonical
 
-            emb = cosine_similarity(offer_embedding, canonical.embedding)
+            emb = max(0.0, cosine_similarity(offer_embedding, canonical.embedding) - variant_penalty)
             if emb > best_embedding:
                 best_embedding = emb
                 if best_canonical is None:
                     best_canonical = canonical
 
             # Lightweight tie-breaker: token overlap of representative titles.
-            title_tok = token_similarity(normalized_title, _normalize_text(canonical.representative_title))
+            title_tok = max(
+                0.0,
+                token_similarity(normalized_title, _normalize_text(canonical.representative_title)) - variant_penalty,
+            )
             if title_tok > 0.98 and canonical.attributes.storage == attrs.storage:
                 if best_canonical is None:
                     best_canonical = canonical
@@ -574,16 +618,17 @@ class CanonicalMatchingEngine:
             canonical = self.canonicals[exact_id]
             if not self.dry_run:
                 canonical.source_offers.append(offer.offer_id)
+            calibrated_confidence = self._calibrate_confidence(1.0, match_type="exact")
             self._log(
                 offer_id=offer.offer_id,
                 action="merge",
                 canonical_id=canonical.canonical_id,
                 match_type="exact",
-                confidence_score=1.0,
+                confidence_score=calibrated_confidence,
                 canonical_key=key,
                 details="exact_canonical_key_match",
             )
-            return MatchDecision(canonical.canonical_id, 1.0, "exact", key, False)
+            return MatchDecision(canonical.canonical_id, calibrated_confidence, "exact", key, False)
 
         best_canonical, fuzzy_score, embedding_score = self._best_similarity(offer, attrs)
         ambiguous_storage = bool(best_canonical and self._storage_is_ambiguous(attrs))
@@ -594,31 +639,33 @@ class CanonicalMatchingEngine:
             if not self.dry_run:
                 best_canonical.source_offers.append(offer.offer_id)
                 self.key_index[index_key] = best_canonical.canonical_id
+            calibrated_confidence = self._calibrate_confidence(fuzzy_score, match_type="fuzzy")
             self._log(
                 offer_id=offer.offer_id,
                 action="merge",
                 canonical_id=best_canonical.canonical_id,
                 match_type="fuzzy",
-                confidence_score=fuzzy_score,
+                confidence_score=calibrated_confidence,
                 canonical_key=key,
                 details="fuzzy_key_match",
             )
-            return MatchDecision(best_canonical.canonical_id, fuzzy_score, "fuzzy", key, False)
+            return MatchDecision(best_canonical.canonical_id, calibrated_confidence, "fuzzy", key, False)
 
         if best_canonical and embedding_score > self.embedding_high_threshold:
             if not self.dry_run:
                 best_canonical.source_offers.append(offer.offer_id)
                 self.key_index[index_key] = best_canonical.canonical_id
+            calibrated_confidence = self._calibrate_confidence(embedding_score, match_type="embedding")
             self._log(
                 offer_id=offer.offer_id,
                 action="merge",
                 canonical_id=best_canonical.canonical_id,
                 match_type="embedding",
-                confidence_score=embedding_score,
+                confidence_score=calibrated_confidence,
                 canonical_key=key,
                 details=f"embedding_high_confidence:{self.embedding_service.backend_name}",
             )
-            return MatchDecision(best_canonical.canonical_id, embedding_score, "embedding", key, False)
+            return MatchDecision(best_canonical.canonical_id, calibrated_confidence, "embedding", key, False)
 
         low_confidence = bool(best_canonical and self.embedding_low_threshold <= embedding_score <= self.embedding_high_threshold)
         needs_review = low_confidence or ambiguous_storage
@@ -635,12 +682,19 @@ class CanonicalMatchingEngine:
             action="create",
             canonical_id=created.canonical_id,
             match_type="new",
-            confidence_score=embedding_score if low_confidence else 0.0,
+            confidence_score=self._calibrate_confidence(
+                embedding_score if low_confidence else 0.0,
+                match_type="low_confidence" if low_confidence else "new",
+            ),
             canonical_key=key,
             details="low_confidence_review" if low_confidence else "new_canonical",
             flags=flags,
         )
-        return MatchDecision(created.canonical_id, embedding_score if low_confidence else 0.0, "new", key, needs_review)
+        calibrated_new = self._calibrate_confidence(
+            embedding_score if low_confidence else 0.0,
+            match_type="low_confidence" if low_confidence else "new",
+        )
+        return MatchDecision(created.canonical_id, calibrated_new, "new", key, needs_review)
 
     def canonicalize(self, *, offer_id: str, title: str, expected_canonical_id: str = "unknown") -> MatchDecision:
         return self.process_offer(
@@ -661,6 +715,7 @@ class CanonicalMatchingEngine:
             fuzzy_threshold=self.fuzzy_threshold,
             dry_run=self.dry_run if dry_run is None else dry_run,
             version=new_version,
+            confidence_calibration_version=self.confidence_calibration_version,
         )
         decisions = engine.process_batch(offers)
         self.audit_log.append(
@@ -734,6 +789,119 @@ def evaluate_predictions(offers: list[OfferRecord], decisions: list[MatchDecisio
         false_split_rate=false_split_rate,
         confidence_distribution=dict(bins),
     )
+
+
+def _f1_score(precision: float, recall: float) -> float:
+    if precision <= 0 or recall <= 0:
+        return 0.0
+    return 2.0 * precision * recall / (precision + recall)
+
+
+def build_fuzzy_threshold_pr_curve(
+    offers: list[OfferRecord],
+    *,
+    thresholds: list[float] | None = None,
+) -> dict[str, object]:
+    points: list[dict[str, float]] = []
+    grid = thresholds or [round(step / 100.0, 2) for step in range(90, 100)]
+
+    for threshold in sorted({round(float(value), 4) for value in grid if 0.0 < float(value) < 1.0}):
+        engine = CanonicalMatchingEngine(fuzzy_threshold=threshold)
+        decisions = engine.process_batch(offers)
+        metrics = evaluate_predictions(offers, decisions)
+        f1 = _f1_score(metrics.precision, metrics.recall)
+        points.append(
+            {
+                "threshold": round(threshold, 4),
+                "precision": round(metrics.precision, 6),
+                "recall": round(metrics.recall, 6),
+                "f1": round(f1, 6),
+                "false_merge_rate": round(metrics.false_merge_rate, 6),
+                "false_split_rate": round(metrics.false_split_rate, 6),
+            }
+        )
+
+    if not points:
+        return {"recommended_threshold": None, "points": [], "dataset_size": len(offers)}
+
+    ranked = sorted(
+        points,
+        key=lambda item: (
+            -float(item["f1"]),
+            float(item["false_merge_rate"]),
+            -float(item["precision"]),
+            -float(item["threshold"]),
+        ),
+    )
+    recommended = ranked[0]
+    return {
+        "recommended_threshold": recommended["threshold"],
+        "dataset_size": len(offers),
+        "points": points,
+        "selection_policy": "max_f1_then_min_false_merge_then_max_precision_then_higher_threshold",
+    }
+
+
+def calibrate_embedding_thresholds_by_brand(
+    offers: list[OfferRecord],
+    *,
+    high_thresholds: list[float] | None = None,
+    low_gap: float = 0.05,
+    min_samples_per_brand: int = 20,
+) -> dict[str, object]:
+    threshold_grid = high_thresholds or [round(step / 100.0, 2) for step in range(88, 97)]
+    brand_buckets: dict[str, list[OfferRecord]] = {}
+    for offer in offers:
+        brand = str(offer.expected_canonical_id or "").split("|", 1)[0].strip().lower() or "unknown"
+        brand_buckets.setdefault(brand, []).append(offer)
+
+    calibrations: dict[str, dict[str, object]] = {}
+    for brand, brand_offers in brand_buckets.items():
+        if len(brand_offers) < int(min_samples_per_brand):
+            continue
+        points: list[dict[str, float]] = []
+        for high in sorted({round(float(v), 4) for v in threshold_grid if 0.0 < float(v) < 1.0}):
+            low = max(0.0, min(high - float(low_gap), high - 0.001))
+            engine = CanonicalMatchingEngine(embedding_high_threshold=high, embedding_low_threshold=low)
+            decisions = engine.process_batch(brand_offers)
+            metrics = evaluate_predictions(brand_offers, decisions)
+            f1 = _f1_score(metrics.precision, metrics.recall)
+            points.append(
+                {
+                    "embedding_high_threshold": round(high, 4),
+                    "embedding_low_threshold": round(low, 4),
+                    "precision": round(metrics.precision, 6),
+                    "recall": round(metrics.recall, 6),
+                    "f1": round(f1, 6),
+                    "false_merge_rate": round(metrics.false_merge_rate, 6),
+                    "false_split_rate": round(metrics.false_split_rate, 6),
+                }
+            )
+
+        if not points:
+            continue
+        ranked = sorted(
+            points,
+            key=lambda item: (
+                -float(item["f1"]),
+                float(item["false_merge_rate"]),
+                -float(item["precision"]),
+                -float(item["embedding_high_threshold"]),
+            ),
+        )
+        calibrations[brand] = {
+            "samples": len(brand_offers),
+            "recommended": ranked[0],
+            "points": points,
+            "selection_policy": "max_f1_then_min_false_merge_then_max_precision_then_higher_high_threshold",
+        }
+
+    return {
+        "brands": calibrations,
+        "dataset_size": len(offers),
+        "low_gap": float(low_gap),
+        "min_samples_per_brand": int(min_samples_per_brand),
+    }
 
 
 def benchmark_engine(offers: list[OfferRecord]) -> dict[str, float]:

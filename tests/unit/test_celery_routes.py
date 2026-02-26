@@ -127,6 +127,17 @@ def test_canonical_key_index_refresh_schedule_registered() -> None:
     assert schedule["task"] == "app.tasks.maintenance_tasks.enqueue_refresh_canonical_key_index"
 
 
+def test_embedding_ann_index_maintenance_task_routing() -> None:
+    route = celery_app.conf.task_routes.get("app.tasks.maintenance_tasks.refresh_embedding_ann_indexes")
+    assert route == {"queue": "maintenance", "routing_key": "maintenance"}
+
+
+def test_embedding_ann_index_maintenance_schedule_registered() -> None:
+    schedule = celery_app.conf.beat_schedule.get("embedding-ann-index-maintenance-daily-0430")
+    assert schedule is not None
+    assert schedule["task"] == "app.tasks.maintenance_tasks.enqueue_refresh_embedding_ann_indexes"
+
+
 def test_canonical_match_snapshot_compaction_task_routing() -> None:
     route = celery_app.conf.task_routes.get("app.tasks.maintenance_tasks.compact_canonical_match_snapshots")
     assert route == {"queue": "maintenance", "routing_key": "maintenance"}

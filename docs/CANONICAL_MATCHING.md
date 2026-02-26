@@ -23,10 +23,10 @@
 3. Replace O(N*C) candidate scan with candidate blocking: brand + storage + model prefix.
 4. Execute pipeline in distributed workers with offset checkpoints.
 5. Keep immutable match ledger (event sourcing) and periodically compact snapshots.
-6. Add active learning loop for low-confidence and false-merge corrections.
+6. Add active learning loop for low-confidence and false-merge corrections (baseline implemented via `catalog_canonical_review_cases` + admin review endpoints).
 
 ## Tuning Suggestions
-1. Tune `fuzzy_threshold` using validation PR curve; start in `[0.93, 0.98]`.
-2. Calibrate embedding thresholds by model family (Apple/Samsung can have different score distributions).
-3. Penalize cross-variant candidates (`pro`, `plus`, storage mismatch) before final scoring.
-4. Separate confidence calibration model from similarity model for stable production behavior.
+1. Tune `fuzzy_threshold` using validation PR curve; start in `[0.93, 0.98]` (baseline tooling added: `build_fuzzy_threshold_pr_curve` + `scripts/tune_canonical_fuzzy_threshold.py`).
+2. Calibrate embedding thresholds by model family (Apple/Samsung can have different score distributions); baseline tooling added via `calibrate_embedding_thresholds_by_brand` and `scripts/calibrate_embedding_thresholds_by_brand.py`.
+3. Penalize cross-variant candidates (`pro`, `plus`, storage mismatch) before final scoring (baseline variant-penalty logic wired into matcher scoring path).
+4. Separate confidence calibration model from similarity model for stable production behavior (baseline implemented via dedicated confidence calibration layer in matcher decisions).

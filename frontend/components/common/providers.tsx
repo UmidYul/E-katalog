@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 import { ReactNode, useEffect, useState } from "react";
 
+import { useUserPriceAlerts } from "@/features/user/use-price-alerts";
 import { useCompareStore } from "@/store/compare.store";
 import { usePriceAlertsStore } from "@/store/priceAlerts.store";
 import { useProfileStore } from "@/store/profile.store";
@@ -16,6 +17,18 @@ function PersistStoresHydrator() {
     void useProfileStore.persist.rehydrate();
     void usePriceAlertsStore.persist.rehydrate();
   }, []);
+
+  return null;
+}
+
+function PriceAlertsServerHydrator() {
+  const serverPriceAlerts = useUserPriceAlerts();
+  const mergeServerMetas = usePriceAlertsStore((s) => s.mergeServerMetas);
+
+  useEffect(() => {
+    if (!serverPriceAlerts.data?.length) return;
+    mergeServerMetas(serverPriceAlerts.data);
+  }, [mergeServerMetas, serverPriceAlerts.data]);
 
   return null;
 }
@@ -42,6 +55,7 @@ export function Providers({ children }: { children: ReactNode }) {
     <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
       <QueryClientProvider client={queryClient}>
         <PersistStoresHydrator />
+        <PriceAlertsServerHydrator />
         {children}
       </QueryClientProvider>
     </ThemeProvider>

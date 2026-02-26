@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 from datetime import UTC, datetime
+from typing import Any
 from urllib.parse import unquote
 
 from sqlalchemy import func, select, text
@@ -214,7 +215,7 @@ async def _resolve_or_create_canonical(
     brand_id: int | None,
     specs: dict,
     image: str | None,
-) -> tuple[CatalogCanonicalProduct, str]:
+) -> tuple[CatalogCanonicalProduct, str, dict[str, Any]]:
     canonical_attrs = extract_attributes(title)
     key_value = canonical_key(canonical_attrs)
     indexed_canonical_id = await resolve_canonical_by_key(session, canonical_key_value=key_value)
@@ -238,7 +239,7 @@ async def _resolve_or_create_canonical(
                 indexed_canonical.main_image = image
             if specs and (not isinstance(indexed_canonical.specs, dict) or not indexed_canonical.specs):
                 indexed_canonical.specs = specs
-            return indexed_canonical, "index"
+            return indexed_canonical, "index", {}
 
     canonical = (
         await session.execute(
@@ -258,7 +259,7 @@ async def _resolve_or_create_canonical(
             canonical.main_image = image
         if specs and (not isinstance(canonical.specs, dict) or not canonical.specs):
             canonical.specs = specs
-        return canonical, "exact"
+        return canonical, "exact", {}
 
     # Upgrade existing neutral canonical records once brand becomes known.
     if brand_id is not None:
@@ -281,9 +282,9 @@ async def _resolve_or_create_canonical(
                 neutral.main_image = image
             if specs and (not isinstance(neutral.specs, dict) or not neutral.specs):
                 neutral.specs = specs
-            return neutral, "neutral_upgrade"
+            return neutral, "neutral_upgrade", {}
 
-    ai_candidate_id = await _find_ai_canonical_candidate(
+    ai_candidate_id, ai_confidence, ai_reason = await _find_ai_canonical_candidate(
         session,
         title=title,
         category_id=category_id,
@@ -307,7 +308,24 @@ async def _resolve_or_create_canonical(
                 canonical.main_image = image
             if specs and (not isinstance(canonical.specs, dict) or not canonical.specs):
                 canonical.specs = specs
-            return canonical, "ai_candidate"
+            if ai_confidence >= settings.ai_canonical_min_confidence:
+                return canonical, "ai_candidate", {"confidence_score": ai_confidence, "ai_reason": ai_reason}
+
+            low_confidence_created = CatalogCanonicalProduct(
+                normalized_title=title,
+                category_id=category_id,
+                brand_id=brand_id,
+                specs=specs or {},
+                main_image=image,
+            )
+            session.add(low_confidence_created)
+            await session.flush()
+            return low_confidence_created, "ai_low_confidence_new", {
+                "confidence_score": ai_confidence,
+                "flags": ["low_confidence", "active_learning_candidate"],
+                "candidate_canonical_id": int(canonical.id),
+                "ai_reason": ai_reason,
+            }
 
     canonical = CatalogCanonicalProduct(
         normalized_title=title,
@@ -318,7 +336,7 @@ async def _resolve_or_create_canonical(
     )
     session.add(canonical)
     await session.flush()
-    return canonical, "new"
+    return canonical, "new", {}
 
 
 async def _append_canonical_match_ledger(
@@ -329,6 +347,8 @@ async def _append_canonical_match_ledger(
     canonical_title: str,
     match_type: str,
     payload: dict,
+    confidence_score: float | None = None,
+    flags: list[str] | None = None,
 ) -> None:
     attrs = extract_attributes(canonical_title)
     key_value = canonical_key(attrs).strip().lower()
@@ -338,7 +358,7 @@ async def _append_canonical_match_ledger(
             insert into catalog_canonical_match_ledger
               (store_product_id, canonical_product_id, canonical_key, action, match_type, confidence_score, engine_version, flags, payload, created_at)
             values
-              (:store_product_id, :canonical_product_id, :canonical_key, :action, :match_type, null, :engine_version, cast(:flags as jsonb), cast(:payload as jsonb), now())
+              (:store_product_id, :canonical_product_id, :canonical_key, :action, :match_type, :confidence_score, :engine_version, cast(:flags as jsonb), cast(:payload as jsonb), now())
             """
         ),
         {
@@ -347,8 +367,51 @@ async def _append_canonical_match_ledger(
             "canonical_key": key_value,
             "action": "upsert_match",
             "match_type": str(match_type or "normalized")[:32],
+            "confidence_score": float(confidence_score) if confidence_score is not None else None,
             "engine_version": 1,
-            "flags": "[]",
+            "flags": json.dumps(list(flags or []), ensure_ascii=False),
+            "payload": json.dumps(payload or {}, ensure_ascii=False),
+        },
+    )
+
+
+async def _enqueue_canonical_review_case(
+    session,
+    *,
+    store_product_id: int,
+    canonical_product_id: int,
+    candidate_canonical_id: int | None,
+    canonical_title: str,
+    confidence_score: float | None,
+    signal_type: str,
+    payload: dict[str, Any],
+) -> None:
+    attrs = extract_attributes(canonical_title)
+    key_value = canonical_key(attrs).strip().lower()
+    await session.execute(
+        text(
+            """
+            insert into catalog_canonical_review_cases
+              (store_product_id, canonical_product_id, candidate_canonical_id, canonical_key, signal_type, confidence_score, status, payload, created_at, updated_at)
+            values
+              (:store_product_id, :canonical_product_id, :candidate_canonical_id, :canonical_key, :signal_type, :confidence_score, 'open', cast(:payload as jsonb), now(), now())
+            on conflict (store_product_id, canonical_product_id, signal_type) do update
+              set candidate_canonical_id = excluded.candidate_canonical_id,
+                  confidence_score = excluded.confidence_score,
+                  payload = excluded.payload,
+                  status = 'open',
+                  reviewed_by = null,
+                  reviewed_at = null,
+                  updated_at = now()
+            """
+        ),
+        {
+            "store_product_id": int(store_product_id),
+            "canonical_product_id": int(canonical_product_id),
+            "candidate_canonical_id": int(candidate_canonical_id) if candidate_canonical_id else None,
+            "canonical_key": key_value,
+            "signal_type": str(signal_type or "low_confidence")[:32],
+            "confidence_score": float(confidence_score) if confidence_score is not None else None,
             "payload": json.dumps(payload or {}, ensure_ascii=False),
         },
     )
@@ -361,9 +424,9 @@ async def _find_ai_canonical_candidate(
     category_id: int,
     brand_id: int | None,
     specs: dict,
-) -> int | None:
+) -> tuple[int | None, float, str]:
     if not settings.ai_canonical_matching_enabled:
-        return None
+        return None, 0.0, "ai_disabled"
     query = text(
         """
         select id, normalized_title, specs
@@ -388,7 +451,7 @@ async def _find_ai_canonical_candidate(
         )
     ).mappings().all()
     if not rows:
-        return None
+        return None, 0.0, "no_candidates"
     candidates = [
         {
             "id": int(row["id"]),
@@ -411,10 +474,12 @@ async def _find_ai_canonical_candidate(
         candidates=len(candidates),
     )
     if candidate_id is None:
-        return None
-    if confidence < settings.ai_canonical_min_confidence:
-        return None
-    return int(candidate_id)
+        return None, float(max(0.0, min(1.0, confidence))), str(reason or "no_candidate")
+    try:
+        resolved_id = int(candidate_id)
+    except (TypeError, ValueError):
+        resolved_id = None
+    return resolved_id, float(max(0.0, min(1.0, confidence))), str(reason or "")
 
 
 async def _resolve_or_create_seller(session, *, store_id: int, store_name: str, metadata: dict) -> CatalogSeller:
@@ -513,7 +578,7 @@ async def _normalize_product_batch(limit: int, *, reset_offset: bool = False) ->
             else:
                 brand_id = product.brand_id if product else None
 
-            canonical, match_type = await _resolve_or_create_canonical(
+            canonical, match_type, match_context = await _resolve_or_create_canonical(
                 session,
                 title=canonical_title,
                 category_id=category_id,
@@ -533,13 +598,46 @@ async def _normalize_product_batch(limit: int, *, reset_offset: bool = False) ->
                 canonical_product_id=int(canonical.id),
                 canonical_title=str(canonical.normalized_title or canonical_title),
                 match_type=match_type,
+                confidence_score=(
+                    float(match_context.get("confidence_score"))
+                    if isinstance(match_context.get("confidence_score"), (int, float))
+                    else None
+                ),
+                flags=[str(item) for item in (match_context.get("flags") or []) if str(item).strip()],
                 payload={
                     "store_id": int(store_product.store_id),
                     "product_id": int(product.id) if product else None,
                     "inferred_brand": inferred_brand,
                     "category_id": int(category_id),
+                    "ai_reason": match_context.get("ai_reason"),
+                    "candidate_canonical_id": match_context.get("candidate_canonical_id"),
                 },
             )
+            if str(match_type) == "ai_low_confidence_new":
+                await _enqueue_canonical_review_case(
+                    session,
+                    store_product_id=int(store_product.id),
+                    canonical_product_id=int(canonical.id),
+                    candidate_canonical_id=(
+                        int(match_context["candidate_canonical_id"])
+                        if isinstance(match_context.get("candidate_canonical_id"), int)
+                        else None
+                    ),
+                    canonical_title=str(canonical.normalized_title or canonical_title),
+                    confidence_score=(
+                        float(match_context.get("confidence_score"))
+                        if isinstance(match_context.get("confidence_score"), (int, float))
+                        else None
+                    ),
+                    signal_type="low_confidence",
+                    payload={
+                        "store_id": int(store_product.store_id),
+                        "product_id": int(product.id) if product else None,
+                        "ai_reason": match_context.get("ai_reason"),
+                        "threshold": float(settings.ai_canonical_min_confidence),
+                        "match_type": match_type,
+                    },
+                )
 
             store_product.canonical_product_id = canonical.id
             if product:
