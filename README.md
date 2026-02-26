@@ -55,6 +55,7 @@ docker compose -f infra/docker/docker-compose.yml exec worker celery -A app.cele
 docker compose -f infra/docker/docker-compose.yml exec worker celery -A app.celery_app call app.tasks.reindex_tasks.reindex_product_search_batch
 ```
 
+
 ### API Contract (PDP)
 
 `GET /api/v1/products/{id}` now returns canonical data with grouped offers:
