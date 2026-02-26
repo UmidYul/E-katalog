@@ -104,3 +104,8 @@ npm run dev
 ```
 
 See `frontend/README.md` for frontend details.
+
+## CI
+
+- GitHub Actions workflow: `.github/workflows/ci.yml`
+- Setup guide: `docs/CI_SETUP.md`

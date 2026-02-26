@@ -1103,8 +1103,10 @@ def _build_gallery_images(
         url = str(candidate.get("url") or "").strip()
         if not url:
             continue
-        source_priority = int(candidate.get("source_priority") or 99)
-        order = int(candidate.get("order") or 0)
+        raw_source_priority = candidate.get("source_priority")
+        source_priority = int(raw_source_priority) if raw_source_priority is not None else 99
+        raw_order = candidate.get("order")
+        order = int(raw_order) if raw_order is not None else 0
         source_title = str(candidate.get("source_title") or "").strip() or None
         source_color = str(candidate.get("source_color") or "").strip() or None
 
