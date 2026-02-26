@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime
+from shared.utils.time import UTC
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
@@ -615,3 +616,4 @@ async def clear_recently_viewed(
         return {"ok": True}
 
     return await execute_idempotent_json(request, redis, scope=f"users.recently_viewed.clear:{user_id}", handler=_op)
+

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import datetime
+from shared.utils.time import UTC
 
 from sqlalchemy import text
 
@@ -92,3 +93,4 @@ async def _run(limit: int) -> dict:
 @celery_app.task(bind=True)
 def enqueue_reindex_batches(self) -> str:
     return reindex_product_search_batch.delay().id
+

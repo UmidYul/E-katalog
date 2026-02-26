@@ -1,4 +1,4 @@
-from app.tasks.maintenance_tasks import _quality_level, _resolve_overall_quality_status, _status_rank
+from services.worker.app.tasks.maintenance_tasks import _quality_level, _resolve_overall_quality_status, _status_rank
 
 
 def test_quality_level_thresholds() -> None:

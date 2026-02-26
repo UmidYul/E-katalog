@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from datetime import UTC, datetime
+from datetime import datetime
+from shared.utils.time import UTC
 from typing import Any
 from urllib.parse import unquote
 
@@ -719,3 +720,4 @@ async def _normalize_full_catalog(chunk_size: int) -> dict:
         if processed == 0:
             break
     return {"processed": total, "at": datetime.now(UTC).isoformat()}
+

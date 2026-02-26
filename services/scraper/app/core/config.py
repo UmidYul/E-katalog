@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, HttpUrl
+from pydantic import Field, HttpUrl, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000", "http://localhost:5173"])
-    cursor_secret: str = "change-me-cursor-secret"
+    cursor_secret: str = ""
 
     user_agents: list[str] = Field(
         default_factory=lambda: [
@@ -80,6 +80,13 @@ class Settings(BaseSettings):
 
     example_store_base_url: HttpUrl = "https://example.com"
     example_store_category_paths: list[str] = Field(default_factory=lambda: ["/phones", "/laptops"])
+
+    @model_validator(mode="after")
+    def _validate_cursor_secret(self) -> "Settings":
+        secret = str(self.cursor_secret or "").strip()
+        if not secret or secret == "change-me-cursor-secret":
+            raise ValueError("CURSOR_SECRET must be explicitly set to a non-default secret")
+        return self
 
 
 @lru_cache(maxsize=1)

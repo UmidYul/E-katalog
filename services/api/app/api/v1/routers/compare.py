@@ -4,7 +4,8 @@ import base64
 import hashlib
 import hmac
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
+from shared.utils.time import UTC
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -189,3 +190,4 @@ async def resolve_compare_share_link(
         expires_at=expires_at.isoformat(),
         request_id=request.state.request_id,
     )
+

@@ -1,4 +1,4 @@
-from app.core.observability import _HttpMetrics
+from services.api.app.core.observability import _HttpMetrics
 
 
 def test_metrics_render_includes_slo_lines() -> None:
@@ -19,4 +19,3 @@ def test_metrics_render_includes_slo_lines() -> None:
     assert "api_slo_breach_5xx" in output
     assert "api_slo_breach_latency_p95" in output
     assert "api_slo_breach_latency_p99" in output
-

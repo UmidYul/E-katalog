@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import datetime
+from shared.utils.time import UTC
 
 from sqlalchemy import text
 
@@ -146,3 +147,4 @@ async def _run(limit: int, *, reset_offset: bool = False) -> dict:
 @celery_app.task(bind=True)
 def enqueue_embedding_batches(self) -> str:
     return generate_embeddings_batch.delay().id
+

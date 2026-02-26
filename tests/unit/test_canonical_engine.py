@@ -1,4 +1,4 @@
-from app.platform.services.canonical_matching import (
+from services.worker.app.platform.services.canonical_matching import (
     CanonicalMatchingEngine,
     OfferRecord,
     canonical_key,

@@ -1,4 +1,4 @@
-from app.celery_app import celery_app
+from services.worker.app.celery_app import celery_app
 
 
 def test_cleanup_empty_canonicals_task_routing() -> None:

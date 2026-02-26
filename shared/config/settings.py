@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, HttpUrl
+from pydantic import Field, HttpUrl, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -115,10 +115,10 @@ class Settings(BaseSettings):
     api_referrer_policy: str = "strict-origin-when-cross-origin"
     api_permissions_policy: str = "camera=(), microphone=(), geolocation=()"
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000", "http://localhost:5173"])
-    cursor_secret: str = "change-me-cursor-secret"
-    admin_seed_enabled: bool = True
+    cursor_secret: str = ""
+    admin_seed_enabled: bool = False
     admin_email: str = "admin@zinc.local"
-    admin_password: str = "Admin12345"
+    admin_password: str = ""
     admin_full_name: str = "Platform Admin"
     admin_role: Literal["admin", "moderator"] = "admin"
     auth_storage_mode: Literal["redis", "dual", "postgres"] = "redis"
@@ -186,6 +186,20 @@ class Settings(BaseSettings):
 
     example_store_base_url: HttpUrl = "https://example.com"
     example_store_category_paths: list[str] = Field(default_factory=lambda: ["/phones", "/laptops"])
+
+    @model_validator(mode="after")
+    def _validate_security_sensitive_settings(self) -> "Settings":
+        secret = str(self.cursor_secret or "").strip()
+        if not secret or secret == "change-me-cursor-secret":
+            raise ValueError("CURSOR_SECRET must be explicitly set to a non-default secret")
+
+        if bool(self.admin_seed_enabled):
+            password = str(self.admin_password or "").strip()
+            if not password or password == "Admin12345":
+                raise ValueError("ADMIN_PASSWORD must be explicitly set when ADMIN_SEED_ENABLED=true")
+            if str(self.environment or "").strip().lower() in {"staging", "production"}:
+                raise ValueError("ADMIN_SEED_ENABLED must be false in staging/production")
+        return self
 
 
 @lru_cache(maxsize=1)

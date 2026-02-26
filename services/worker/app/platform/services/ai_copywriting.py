@@ -4,7 +4,8 @@ import hashlib
 import json
 import re
 from collections.abc import Iterable
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
+from shared.utils.time import UTC
 from typing import Any
 
 import httpx
@@ -579,3 +580,4 @@ async def generate_product_copy(
     normalized["source_hash"] = source_hash
     normalized["source"] = source
     return normalized
+

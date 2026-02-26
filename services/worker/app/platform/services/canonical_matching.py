@@ -6,7 +6,8 @@ import tracemalloc
 import hashlib
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
+from shared.utils.time import UTC
 from time import perf_counter
 from typing import Iterable
 
@@ -1021,3 +1022,4 @@ def benchmark_engine(offers: list[OfferRecord]) -> dict[str, float]:
         "peak_memory_mb": peak / (1024 * 1024),
         "canonical_count": float(len(engine.canonicals)),
     }
+

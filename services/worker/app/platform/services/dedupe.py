@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from datetime import UTC, datetime
+from datetime import datetime
+from shared.utils.time import UTC
 import re
 
 from sqlalchemy import and_, select
@@ -323,3 +324,4 @@ async def merge_high_confidence_duplicates(session: AsyncSession, limit: int = 2
 
     await session.commit()
     return merged
+

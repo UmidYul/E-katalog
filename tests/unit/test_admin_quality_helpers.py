@@ -1,4 +1,5 @@
-from datetime import UTC, datetime
+from datetime import datetime
+from shared.utils.time import UTC
 
 from services.api.app.api.v1.routers.admin import _serialize_quality_no_offer_row
 
@@ -35,3 +36,4 @@ def test_serialize_quality_no_offer_row_fields() -> None:
     assert payload["updated_at"] == now.isoformat()
     assert payload["brand"] == {"id": row["brand_id"], "name": "Apple"}
     assert payload["category"] == {"id": row["category_id"], "name": "Смартфоны"}
+

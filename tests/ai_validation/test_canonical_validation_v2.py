@@ -1,5 +1,5 @@
-from app.platform.services.canonical_matching import CanonicalMatchingEngine, evaluate_predictions
-from app.platform.services.synthetic_data import generate_synthetic_offers
+from services.worker.app.platform.services.canonical_matching import CanonicalMatchingEngine, evaluate_predictions
+from services.worker.app.platform.services.synthetic_data import generate_synthetic_offers
 
 
 def test_ai_validation_metrics() -> None:

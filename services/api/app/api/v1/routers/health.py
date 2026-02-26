@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import datetime
+from shared.utils.time import UTC
 from time import perf_counter
 
 from celery import Celery
@@ -144,3 +145,4 @@ async def ready(response: Response, redis: Redis = Depends(get_redis)) -> dict[s
 @router.get("/metrics", include_in_schema=False)
 async def metrics() -> Response:
     return Response(content=http_metrics.render_prometheus(), media_type="text/plain; version=0.0.4; charset=utf-8")
+

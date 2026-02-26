@@ -314,6 +314,8 @@ def _extract_memory_from_specs(specs: dict | None) -> tuple[str | None, str | No
 
         if "ram" in key or ("\u043e\u043f\u0435\u0440\u0430\u0442\u0438\u0432" in key and "\u043f\u0430\u043c\u044f\u0442" in key):
             return "ram"
+        if "storage" in key or "built in memory" in key or "builtinmemory" in compact:
+            return "storage"
         if ("\u0432\u0441\u0442\u0440\u043e\u0435\u043d" in key and "\u043f\u0430\u043c\u044f\u0442" in key) or ("\u043f\u043e\u0441\u0442\u043e\u044f\u043d" in key and "\u043f\u0430\u043c\u044f\u0442" in key):
             return "storage"
         if key in {"memory", "\u043f\u0430\u043c\u044f\u0442\u044c", "memory config", "\u043a\u043e\u043d\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044f \u043f\u0430\u043c\u044f\u0442\u0438"}:

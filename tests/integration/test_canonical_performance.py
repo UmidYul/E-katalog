@@ -1,5 +1,5 @@
-from app.platform.services.canonical_matching import benchmark_engine
-from app.platform.services.synthetic_data import generate_scaled_offers
+from services.worker.app.platform.services.canonical_matching import benchmark_engine
+from services.worker.app.platform.services.synthetic_data import generate_scaled_offers
 
 
 def test_performance_1000_offers() -> None:

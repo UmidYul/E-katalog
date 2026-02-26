@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime
+from datetime import datetime
+from shared.utils.time import UTC
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -541,3 +542,4 @@ async def pg_upsert_oauth_identity(db: AsyncSession, *, provider: str, provider_
             },
         )
     )
+

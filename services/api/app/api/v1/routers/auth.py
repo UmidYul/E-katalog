@@ -8,7 +8,8 @@ import html
 import io
 import secrets
 import smtplib
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
+from shared.utils.time import UTC
 from email.message import EmailMessage
 from typing import Literal
 from urllib.parse import quote, urlencode
@@ -2148,3 +2149,4 @@ async def ensure_seed_admin(redis: Redis, db: AsyncSession | None = None) -> dic
         "full_name": created["full_name"],
         "role": created["role"],
     }
+

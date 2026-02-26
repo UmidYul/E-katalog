@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import datetime
+from shared.utils.time import UTC
 
 from sqlalchemy import select, text
 
@@ -157,3 +158,4 @@ async def _run(limit: int) -> dict:
 @celery_app.task(bind=True)
 def enqueue_product_copy_batches(self) -> str:
     return generate_product_copy_batch.delay().id
+

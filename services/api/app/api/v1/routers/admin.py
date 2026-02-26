@@ -8,7 +8,8 @@ import re
 import secrets
 from collections import defaultdict
 from decimal import Decimal, InvalidOperation
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
+from shared.utils.time import UTC
 from typing import Any, Literal
 from urllib.parse import urljoin
 from uuid import uuid4
@@ -4209,3 +4210,4 @@ async def get_admin_task_status(task_id: str) -> dict:
     else:
         status["progress"] = progress_map.get(state, 40)
     return status
+

@@ -1,5 +1,5 @@
-from app.platform.services.canonical_matching import CanonicalMatchingEngine
-from app.platform.services.synthetic_data import generate_synthetic_offers
+from services.worker.app.platform.services.canonical_matching import CanonicalMatchingEngine
+from services.worker.app.platform.services.synthetic_data import generate_synthetic_offers
 
 
 def test_full_pipeline_creates_1_canonical_for_iphone13() -> None:

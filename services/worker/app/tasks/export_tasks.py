@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import csv
 import json
-from datetime import UTC, datetime
+from datetime import datetime
+from shared.utils.time import UTC
 from pathlib import Path
 
 from sqlalchemy import text
@@ -80,3 +81,4 @@ async def _export_csv(output: str, limit: int) -> dict:
         writer.writerows(rows)
     logger.info("export_csv_completed", output=output, limit=limit)
     return {"output": output, "limit": limit, "at": datetime.now(UTC).isoformat()}
+

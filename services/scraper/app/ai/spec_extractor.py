@@ -4,7 +4,8 @@ import asyncio
 import json
 import random
 import re
-from datetime import UTC, datetime
+from datetime import datetime
+from shared.utils.time import UTC
 from email.utils import parsedate_to_datetime
 from typing import Any
 
@@ -210,3 +211,4 @@ async def ai_extract_specs(
     if not isinstance(parsed, dict):
         return {}
     return _sanitize(parsed)
+

@@ -4,7 +4,8 @@ import asyncio
 import json
 import smtplib
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
+from shared.utils.time import UTC
 from decimal import Decimal
 from email.message import EmailMessage
 from statistics import median
@@ -2469,3 +2470,4 @@ def enqueue_full_catalog_rebuild(self) -> dict:
     result = workflow.apply_async()
     logger.info("full_catalog_rebuild_enqueued", workflow_id=result.id, touched_rows=prepared["touched_rows"])
     return {"workflow_id": result.id, "touched_rows": prepared["touched_rows"], "at": datetime.now(UTC).isoformat()}
+

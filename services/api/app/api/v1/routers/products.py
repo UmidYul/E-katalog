@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
+from shared.utils.time import UTC
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
@@ -307,3 +308,4 @@ async def get_product_history(
     if resolved_product_id is None:
         raise HTTPException(status_code=404, detail="product not found")
     return await repo.price_history(product_id=resolved_product_id, days=days)
+

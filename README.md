@@ -113,6 +113,11 @@ npm run dev
 
 See `frontend/README.md` for frontend details.
 
+## Python Version
+
+- Local development and CI are pinned to Python `3.11` (`.python-version`).
+- Production containers may run newer compatible versions (for example, `3.12`), but new backend code should stay compatible with `3.11` unless the pin is intentionally upgraded.
+
 ## CI
 
 - GitHub Actions workflow: `.github/workflows/ci.yml`

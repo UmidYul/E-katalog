@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 from collections import defaultdict
 
-from app.platform.services.canonical_matching import (
+from services.worker.app.platform.services.canonical_matching import (
     CanonicalMatchingEngine,
     MatchDecision,
     OfferRecord,

@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 import hashlib
 import re
-from datetime import UTC, datetime
+from datetime import datetime
+from shared.utils.time import UTC
 from time import time
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
@@ -959,3 +960,4 @@ async def moderate_answer(
 
     actor_id = _current_user_internal_id(current_user)
     return await execute_idempotent_json(request, redis, scope=f"product_feedback.answer.moderate:{answer_id}:{actor_id}", handler=_op)
+
