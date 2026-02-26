@@ -160,6 +160,7 @@ def test_hsts_header_is_set_in_production_environment() -> None:
     script = (
         "import json,os,sys;"
         "os.environ['ENVIRONMENT']='production';"
+        "os.environ['CURSOR_SECRET']='test-ci-cursor-secret';"
         f"sys.path.insert(0,{str(API_ROOT)!r});"
         "from fastapi.testclient import TestClient;"
         "from app.main import app;"
