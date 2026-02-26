@@ -12,8 +12,8 @@ This file aggregates items that are still not fully implemented based on explici
 ## 1) Backend Prod Tasks (`docs/BACKEND_PROD_TASKS.md`)
 
 - [~] Auth storage migration Redis -> Postgres: auth router + user profile/notification + admin user-management reads/writes now support `AUTH_STORAGE_MODE=postgres`; remaining cleanup/cutover tasks still pending.
-- [~] Password reset + email confirmation: password-reset API is implemented; email confirmation API/token flow added, but external delivery/provider integration is still pending.
-- [~] Unified RBAC policy layer for API: shared `app/api/rbac.py` added and adopted by admin + product-feedback routers; remaining routers should migrate to the same policy helpers.
+- [x] Password reset + email confirmation implemented: API endpoints + DB-backed tokens + SMTP delivery integration.
+- [x] Unified RBAC policy layer for API implemented: shared `app/api/rbac.py` helpers/dependencies adopted by admin + product-feedback routers.
 - [x] Audit log for admin operations baseline implemented: `admin_audit_events` table + `/api/v1/admin/audit/events` + write logging in mutating admin endpoints.
 - [~] Idempotency keys for critical write endpoints: baseline implemented (`Idempotency-Key` + Redis TTL replay) for auth recovery flows, critical admin writes, admin task enqueue endpoints, and product price-alert upsert; remaining non-critical writes can be migrated incrementally.
 - [x] Anti-bruteforce hardening for auth implemented (ip/email lockout + separate Redis buckets).
@@ -22,12 +22,12 @@ This file aggregates items that are still not fully implemented based on explici
 - [x] Backups + restore validation baseline implemented: `scripts/db_backup_restore.py` + GitHub workflow `.github/workflows/backup-restore-validation.yml` + runbook `docs/BACKUP_RESTORE_RUNBOOK.md`.
 - [x] OpenAPI contract testing + API versioning baseline implemented (`tests/unit/test_openapi_contract.py` + `X-API-Version` middleware behavior checks).
 - [x] Cleanup tasks for sessions/tokens/temporary entities baseline implemented (Redis auth sessions cleanup, Postgres token cleanup, ephemeral auth key TTL cleanup).
-- [ ] Notifications pipeline for price/stock (email/telegram/webhook) (`TODO`).
-- [ ] Stage B dual-write transition still has open TODO markers in source doc (`dual` writes in both stores, reads from Redis during transition).
+- [x] Notifications pipeline for price/stock baseline implemented: queued delivery worker supports `telegram` + `email` channels with optional webhook fanout.
+- [x] Stage B dual-write transition implemented (`dual` writes to Redis+Postgres; reads remain Redis in transition mode).
 - [ ] Stage C cutover tasks:
 - [ ] switch reads to pure Postgres everywhere (`TODO` / `IN_PROGRESS`);
 - [ ] leave Redis only for cache/rate-limit (`TODO`);
-- [ ] remove legacy auth keys from Redis after grace period (`TODO`).
+- [x] remove legacy auth keys from Redis after grace period (maintenance task + daily schedule implemented).
 
 ## 2) EK.UA MVP Features (`docs/EK_UA_MVP_FEATURES.md`)
 

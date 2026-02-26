@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import smtplib
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from email.message import EmailMessage
 from statistics import median
 from typing import Any
 
@@ -562,6 +564,76 @@ async def _send_telegram_text(*, chat_id: str, text_value: str) -> tuple[bool, s
         return False, str(exc)
 
 
+def _email_contact(raw_value: str | None) -> str | None:
+    normalized = str(raw_value or "").strip()
+    if not normalized or "@" not in normalized:
+        return None
+    return normalized
+
+
+def _build_price_alert_email_subject(*, product_title: str) -> str:
+    title = str(product_title or "Product").strip() or "Product"
+    return f"Price alert: {title}"
+
+
+async def _send_email_text(*, recipient: str, subject: str, text_value: str) -> tuple[bool, str | None]:
+    if not settings.price_alerts_email_enabled:
+        return False, "email delivery disabled"
+    smtp_host = str(settings.price_alerts_smtp_host or "").strip()
+    smtp_from = str(settings.price_alerts_email_from or "").strip()
+    if not smtp_host:
+        return False, "missing smtp host"
+    if not smtp_from:
+        return False, "missing smtp from"
+
+    msg = EmailMessage()
+    msg["From"] = smtp_from
+    msg["To"] = recipient
+    msg["Subject"] = subject
+    msg.set_content(text_value)
+
+    smtp_port = int(settings.price_alerts_smtp_port)
+    smtp_username = str(settings.price_alerts_smtp_username or "").strip()
+    smtp_password = str(settings.price_alerts_smtp_password or "").strip()
+    use_ssl = bool(settings.price_alerts_smtp_use_ssl)
+    use_tls = bool(settings.price_alerts_smtp_use_tls)
+    timeout_seconds = max(2.0, float(settings.price_alerts_email_timeout_seconds))
+
+    def _send() -> None:
+        smtp_class = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
+        with smtp_class(smtp_host, smtp_port, timeout=timeout_seconds) as server:
+            if (not use_ssl) and use_tls:
+                server.starttls()
+            if smtp_username:
+                server.login(smtp_username, smtp_password)
+            server.send_message(msg)
+
+    try:
+        await asyncio.to_thread(_send)
+        return True, None
+    except Exception as exc:  # noqa: BLE001
+        return False, str(exc)
+
+
+async def _send_price_alert_webhook(payload: dict[str, Any]) -> tuple[bool, str | None]:
+    url = str(settings.price_alerts_webhook_url or "").strip()
+    if not url:
+        return False, "missing webhook url"
+    timeout = max(2.0, float(settings.price_alerts_webhook_timeout_seconds))
+    headers = {"content-type": "application/json"}
+    secret = str(settings.price_alerts_webhook_secret or "").strip()
+    if secret:
+        headers["x-webhook-secret"] = secret
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout=timeout)) as client:
+            response = await client.post(url, json=payload, headers=headers)
+        if response.status_code >= 400:
+            return False, f"http {response.status_code}: {response.text[:300]}"
+        return True, None
+    except Exception as exc:  # noqa: BLE001
+        return False, str(exc)
+
+
 async def _load_price_alert_candidates(session, *, limit: int) -> list[dict[str, Any]]:
     rows = (
         await session.execute(
@@ -589,13 +661,15 @@ async def _load_price_alert_candidates(session, *, limit: int) -> list[dict[str,
                     cp.title as product_title,
                     cp.uuid as product_uuid,
                     cur.current_min_price,
-                    au.telegram as telegram_contact
+                    au.telegram as telegram_contact,
+                    au.email as email_contact,
+                    au.email_confirmed as email_confirmed
                 from catalog_price_alerts a
                 join catalog_canonical_products cp on cp.id = a.product_id
                 left join current_prices cur on cur.product_id = a.product_id
                 left join auth_users au on cast(au.uuid as text) = cast(a.user_uuid as text)
                 where a.alerts_enabled = true
-                  and a.channel = 'telegram'
+                  and a.channel in ('telegram', 'email')
                 order by coalesce(a.last_notified_at, to_timestamp(0)) asc, a.updated_at asc, a.id asc
                 limit :limit
                 """
@@ -609,8 +683,6 @@ async def _load_price_alert_candidates(session, *, limit: int) -> list[dict[str,
 async def _deliver_price_alert_notifications(*, limit: int) -> dict[str, Any]:
     if not settings.price_alerts_delivery_enabled:
         return {"status": "disabled", "reason": "price_alerts_delivery_disabled", "at": datetime.now(UTC).isoformat()}
-    if not str(settings.price_alerts_telegram_bot_token or "").strip():
-        return {"status": "disabled", "reason": "missing_telegram_bot_token", "at": datetime.now(UTC).isoformat()}
 
     now_dt = datetime.now(UTC)
     effective_limit = max(1, int(limit))
@@ -618,8 +690,11 @@ async def _deliver_price_alert_notifications(*, limit: int) -> dict[str, Any]:
     skipped_no_contact = 0
     skipped_not_triggered = 0
     skipped_cooldown = 0
+    skipped_unsupported_channel = 0
     failed = 0
     seen_updates = 0
+    webhook_sent = 0
+    webhook_failed = 0
 
     async with AsyncSessionLocal() as session:
         candidates = await _load_price_alert_candidates(session, limit=effective_limit)
@@ -672,11 +747,7 @@ async def _deliver_price_alert_notifications(*, limit: int) -> dict[str, Any]:
                 skipped_cooldown += 1
                 continue
 
-            chat_id = _telegram_chat_id(row.get("telegram_contact"))
-            if chat_id is None:
-                skipped_no_contact += 1
-                continue
-
+            channel = str(row.get("channel") or "").strip().lower()
             message = _build_price_alert_message(
                 product_title=str(row.get("product_title") or "Product"),
                 product_uuid=str(row.get("product_uuid") or ""),
@@ -684,16 +755,68 @@ async def _deliver_price_alert_notifications(*, limit: int) -> dict[str, Any]:
                 target_price=target_price,
                 baseline_price=baseline_price,
             )
-            delivered, error = await _send_telegram_text(chat_id=chat_id, text_value=message)
+            delivered = False
+            error: str | None = None
+            contact_value: str | None = None
+            if channel == "telegram":
+                chat_id = _telegram_chat_id(row.get("telegram_contact"))
+                contact_value = chat_id
+                if chat_id is None:
+                    skipped_no_contact += 1
+                    continue
+                delivered, error = await _send_telegram_text(chat_id=chat_id, text_value=message)
+            elif channel == "email":
+                email_confirmed = bool(row.get("email_confirmed"))
+                recipient = _email_contact(row.get("email_contact"))
+                contact_value = recipient
+                if (not email_confirmed) or recipient is None:
+                    skipped_no_contact += 1
+                    continue
+                delivered, error = await _send_email_text(
+                    recipient=recipient,
+                    subject=_build_price_alert_email_subject(product_title=str(row.get("product_title") or "Product")),
+                    text_value=message,
+                )
+            else:
+                skipped_unsupported_channel += 1
+                continue
+
             if not delivered:
                 failed += 1
                 logger.warning(
                     "price_alert_delivery_failed",
                     alert_id=alert_id,
-                    chat_id=chat_id,
+                    channel=channel,
+                    contact=contact_value,
                     error=str(error or "unknown"),
                 )
                 continue
+
+            webhook_url = str(settings.price_alerts_webhook_url or "").strip()
+            if webhook_url:
+                webhook_payload = {
+                    "event": "price_alert.delivered",
+                    "channel": channel,
+                    "alert_id": str(row.get("uuid") or alert_id),
+                    "user_uuid": str(row.get("user_uuid") or ""),
+                    "product_uuid": str(row.get("product_uuid") or ""),
+                    "product_title": str(row.get("product_title") or "Product"),
+                    "current_price": _format_price(current_price),
+                    "target_price": _format_price(target_price),
+                    "baseline_price": _format_price(baseline_price),
+                    "sent_at": datetime.now(UTC).isoformat(),
+                }
+                webhook_ok, webhook_error = await _send_price_alert_webhook(webhook_payload)
+                if webhook_ok:
+                    webhook_sent += 1
+                else:
+                    webhook_failed += 1
+                    logger.warning(
+                        "price_alert_webhook_delivery_failed",
+                        alert_id=alert_id,
+                        channel=channel,
+                        error=str(webhook_error or "unknown"),
+                    )
 
             await session.execute(
                 text(
@@ -722,7 +845,10 @@ async def _deliver_price_alert_notifications(*, limit: int) -> dict[str, Any]:
         skipped_no_contact=skipped_no_contact,
         skipped_not_triggered=skipped_not_triggered,
         skipped_cooldown=skipped_cooldown,
+        skipped_unsupported_channel=skipped_unsupported_channel,
         seen_updates=seen_updates,
+        webhook_sent=webhook_sent,
+        webhook_failed=webhook_failed,
     )
     return {
         "status": "ok",
@@ -732,7 +858,10 @@ async def _deliver_price_alert_notifications(*, limit: int) -> dict[str, Any]:
         "skipped_no_contact": skipped_no_contact,
         "skipped_not_triggered": skipped_not_triggered,
         "skipped_cooldown": skipped_cooldown,
+        "skipped_unsupported_channel": skipped_unsupported_channel,
         "seen_updates": seen_updates,
+        "webhook_sent": webhook_sent,
+        "webhook_failed": webhook_failed,
         "at": datetime.now(UTC).isoformat(),
     }
 
@@ -1328,6 +1457,7 @@ def enqueue_cleanup_auth_sessions(self) -> str:
 async def _cleanup_auth_token_tables(
     *,
     reset_used_retention_days: int,
+    email_confirmation_used_retention_days: int,
     revoked_token_retention_days: int,
     revoked_session_retention_days: int,
 ) -> dict[str, Any]:
@@ -1335,11 +1465,13 @@ async def _cleanup_auth_token_tables(
         return {"status": "disabled", "at": datetime.now(UTC).isoformat()}
 
     effective_reset_used_retention_days = max(1, int(reset_used_retention_days))
+    effective_email_confirmation_used_retention_days = max(1, int(email_confirmation_used_retention_days))
     effective_revoked_token_retention_days = max(1, int(revoked_token_retention_days))
     effective_revoked_session_retention_days = max(1, int(revoked_session_retention_days))
 
     now_dt = datetime.now(UTC)
     reset_used_cutoff = now_dt - timedelta(days=effective_reset_used_retention_days)
+    email_confirmation_used_cutoff = now_dt - timedelta(days=effective_email_confirmation_used_retention_days)
     revoked_token_cutoff = now_dt - timedelta(days=effective_revoked_token_retention_days)
     revoked_session_cutoff = now_dt - timedelta(days=effective_revoked_session_retention_days)
 
@@ -1361,6 +1493,24 @@ async def _cleanup_auth_token_tables(
                 """
             ),
             {"cutoff": reset_used_cutoff},
+        )
+        email_confirm_expired = await session.execute(
+            text(
+                """
+                delete from auth_email_confirmation_tokens
+                where expires_at < now()
+                """
+            )
+        )
+        email_confirm_used = await session.execute(
+            text(
+                """
+                delete from auth_email_confirmation_tokens
+                where used_at is not null
+                  and used_at < :cutoff
+                """
+            ),
+            {"cutoff": email_confirmation_used_cutoff},
         )
         session_tokens_expired = await session.execute(
             text(
@@ -1394,6 +1544,8 @@ async def _cleanup_auth_token_tables(
 
     deleted_reset_expired = int(reset_expired.rowcount or 0)
     deleted_reset_used = int(reset_used.rowcount or 0)
+    deleted_email_confirm_expired = int(email_confirm_expired.rowcount or 0)
+    deleted_email_confirm_used = int(email_confirm_used.rowcount or 0)
     deleted_session_tokens_expired = int(session_tokens_expired.rowcount or 0)
     deleted_session_tokens_revoked = int(session_tokens_revoked.rowcount or 0)
     deleted_sessions_revoked = int(sessions_revoked.rowcount or 0)
@@ -1401,10 +1553,13 @@ async def _cleanup_auth_token_tables(
     logger.info(
         "cleanup_auth_token_tables_completed",
         reset_used_retention_days=effective_reset_used_retention_days,
+        email_confirmation_used_retention_days=effective_email_confirmation_used_retention_days,
         revoked_token_retention_days=effective_revoked_token_retention_days,
         revoked_session_retention_days=effective_revoked_session_retention_days,
         deleted_reset_expired=deleted_reset_expired,
         deleted_reset_used=deleted_reset_used,
+        deleted_email_confirm_expired=deleted_email_confirm_expired,
+        deleted_email_confirm_used=deleted_email_confirm_used,
         deleted_session_tokens_expired=deleted_session_tokens_expired,
         deleted_session_tokens_revoked=deleted_session_tokens_revoked,
         deleted_sessions_revoked=deleted_sessions_revoked,
@@ -1413,10 +1568,13 @@ async def _cleanup_auth_token_tables(
     return {
         "status": "ok",
         "reset_used_retention_days": effective_reset_used_retention_days,
+        "email_confirmation_used_retention_days": effective_email_confirmation_used_retention_days,
         "revoked_token_retention_days": effective_revoked_token_retention_days,
         "revoked_session_retention_days": effective_revoked_session_retention_days,
         "deleted_reset_expired": deleted_reset_expired,
         "deleted_reset_used": deleted_reset_used,
+        "deleted_email_confirm_expired": deleted_email_confirm_expired,
+        "deleted_email_confirm_used": deleted_email_confirm_used,
         "deleted_session_tokens_expired": deleted_session_tokens_expired,
         "deleted_session_tokens_revoked": deleted_session_tokens_revoked,
         "deleted_sessions_revoked": deleted_sessions_revoked,
@@ -1428,6 +1586,7 @@ async def _cleanup_auth_token_tables(
 def cleanup_auth_token_tables(
     self,
     reset_used_retention_days: int | None = None,
+    email_confirmation_used_retention_days: int | None = None,
     revoked_token_retention_days: int | None = None,
     revoked_session_retention_days: int | None = None,
 ) -> dict[str, Any]:
@@ -1435,6 +1594,11 @@ def cleanup_auth_token_tables(
         int(reset_used_retention_days)
         if isinstance(reset_used_retention_days, int) and reset_used_retention_days > 0
         else int(settings.auth_password_reset_used_retention_days)
+    )
+    effective_email_confirmation_used_retention_days = (
+        int(email_confirmation_used_retention_days)
+        if isinstance(email_confirmation_used_retention_days, int) and email_confirmation_used_retention_days > 0
+        else int(settings.auth_email_confirmation_used_retention_days)
     )
     effective_revoked_token_retention_days = (
         int(revoked_token_retention_days)
@@ -1449,6 +1613,7 @@ def cleanup_auth_token_tables(
     return asyncio.run(
         _cleanup_auth_token_tables(
             reset_used_retention_days=effective_reset_used_retention_days,
+            email_confirmation_used_retention_days=effective_email_confirmation_used_retention_days,
             revoked_token_retention_days=effective_revoked_token_retention_days,
             revoked_session_retention_days=effective_revoked_session_retention_days,
         )
@@ -1542,6 +1707,131 @@ def cleanup_auth_ephemeral_keys(self, scan_limit: int | None = None) -> dict[str
 @celery_app.task(bind=True)
 def enqueue_cleanup_auth_ephemeral_keys(self) -> str:
     return cleanup_auth_ephemeral_keys.delay().id
+
+
+async def _cleanup_auth_legacy_redis_keys(*, grace_days: int, scan_limit: int) -> dict[str, Any]:
+    if not settings.auth_legacy_redis_cleanup_enabled:
+        return {"status": "disabled", "reason": "auth_legacy_redis_cleanup_disabled", "at": datetime.now(UTC).isoformat()}
+    if str(settings.auth_storage_mode) != "postgres":
+        return {"status": "disabled", "reason": "auth_storage_mode_not_postgres", "at": datetime.now(UTC).isoformat()}
+
+    effective_grace_days = max(1, int(grace_days))
+    effective_scan_limit = max(100, int(scan_limit))
+    cutoff = datetime.now(UTC) - timedelta(days=effective_grace_days)
+
+    redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    scanned = 0
+    deleted_users = 0
+    deleted_email_indexes = 0
+    deleted_session_sets = 0
+    skipped_recent = 0
+    skipped_invalid = 0
+
+    async for user_key in redis.scan_iter(match="auth:user:*"):
+        if scanned >= effective_scan_limit:
+            break
+        if user_key.count(":") != 2:
+            continue
+        scanned += 1
+
+        payload = await redis.hgetall(user_key)
+        if not payload:
+            await redis.delete(user_key)
+            continue
+
+        user_id = str(payload.get("id") or "").strip()
+        email = str(payload.get("email") or "").strip().lower()
+        last_seen = _parse_iso_datetime(payload.get("last_seen_at"))
+        updated_at = _parse_iso_datetime(payload.get("updated_at") or payload.get("created_at"))
+        reference_dt = last_seen or updated_at
+        if reference_dt is None:
+            skipped_invalid += 1
+            continue
+        if reference_dt >= cutoff:
+            skipped_recent += 1
+            continue
+
+        session_set_key = f"auth:user:{user_id}:sessions" if user_id else ""
+        active_session_refs = 0
+        if session_set_key:
+            for session_id in await redis.smembers(session_set_key):
+                if await redis.exists(f"auth:session:{session_id}"):
+                    active_session_refs += 1
+            if active_session_refs == 0:
+                if await redis.delete(session_set_key):
+                    deleted_session_sets += 1
+
+        if active_session_refs > 0:
+            skipped_recent += 1
+            continue
+
+        pipe = redis.pipeline()
+        pipe.delete(user_key)
+        if email:
+            pipe.delete(f"auth:user:email:{email}")
+        await pipe.execute()
+        deleted_users += 1
+        if email:
+            deleted_email_indexes += 1
+
+    if hasattr(redis, "aclose"):
+        await redis.aclose()
+    else:
+        await redis.close()
+
+    logger.info(
+        "cleanup_auth_legacy_redis_keys_completed",
+        grace_days=effective_grace_days,
+        scan_limit=effective_scan_limit,
+        scanned=scanned,
+        deleted_users=deleted_users,
+        deleted_email_indexes=deleted_email_indexes,
+        deleted_session_sets=deleted_session_sets,
+        skipped_recent=skipped_recent,
+        skipped_invalid=skipped_invalid,
+    )
+    return {
+        "status": "ok",
+        "grace_days": effective_grace_days,
+        "scan_limit": effective_scan_limit,
+        "cutoff_at": cutoff.isoformat(),
+        "scanned": scanned,
+        "deleted_users": deleted_users,
+        "deleted_email_indexes": deleted_email_indexes,
+        "deleted_session_sets": deleted_session_sets,
+        "skipped_recent": skipped_recent,
+        "skipped_invalid": skipped_invalid,
+        "at": datetime.now(UTC).isoformat(),
+    }
+
+
+@celery_app.task(bind=True)
+def cleanup_auth_legacy_redis_keys(
+    self,
+    grace_days: int | None = None,
+    scan_limit: int | None = None,
+) -> dict[str, Any]:
+    effective_grace_days = (
+        int(grace_days)
+        if isinstance(grace_days, int) and grace_days > 0
+        else int(settings.auth_legacy_redis_cleanup_grace_days)
+    )
+    effective_scan_limit = (
+        int(scan_limit)
+        if isinstance(scan_limit, int) and scan_limit > 0
+        else int(settings.auth_legacy_redis_cleanup_scan_limit)
+    )
+    return asyncio.run(
+        _cleanup_auth_legacy_redis_keys(
+            grace_days=effective_grace_days,
+            scan_limit=effective_scan_limit,
+        )
+    )
+
+
+@celery_app.task(bind=True)
+def enqueue_cleanup_auth_legacy_redis_keys(self) -> str:
+    return cleanup_auth_legacy_redis_keys.delay().id
 
 
 @celery_app.task(bind=True)

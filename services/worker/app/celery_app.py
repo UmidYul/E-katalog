@@ -72,6 +72,8 @@ celery_app.conf.update(
         "app.tasks.maintenance_tasks.enqueue_cleanup_auth_token_tables": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.maintenance_tasks.cleanup_auth_ephemeral_keys": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.maintenance_tasks.enqueue_cleanup_auth_ephemeral_keys": {"queue": "maintenance", "routing_key": "maintenance"},
+        "app.tasks.maintenance_tasks.cleanup_auth_legacy_redis_keys": {"queue": "maintenance", "routing_key": "maintenance"},
+        "app.tasks.maintenance_tasks.enqueue_cleanup_auth_legacy_redis_keys": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.maintenance_tasks.cleanup_empty_canonicals": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.maintenance_tasks.deactivate_no_offer_products": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.maintenance_tasks.enqueue_auto_deactivate_no_offer_products": {"queue": "maintenance", "routing_key": "maintenance"},
@@ -144,6 +146,11 @@ celery_app.conf.update(
         "cleanup-auth-ephemeral-keys-hourly": {
             "task": "app.tasks.maintenance_tasks.enqueue_cleanup_auth_ephemeral_keys",
             "schedule": crontab(minute=12),
+            "options": {"queue": "maintenance", "routing_key": "maintenance"},
+        },
+        "cleanup-auth-legacy-redis-keys-daily-0420": {
+            "task": "app.tasks.maintenance_tasks.enqueue_cleanup_auth_legacy_redis_keys",
+            "schedule": crontab(minute=20, hour=4),
             "options": {"queue": "maintenance", "routing_key": "maintenance"},
         },
         "quality-report-every-6h": {

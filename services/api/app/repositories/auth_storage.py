@@ -9,7 +9,14 @@ from sqlalchemy import and_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from shared.db.models import AuthOAuthIdentity, AuthPasswordResetToken, AuthSession, AuthSessionToken, AuthUser
+from shared.db.models import (
+    AuthEmailConfirmationToken,
+    AuthOAuthIdentity,
+    AuthPasswordResetToken,
+    AuthSession,
+    AuthSessionToken,
+    AuthUser,
+)
 
 
 def hash_auth_token(raw_token: str) -> str:
@@ -352,6 +359,29 @@ async def pg_revoke_session_token(db: AsyncSession, *, raw_token: str, token_typ
     return int(row.rowcount or 0) > 0
 
 
+async def pg_resolve_session_token(db: AsyncSession, *, raw_token: str, token_type: str) -> dict[str, Any] | None:
+    now_dt = datetime.now(UTC)
+    row = (
+        await db.execute(
+            select(AuthSessionToken.user_id, AuthSessionToken.session_id)
+            .join(AuthSession, AuthSession.id == AuthSessionToken.session_id)
+            .where(
+                and_(
+                    AuthSessionToken.token_hash == hash_auth_token(raw_token),
+                    AuthSessionToken.token_type == token_type,
+                    AuthSessionToken.revoked_at.is_(None),
+                    AuthSessionToken.expires_at > now_dt,
+                    AuthSession.revoked_at.is_(None),
+                )
+            )
+            .limit(1)
+        )
+    ).first()
+    if not row:
+        return None
+    return {"user_id": int(row[0]), "session_id": str(row[1])}
+
+
 async def pg_revoke_session(db: AsyncSession, *, user_id: int, session_id: str) -> bool:
     now = datetime.now(UTC)
     session_row = await db.execute(
@@ -413,6 +443,58 @@ async def pg_consume_password_reset_token(db: AsyncSession, *, raw_token: str) -
             )
             .values(used_at=now)
             .returning(AuthPasswordResetToken.user_id)
+        )
+    ).first()
+    if row is None or row[0] is None:
+        return None
+    return int(row[0])
+
+
+async def pg_create_email_confirmation_token(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    raw_token: str,
+    expires_at: datetime,
+) -> None:
+    token_hash = hash_auth_token(raw_token)
+    await db.execute(
+        update(AuthEmailConfirmationToken)
+        .where(and_(AuthEmailConfirmationToken.user_id == user_id, AuthEmailConfirmationToken.used_at.is_(None)))
+        .values(used_at=datetime.now(UTC))
+    )
+    insert_stmt = pg_insert(AuthEmailConfirmationToken).values(
+        user_id=user_id,
+        token_hash=token_hash,
+        expires_at=expires_at,
+        used_at=None,
+    )
+    await db.execute(
+        insert_stmt.on_conflict_do_update(
+            index_elements=[AuthEmailConfirmationToken.token_hash],
+            set_={
+                "user_id": insert_stmt.excluded.user_id,
+                "expires_at": insert_stmt.excluded.expires_at,
+                "used_at": None,
+            },
+        )
+    )
+
+
+async def pg_consume_email_confirmation_token(db: AsyncSession, *, raw_token: str) -> int | None:
+    now = datetime.now(UTC)
+    row = (
+        await db.execute(
+            update(AuthEmailConfirmationToken)
+            .where(
+                and_(
+                    AuthEmailConfirmationToken.token_hash == hash_auth_token(raw_token),
+                    AuthEmailConfirmationToken.used_at.is_(None),
+                    AuthEmailConfirmationToken.expires_at > now,
+                )
+            )
+            .values(used_at=now)
+            .returning(AuthEmailConfirmationToken.user_id)
         )
     ).first()
     if row is None or row[0] is None:

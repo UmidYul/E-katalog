@@ -530,6 +530,20 @@ class AuthPasswordResetToken(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class AuthEmailConfirmationToken(Base):
+    __tablename__ = "auth_email_confirmation_tokens"
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_auth_email_confirmation_tokens_hash"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("auth_users.id", ondelete="CASCADE"), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 Index("ix_catalog_categories_parent_id", CatalogCategory.parent_id)
 Index("ix_catalog_categories_lft_rgt", CatalogCategory.lft, CatalogCategory.rgt)
 Index("ix_catalog_brands_normalized_name", CatalogBrand.normalized_name)
@@ -595,6 +609,7 @@ Index("ix_auth_session_tokens_user_type", AuthSessionToken.user_id, AuthSessionT
 Index("ix_auth_session_tokens_expires_at", AuthSessionToken.expires_at)
 Index("ix_auth_oauth_identities_user_id", AuthOAuthIdentity.user_id)
 Index("ix_auth_password_reset_tokens_user_expires", AuthPasswordResetToken.user_id, AuthPasswordResetToken.expires_at)
+Index("ix_auth_email_confirmation_tokens_user_expires", AuthEmailConfirmationToken.user_id, AuthEmailConfirmationToken.expires_at)
 
 # Postgres-specific indexes to create in migrations:
 # - lower(normalized_title) gin_trgm_ops

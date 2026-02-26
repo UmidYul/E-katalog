@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
 import html
 import io
 import secrets
+import smtplib
 from datetime import UTC, datetime, timedelta
+from email.message import EmailMessage
 from typing import Literal
 from urllib.parse import quote, urlencode
 from uuid import UUID, uuid4
@@ -30,8 +33,11 @@ from app.repositories.auth_storage import (
     pg_get_user_id_by_email,
     pg_list_active_sessions,
     pg_patch_user_fields,
+    pg_resolve_session_token,
     pg_consume_password_reset_token,
+    pg_consume_email_confirmation_token,
     pg_create_password_reset_token,
+    pg_create_email_confirmation_token,
     pg_load_user_by_email,
     pg_load_user_by_id,
     pg_revoke_session,
@@ -209,6 +215,56 @@ def _issue_token() -> str:
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _build_password_reset_link(token: str) -> str:
+    base = str(settings.next_public_app_url or "http://localhost").strip().rstrip("/")
+    return f"{base}/auth/reset-password?token={quote(token, safe='')}"
+
+
+def _build_email_confirmation_link(token: str) -> str:
+    base = str(settings.next_public_app_url or "http://localhost").strip().rstrip("/")
+    return f"{base}/auth/confirm-email?token={quote(token, safe='')}"
+
+
+async def _send_auth_email(*, recipient: str, subject: str, text_value: str) -> tuple[bool, str | None]:
+    if not settings.auth_email_delivery_enabled:
+        return False, "auth email delivery disabled"
+
+    smtp_host = str(settings.auth_smtp_host or "").strip()
+    smtp_from = str(settings.auth_email_from or "").strip()
+    if not smtp_host:
+        return False, "missing smtp host"
+    if not smtp_from:
+        return False, "missing smtp from"
+
+    msg = EmailMessage()
+    msg["From"] = smtp_from
+    msg["To"] = recipient
+    msg["Subject"] = subject
+    msg.set_content(text_value)
+
+    smtp_port = int(settings.auth_smtp_port)
+    smtp_username = str(settings.auth_smtp_username or "").strip()
+    smtp_password = str(settings.auth_smtp_password or "").strip()
+    use_ssl = bool(settings.auth_smtp_use_ssl)
+    use_tls = bool(settings.auth_smtp_use_tls)
+    timeout_seconds = max(2.0, float(settings.auth_email_timeout_seconds))
+
+    def _send() -> None:
+        smtp_class = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
+        with smtp_class(smtp_host, smtp_port, timeout=timeout_seconds) as server:
+            if (not use_ssl) and use_tls:
+                server.starttls()
+            if smtp_username:
+                server.login(smtp_username, smtp_password)
+            server.send_message(msg)
+
+    try:
+        await asyncio.to_thread(_send)
+    except Exception as exc:
+        return False, str(exc)
+    return True, None
 
 
 def _normalize_uuid(value: str | None) -> str | None:
@@ -474,6 +530,40 @@ async def _resolve_pg_user_id(redis: Redis, db: AsyncSession | None, *, user_id:
     return None
 
 
+async def _patch_auth_user_fields(
+    redis: Redis,
+    db: AsyncSession | None,
+    *,
+    user_id: int,
+    fields: dict[str, str],
+) -> None:
+    if not fields:
+        return
+    if db is not None and _auth_reads_from_postgres():
+        await pg_patch_user_fields(db, user_id=user_id, fields=fields)
+        return
+    await redis.hset(f"auth:user:{user_id}", mapping=fields)
+    if db is not None and _auth_writes_to_postgres():
+        await _sync_user_from_redis(redis, db, user_id=user_id)
+
+
+async def _resolve_token_payload(
+    redis: Redis,
+    db: AsyncSession | None,
+    *,
+    raw_token: str | None,
+    token_type: Literal["access", "refresh"],
+) -> tuple[int | None, str | None]:
+    token_value = str(raw_token or "").strip()
+    if not token_value:
+        return None, None
+    if db is not None and _auth_reads_from_postgres():
+        payload = await pg_resolve_session_token(db, raw_token=token_value, token_type=token_type)
+        if payload is not None:
+            return int(payload["user_id"]), str(payload["session_id"])
+    return _decode_token_payload(await redis.get(f"auth:{token_type}:{token_value}"))
+
+
 async def _ensure_redis_user_from_postgres(redis: Redis, db: AsyncSession, *, pg_user_id: int) -> int | None:
     user = await pg_load_user_by_id(db, pg_user_id)
     if user is None:
@@ -589,6 +679,42 @@ async def _create_user(
     role: str = "user",
     extra_fields: dict[str, str] | None = None,
 ) -> dict:
+    if db is not None and _auth_reads_from_postgres():
+        now = _now_iso()
+        normalized_email = email.lower().strip()
+        normalized_full_name = full_name.strip()
+        mapping: dict[str, str] = {
+            "uuid": str(uuid4()),
+            "email": normalized_email,
+            "full_name": normalized_full_name,
+            "display_name": normalized_full_name,
+            "phone": "",
+            "city": "",
+            "telegram": "",
+            "about": "",
+            "updated_at": now,
+            "created_at": now,
+            "role": role,
+            "password_hash": password_hash,
+            "last_seen_at": "",
+            "twofa_enabled": "0",
+            "twofa_secret": "",
+            "twofa_recovery_codes_hash": "",
+            "twofa_pending_secret": "",
+            "twofa_pending_recovery_codes_hash": "",
+            "notification_preferences": "",
+            "email_confirmed": "0",
+            "email_confirmed_at": "",
+        }
+        if extra_fields:
+            mapping.update({key: str(value) for key, value in extra_fields.items()})
+        pg_user_id = await pg_upsert_user_from_redis_mapping(db, mapping)
+        await db.commit()
+        user = await pg_load_user_by_id(db, pg_user_id)
+        if user is None:
+            raise HTTPException(status_code=500, detail="failed to create user")
+        return user
+
     user_id = await redis.incr("auth:user:id")
     user_uuid = str(uuid4())
     now = _now_iso()
@@ -644,19 +770,20 @@ async def _create_session(
     device = _extract_device(request)
     ip_address = _extract_client_ip(request)
     location = _extract_location(request)
-    await redis.hset(
-        _session_key(session_id),
-        mapping={
-            "id": session_id,
-            "user_id": str(user_id),
-            "device": device,
-            "ip_address": ip_address,
-            "location": location,
-            "created_at": now,
-            "last_seen_at": now,
-        },
-    )
-    await redis.sadd(_user_sessions_key(user_id), session_id)
+    if not _auth_reads_from_postgres():
+        await redis.hset(
+            _session_key(session_id),
+            mapping={
+                "id": session_id,
+                "user_id": str(user_id),
+                "device": device,
+                "ip_address": ip_address,
+                "location": location,
+                "created_at": now,
+                "last_seen_at": now,
+            },
+        )
+        await redis.sadd(_user_sessions_key(user_id), session_id)
     if db is not None and _auth_writes_to_postgres():
         pg_user_id = await _resolve_pg_user_id(redis, db, user_id=user_id)
         if pg_user_id is not None:
@@ -686,15 +813,16 @@ async def _touch_session(
     device = _extract_device(request)
     ip_address = _extract_client_ip(request)
     location = _extract_location(request)
-    await redis.hset(
-        _session_key(session_id),
-        mapping={
-            "last_seen_at": now,
-            "device": device,
-            "ip_address": ip_address,
-            "location": location,
-        },
-    )
+    if not _auth_reads_from_postgres():
+        await redis.hset(
+            _session_key(session_id),
+            mapping={
+                "last_seen_at": now,
+                "device": device,
+                "ip_address": ip_address,
+                "location": location,
+            },
+        )
     if db is not None and _auth_writes_to_postgres():
         await pg_touch_session(
             db,
@@ -729,23 +857,26 @@ async def _set_auth_cookies(
     access = _issue_token()
     refresh = _issue_token()
     encoded = _encode_token_payload(user_id, session_id)
-    role_payload = await redis.hgetall(f"auth:user:{user_id}")
-    role = str(role_payload.get("role", "user")) if role_payload else "user"
-    if role == "user" and db is not None and _auth_reads_from_postgres():
+    role = "user"
+    if db is not None and _auth_reads_from_postgres():
         pg_user = await pg_load_user_by_id(db, user_id)
         if pg_user is not None:
             role = str(pg_user.get("role") or "user")
+    else:
+        role_payload = await redis.hgetall(f"auth:user:{user_id}")
+        role = str(role_payload.get("role", "user")) if role_payload else "user"
 
-    pipe = redis.pipeline()
-    pipe.setex(f"auth:access:{access}", ACCESS_TTL_SECONDS, encoded)
-    pipe.setex(f"auth:refresh:{refresh}", REFRESH_TTL_SECONDS, encoded)
-    pipe.sadd(_session_access_key(session_id), access)
-    pipe.sadd(_session_refresh_key(session_id), refresh)
-    pipe.hset(f"auth:user:{user_id}", mapping={"last_seen_at": _now_iso()})
-    if rotate_refresh_token:
-        pipe.delete(f"auth:refresh:{rotate_refresh_token}")
-        pipe.srem(_session_refresh_key(session_id), rotate_refresh_token)
-    await pipe.execute()
+    if not _auth_reads_from_postgres():
+        pipe = redis.pipeline()
+        pipe.setex(f"auth:access:{access}", ACCESS_TTL_SECONDS, encoded)
+        pipe.setex(f"auth:refresh:{refresh}", REFRESH_TTL_SECONDS, encoded)
+        pipe.sadd(_session_access_key(session_id), access)
+        pipe.sadd(_session_refresh_key(session_id), refresh)
+        pipe.hset(f"auth:user:{user_id}", mapping={"last_seen_at": _now_iso()})
+        if rotate_refresh_token:
+            pipe.delete(f"auth:refresh:{rotate_refresh_token}")
+            pipe.srem(_session_refresh_key(session_id), rotate_refresh_token)
+        await pipe.execute()
     if db is not None and _auth_writes_to_postgres():
         pg_user_id = await _resolve_pg_user_id(redis, db, user_id=user_id)
         if pg_user_id is not None:
@@ -768,7 +899,10 @@ async def _set_auth_cookies(
             )
             if rotate_refresh_token:
                 await pg_revoke_session_token(db, raw_token=rotate_refresh_token, token_type="refresh")
-            await _sync_user_from_redis(redis, db, user_id=user_id)
+            if _auth_reads_from_postgres():
+                await pg_patch_user_fields(db, user_id=pg_user_id, fields={"last_seen_at": _now_iso(), "updated_at": _now_iso()})
+            else:
+                await _sync_user_from_redis(redis, db, user_id=user_id)
             await db.commit()
 
     cookie_base = {
@@ -800,7 +934,7 @@ async def _resolve_user_from_access(
     if not access:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="missing access token")
 
-    user_id, session_id = _decode_token_payload(await redis.get(f"auth:access:{access}"))
+    user_id, session_id = await _resolve_token_payload(redis, db, raw_token=access, token_type="access")
     if user_id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid access token")
 
@@ -821,7 +955,8 @@ async def _resolve_user_from_access(
             await _touch_session(redis, session_id=session_id, request=request, db=db)
 
     if touch:
-        await redis.hset(f"auth:user:{user_id}", mapping={"last_seen_at": _now_iso()})
+        if not _auth_reads_from_postgres():
+            await redis.hset(f"auth:user:{user_id}", mapping={"last_seen_at": _now_iso()})
         if db is not None and _auth_writes_to_postgres():
             if _auth_reads_from_postgres():
                 await pg_patch_user_fields(
@@ -843,6 +978,7 @@ async def _resolve_user_from_access(
         "full_name": user["full_name"],
         "role": user["role"],
         "twofa_enabled": bool(user["twofa_enabled"]),
+        "email_confirmed": bool(user.get("email_confirmed")),
         "session_id": session_id,
     }
 
@@ -931,9 +1067,13 @@ async def _verify_user_2fa(
         if target not in hashes:
             return False
         next_hashes = [item for item in hashes if item != target]
-        await redis.hset(f"auth:user:{int(user['id'])}", mapping={"twofa_recovery_codes_hash": _serialize_hashes(next_hashes)})
+        await _patch_auth_user_fields(
+            redis,
+            db,
+            user_id=int(user["id"]),
+            fields={"twofa_recovery_codes_hash": _serialize_hashes(next_hashes), "updated_at": _now_iso()},
+        )
         if db is not None and _auth_writes_to_postgres():
-            await _sync_user_from_redis(redis, db, user_id=int(user["id"]))
             await db.commit()
         return True
     return False
@@ -1037,11 +1177,12 @@ async def login(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials")
 
     if _password_needs_rehash(str(user["password_hash"])):
-        await redis.hset(
-            f"auth:user:{int(user['id'])}",
-            mapping={"password_hash": _hash_password(payload.password), "updated_at": _now_iso()},
+        await _patch_auth_user_fields(
+            redis,
+            db,
+            user_id=int(user["id"]),
+            fields={"password_hash": _hash_password(payload.password), "updated_at": _now_iso()},
         )
-        await _sync_user_from_redis(redis, db, user_id=int(user["id"]))
         await db.commit()
 
     if user["twofa_enabled"]:
@@ -1084,7 +1225,7 @@ async def refresh(
     if not refresh_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="missing refresh token")
 
-    user_id, session_id = _decode_token_payload(await redis.get(f"auth:refresh:{refresh_token}"))
+    user_id, session_id = await _resolve_token_payload(redis, db, raw_token=refresh_token, token_type="refresh")
     if user_id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid refresh token")
     if session_id:
@@ -1123,9 +1264,9 @@ async def logout(
     session_id: str | None = None
 
     if access:
-        user_id, session_id = _decode_token_payload(await redis.get(f"auth:access:{access}"))
+        user_id, session_id = await _resolve_token_payload(redis, db, raw_token=access, token_type="access")
     if refresh_token and user_id is None:
-        user_id, session_id = _decode_token_payload(await redis.get(f"auth:refresh:{refresh_token}"))
+        user_id, session_id = await _resolve_token_payload(redis, db, raw_token=refresh_token, token_type="refresh")
 
     if user_id is not None and session_id:
         await _revoke_session(redis, user_id=user_id, session_id=session_id, db=db)
@@ -1183,8 +1324,12 @@ async def change_password(
         if payload.current_password == payload.new_password:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="new password must differ from current password")
 
-        await redis.hset(f"auth:user:{user_id}", mapping={"password_hash": _hash_password(payload.new_password), "updated_at": _now_iso()})
-        await _sync_user_from_redis(redis, db, user_id=user_id)
+        await _patch_auth_user_fields(
+            redis,
+            db,
+            user_id=user_id,
+            fields={"password_hash": _hash_password(payload.new_password), "updated_at": _now_iso()},
+        )
         await db.commit()
         revoked = 0
         if payload.revoke_other_sessions:
@@ -1224,6 +1369,15 @@ async def request_password_reset(
                     expires_at=datetime.now(UTC) + timedelta(seconds=ttl_seconds),
                 )
                 await db.commit()
+                await _send_auth_email(
+                    recipient=normalized_email,
+                    subject="Password reset request",
+                    text_value=(
+                        "You requested a password reset.\n\n"
+                        f"Reset link: {_build_password_reset_link(issued_token)}\n\n"
+                        "If you did not request this, ignore this email."
+                    ),
+                )
                 if settings.environment == "local" or settings.auth_password_reset_debug_return_token:
                     debug_token = issued_token
 
@@ -1252,19 +1406,20 @@ async def confirm_password_reset(
         if pg_user_id is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid or expired reset token")
 
-        redis_user_id = await _ensure_redis_user_from_postgres(redis, db, pg_user_id=pg_user_id)
-        if redis_user_id is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found")
+        target_user_id = int(pg_user_id)
+        if not _auth_reads_from_postgres():
+            redis_user_id = await _ensure_redis_user_from_postgres(redis, db, pg_user_id=pg_user_id)
+            if redis_user_id is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found")
+            target_user_id = int(redis_user_id)
 
-        await redis.hset(
-            f"auth:user:{redis_user_id}",
-            mapping={
-                "password_hash": _hash_password(payload.new_password),
-                "updated_at": _now_iso(),
-            },
+        await _patch_auth_user_fields(
+            redis,
+            db,
+            user_id=target_user_id,
+            fields={"password_hash": _hash_password(payload.new_password), "updated_at": _now_iso()},
         )
-        await _sync_user_from_redis(redis, db, user_id=redis_user_id)
-        revoked = await _revoke_all_sessions_except(redis, user_id=redis_user_id, keep_session_id=None, db=db)
+        revoked = await _revoke_all_sessions_except(redis, user_id=target_user_id, keep_session_id=None, db=db)
         await db.commit()
         _clear_auth_cookies(response)
         return {"ok": True, "revoked_sessions": revoked}
@@ -1292,7 +1447,26 @@ async def request_email_confirmation(
             return EmailConfirmationRequestResponse(ok=True, expires_in=ttl_seconds)
 
         confirmation_token = _issue_token()
-        await redis.setex(_email_confirmation_key(confirmation_token), ttl_seconds, str(user_id))
+        if _auth_reads_from_postgres():
+            await pg_create_email_confirmation_token(
+                db,
+                user_id=int(user["id"]),
+                raw_token=confirmation_token,
+                expires_at=datetime.now(UTC) + timedelta(seconds=ttl_seconds),
+            )
+            await db.commit()
+        else:
+            await redis.setex(_email_confirmation_key(confirmation_token), ttl_seconds, str(user_id))
+
+        await _send_auth_email(
+            recipient=str(user.get("email") or "").strip().lower(),
+            subject="Confirm your email",
+            text_value=(
+                "Please confirm your email address.\n\n"
+                f"Confirmation link: {_build_email_confirmation_link(confirmation_token)}\n\n"
+                "If this wasn't you, ignore this email."
+            ),
+        )
 
         debug_token: str | None = None
         if settings.environment == "local" or settings.auth_email_confirmation_debug_return_token:
@@ -1315,25 +1489,32 @@ async def confirm_email(
         if not token:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid email confirmation token")
 
-        raw_user_id = await redis.get(_email_confirmation_key(token))
-        if not raw_user_id:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid or expired email confirmation token")
-        try:
-            user_id = int(raw_user_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid email confirmation token") from exc
+        if _auth_reads_from_postgres():
+            user_id = await pg_consume_email_confirmation_token(db, raw_token=token)
+            if user_id is None:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid or expired email confirmation token")
+        else:
+            raw_user_id = await redis.get(_email_confirmation_key(token))
+            if not raw_user_id:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid or expired email confirmation token")
+            try:
+                user_id = int(raw_user_id)
+            except ValueError as exc:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid email confirmation token") from exc
 
         now_iso = _now_iso()
-        await redis.hset(
-            f"auth:user:{user_id}",
-            mapping={
+        await _patch_auth_user_fields(
+            redis,
+            db,
+            user_id=user_id,
+            fields={
                 "email_confirmed": "1",
                 "email_confirmed_at": now_iso,
                 "updated_at": now_iso,
             },
         )
-        await redis.delete(_email_confirmation_key(token))
-        await _sync_user_from_redis(redis, db, user_id=user_id)
+        if not _auth_reads_from_postgres():
+            await redis.delete(_email_confirmation_key(token))
         await db.commit()
         return {"ok": True, "email_confirmed": True}
 
@@ -1466,14 +1647,16 @@ async def setup_twofa(
 
     secret = _build_totp_secret()
     recovery_codes = _issue_recovery_codes()
-    await redis.hset(
-        f"auth:user:{user_id}",
-        mapping={
+    await _patch_auth_user_fields(
+        redis,
+        db,
+        user_id=user_id,
+        fields={
             "twofa_pending_secret": secret,
             "twofa_pending_recovery_codes_hash": _serialize_hashes([_hash_recovery_code(code) for code in recovery_codes]),
+            "updated_at": _now_iso(),
         },
     )
-    await _sync_user_from_redis(redis, db, user_id=user_id)
     await db.commit()
 
     otpauth_url = _build_otpauth_url(email=user["email"], secret=secret)
@@ -1543,9 +1726,11 @@ async def verify_twofa(
     if not _verify_totp(pending_secret, payload.code):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid 2fa code")
 
-    await redis.hset(
-        f"auth:user:{user_id}",
-        mapping={
+    await _patch_auth_user_fields(
+        redis,
+        db,
+        user_id=user_id,
+        fields={
             "twofa_enabled": "1",
             "twofa_secret": pending_secret,
             "twofa_recovery_codes_hash": pending_hashes,
@@ -1554,7 +1739,6 @@ async def verify_twofa(
             "updated_at": _now_iso(),
         },
     )
-    await _sync_user_from_redis(redis, db, user_id=user_id)
     await db.commit()
     return TwoFactorStatusResponse(enabled=True)
 
@@ -1566,9 +1750,11 @@ async def disable_twofa(
     db: AsyncSession = Depends(get_db_session),
 ):
     current = await _resolve_user_from_access(request, redis, touch=True, db=db)
-    await redis.hset(
-        f"auth:user:{int(current['internal_id'])}",
-        mapping={
+    await _patch_auth_user_fields(
+        redis,
+        db,
+        user_id=int(current["internal_id"]),
+        fields={
             "twofa_enabled": "0",
             "twofa_secret": "",
             "twofa_recovery_codes_hash": "",
@@ -1577,7 +1763,6 @@ async def disable_twofa(
             "updated_at": _now_iso(),
         },
     )
-    await _sync_user_from_redis(redis, db, user_id=int(current["internal_id"]))
     await db.commit()
     return TwoFactorStatusResponse(enabled=False)
 
@@ -1723,8 +1908,6 @@ async def _link_oauth_identity(
     user_id: int,
     db: AsyncSession | None = None,
 ) -> None:
-    await redis.set(_oauth_identity_key(provider, provider_user_id), str(user_id))
-    await redis.sadd(f"auth:user:{user_id}:oauth_providers", provider)
     if db is not None and _auth_writes_to_postgres():
         pg_user_id = await _resolve_pg_user_id(redis, db, user_id=user_id)
         if pg_user_id is not None:
@@ -1735,6 +1918,9 @@ async def _link_oauth_identity(
                 user_id=pg_user_id,
             )
             await db.commit()
+    if not _auth_reads_from_postgres():
+        await redis.set(_oauth_identity_key(provider, provider_user_id), str(user_id))
+        await redis.sadd(f"auth:user:{user_id}:oauth_providers", provider)
 
 
 async def _resolve_or_create_oauth_user(
@@ -1746,10 +1932,15 @@ async def _resolve_or_create_oauth_user(
     full_name: str,
     db: AsyncSession | None = None,
 ) -> dict:
-    mapped = await redis.get(_oauth_identity_key(provider, provider_user_id))
-    if not mapped and db is not None and _auth_writes_to_postgres():
+    mapped: str | None = None
+    if db is not None and _auth_reads_from_postgres():
         mapped_id = await pg_get_oauth_identity_user_id(db, provider=provider, provider_user_id=provider_user_id)
         mapped = str(mapped_id) if mapped_id is not None else None
+    else:
+        mapped = await redis.get(_oauth_identity_key(provider, provider_user_id))
+        if not mapped and db is not None and _auth_writes_to_postgres():
+            mapped_id = await pg_get_oauth_identity_user_id(db, provider=provider, provider_user_id=provider_user_id)
+            mapped = str(mapped_id) if mapped_id is not None else None
     if mapped:
         try:
             existing = await _load_user(redis, int(mapped), db)
@@ -1884,9 +2075,11 @@ async def ensure_seed_admin(redis: Redis, db: AsyncSession | None = None) -> dic
     email = settings.admin_email.lower().strip()
     existing = await _get_user_by_email(redis, email, db)
     if existing is not None:
-        await redis.hset(
-            f"auth:user:{existing['id']}",
-            mapping={
+        await _patch_auth_user_fields(
+            redis,
+            db,
+            user_id=int(existing["id"]),
+            fields={
                 "full_name": settings.admin_full_name,
                 "display_name": settings.admin_full_name,
                 "role": settings.admin_role,
@@ -1894,7 +2087,6 @@ async def ensure_seed_admin(redis: Redis, db: AsyncSession | None = None) -> dic
             },
         )
         if db is not None and _auth_writes_to_postgres():
-            await _sync_user_from_redis(redis, db, user_id=int(existing["id"]))
             await db.commit()
         refreshed = await _load_user(redis, int(existing["id"]), db)
         if refreshed is None:

@@ -11,8 +11,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db_session, get_redis
-from app.api.rbac import is_admin
-from app.api.rbac import is_staff
+from app.api.rbac import ADMIN_ROLE, STAFF_ROLES, require_roles
 from app.api.v1.routers.auth import get_current_user
 from app.core.config import settings
 from app.core.rate_limit import enforce_rate_limit
@@ -495,12 +494,10 @@ async def list_feedback_moderation_queue(
     kind: str = Query(default="all", pattern="^(all|review|question)$"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin privileges required")),
 ):
     redis = get_redis()
     await enforce_rate_limit(request, redis, bucket="product-feedback-moderation-read", limit=120)
-    if not is_admin(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin privileges required")
 
     items: list[ProductFeedbackQueueItem] = []
     status_counts: dict[str, int] = {"published": 0, "pending": 0, "rejected": 0}
@@ -668,12 +665,10 @@ async def create_question_answer(
     question_id: str,
     payload: ProductAnswerCreate,
     request: Request,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_roles(*STAFF_ROLES, detail="staff privileges required")),
 ):
     redis = get_redis()
     await enforce_rate_limit(request, redis, bucket="product-feedback-write", limit=60)
-    if not is_staff(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="staff privileges required")
 
     question_payload = await redis.hgetall(_question_key(question_id))
     if not question_payload:
@@ -804,12 +799,10 @@ async def pin_answer(
     answer_id: str,
     payload: ProductAnswerPinIn,
     request: Request,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_roles(*STAFF_ROLES, detail="staff privileges required")),
 ):
     redis = get_redis()
     await enforce_rate_limit(request, redis, bucket="product-feedback-moderation", limit=60)
-    if not is_staff(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="staff privileges required")
 
     answer_key = _answer_key(answer_id)
     answer_payload = await redis.hgetall(answer_key)
@@ -846,12 +839,10 @@ async def moderate_review(
     review_id: str,
     payload: ProductFeedbackModerationIn,
     request: Request,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin privileges required")),
 ):
     redis = get_redis()
     await enforce_rate_limit(request, redis, bucket="product-feedback-moderation", limit=60)
-    if not is_admin(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin privileges required")
 
     key = _review_key(review_id)
     existing = await redis.hgetall(key)
@@ -876,12 +867,10 @@ async def moderate_question(
     question_id: str,
     payload: ProductFeedbackModerationIn,
     request: Request,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin privileges required")),
 ):
     redis = get_redis()
     await enforce_rate_limit(request, redis, bucket="product-feedback-moderation", limit=60)
-    if not is_admin(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin privileges required")
 
     key = _question_key(question_id)
     existing = await redis.hgetall(key)

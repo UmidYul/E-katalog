@@ -2,6 +2,8 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from app.tasks.maintenance_tasks import _should_send_price_alert
+from app.tasks.maintenance_tasks import _email_contact
+from app.tasks.maintenance_tasks import _build_price_alert_email_subject
 from app.tasks.maintenance_tasks import _telegram_chat_id
 
 
@@ -45,3 +47,13 @@ def test_telegram_chat_id_parses_prefixed_value() -> None:
     assert _telegram_chat_id("chatid:-100123456") == "-100123456"
     assert _telegram_chat_id("  @my_channel  ") == "@my_channel"
     assert _telegram_chat_id("") is None
+
+
+def test_email_contact_validates_basic_format() -> None:
+    assert _email_contact(" user@example.com ") == "user@example.com"
+    assert _email_contact("invalid-email") is None
+    assert _email_contact("") is None
+
+
+def test_build_price_alert_email_subject_contains_product_title() -> None:
+    assert _build_price_alert_email_subject(product_title="iPhone 15") == "Price alert: iPhone 15"
