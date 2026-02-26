@@ -26,7 +26,7 @@ _SIM_TOKENS_PATTERN = re.compile(
     r"\b(?:nanosim|nano\s*sim|micro\s*sim|dual\s*sim|esim|sim)\b",
     flags=re.IGNORECASE,
 )
-_STORAGE_VALUE_PATTERN = re.compile(r"\b(64|128|256|512|1024)\b")
+_STORAGE_VALUE_PATTERN = re.compile(r"\b(\d{2,4})\b")
 _COLOR_KEY_CANDIDATES = ("color", "colour")
 
 
@@ -77,7 +77,9 @@ def _storage_from_specs(specs: dict | None) -> str | None:
             continue
         match = _STORAGE_VALUE_PATTERN.search(str(raw_value))
         if match:
-            return match.group(1)
+            value = int(match.group(1))
+            if 16 <= value <= 4096:
+                return str(value)
     return None
 
 
@@ -113,7 +115,9 @@ def _structural_key(product: CatalogCanonicalProduct) -> str | None:
         return None
     color = _color_from_specs(product.specs if isinstance(product.specs, dict) else None)
     if color is None:
-        return None
+        # Use a medium-strength structural key when color is missing to avoid
+        # under-merging sparse specs; color conflicts are still handled by score.
+        return f"{brand}|{model}|{storage}"
     return f"{brand}|{model}|{storage}|{color}"
 
 

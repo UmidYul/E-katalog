@@ -37,6 +37,100 @@ def _quality_level(*, ratio: float, warn_threshold: float, critical_threshold: f
     return "ok"
 
 
+async def _adaptive_thresholds(
+    session,
+    *,
+    metric_key: str,
+    warn_threshold: float,
+    critical_threshold: float,
+) -> tuple[float, float]:
+    if not settings.quality_report_adaptive_thresholds_enabled:
+        return warn_threshold, critical_threshold
+
+    window = max(3, int(settings.quality_report_adaptive_window_reports))
+    rows = (
+        await session.execute(
+            text(
+                """
+                select cast(summary ->> :metric_key as double precision) as metric
+                from catalog_data_quality_reports
+                where summary ? :metric_key
+                order by created_at desc
+                limit :limit
+                """
+            ),
+            {"metric_key": metric_key, "limit": window},
+        )
+    ).all()
+    values = [float(row.metric) for row in rows if row.metric is not None]
+    if len(values) < 3:
+        return warn_threshold, critical_threshold
+
+    baseline = float(median(values))
+    if baseline <= warn_threshold:
+        return warn_threshold, critical_threshold
+
+    warn_scale = min(2.0, max(1.0, baseline / max(warn_threshold, 1e-6)))
+    critical_scale = min(2.0, max(1.0, baseline / max(critical_threshold, 1e-6)))
+    adjusted_warn = min(0.99, warn_threshold * warn_scale)
+    adjusted_critical = min(0.99, max(adjusted_warn + 1e-6, critical_threshold * critical_scale))
+    return adjusted_warn, adjusted_critical
+
+
+async def _should_send_quality_alert(
+    session,
+    *,
+    report_id: int,
+    status: str,
+    min_alert_status: str,
+    summary: dict[str, Any],
+) -> bool:
+    if _status_rank(status) < _status_rank(min_alert_status):
+        return False
+
+    cooldown_minutes = max(0, int(settings.quality_report_alert_cooldown_minutes))
+    delta_threshold = max(0.0, float(settings.quality_report_alert_min_delta))
+    if cooldown_minutes <= 0:
+        return True
+
+    row = (
+        await session.execute(
+            text(
+                """
+                select id, status, summary, created_at
+                from catalog_data_quality_reports
+                where id <> :report_id
+                order by created_at desc
+                limit 1
+                """
+            ),
+            {"report_id": report_id},
+        )
+    ).mappings().one_or_none()
+    if not row:
+        return True
+
+    created_at = _parse_iso_datetime(row.get("created_at")) or datetime.now(UTC)
+    if datetime.now(UTC) > (created_at + timedelta(minutes=cooldown_minutes)):
+        return True
+    if _status_rank(str(row.get("status") or "")) < _status_rank(min_alert_status):
+        return True
+
+    prev_summary = row.get("summary") if isinstance(row.get("summary"), dict) else {}
+    keys = (
+        "active_without_valid_offers_ratio",
+        "search_mismatch_ratio",
+        "stale_offer_ratio",
+        "low_quality_image_ratio",
+    )
+    for key in keys:
+        current_value = float(summary.get(key) or 0.0)
+        previous_value = float(prev_summary.get(key) or 0.0)
+        if abs(current_value - previous_value) >= delta_threshold:
+            return True
+    return False
+
+
 def _resolve_overall_quality_status(levels: list[str]) -> str:
     if "critical" in levels:
         return "critical"
@@ -312,25 +406,50 @@ async def _generate_catalog_quality_report() -> dict:
         stale_offer_ratio = _to_ratio(stale_valid_offers, total_valid_offers)
         low_quality_image_ratio = _to_ratio(low_quality_main_image_products, active_products)
 
+        active_warn, active_critical = await _adaptive_thresholds(
+            session,
+            metric_key="active_without_valid_offers_ratio",
+            warn_threshold=float(settings.quality_report_active_without_offers_warn_ratio),
+            critical_threshold=float(settings.quality_report_active_without_offers_critical_ratio),
+        )
+        mismatch_warn, mismatch_critical = await _adaptive_thresholds(
+            session,
+            metric_key="search_mismatch_ratio",
+            warn_threshold=float(settings.quality_report_search_mismatch_warn_ratio),
+            critical_threshold=float(settings.quality_report_search_mismatch_critical_ratio),
+        )
+        stale_warn, stale_critical = await _adaptive_thresholds(
+            session,
+            metric_key="stale_offer_ratio",
+            warn_threshold=float(settings.quality_report_stale_offer_warn_ratio),
+            critical_threshold=float(settings.quality_report_stale_offer_critical_ratio),
+        )
+        image_warn, image_critical = await _adaptive_thresholds(
+            session,
+            metric_key="low_quality_image_ratio",
+            warn_threshold=float(settings.quality_report_low_quality_image_warn_ratio),
+            critical_threshold=float(settings.quality_report_low_quality_image_critical_ratio),
+        )
+
         active_without_offers_level = _quality_level(
             ratio=active_without_offers_ratio,
-            warn_threshold=settings.quality_report_active_without_offers_warn_ratio,
-            critical_threshold=settings.quality_report_active_without_offers_critical_ratio,
+            warn_threshold=active_warn,
+            critical_threshold=active_critical,
         )
         search_mismatch_level = _quality_level(
             ratio=search_mismatch_ratio,
-            warn_threshold=settings.quality_report_search_mismatch_warn_ratio,
-            critical_threshold=settings.quality_report_search_mismatch_critical_ratio,
+            warn_threshold=mismatch_warn,
+            critical_threshold=mismatch_critical,
         )
         stale_offer_level = _quality_level(
             ratio=stale_offer_ratio,
-            warn_threshold=settings.quality_report_stale_offer_warn_ratio,
-            critical_threshold=settings.quality_report_stale_offer_critical_ratio,
+            warn_threshold=stale_warn,
+            critical_threshold=stale_critical,
         )
         low_quality_image_level = _quality_level(
             ratio=low_quality_image_ratio,
-            warn_threshold=settings.quality_report_low_quality_image_warn_ratio,
-            critical_threshold=settings.quality_report_low_quality_image_critical_ratio,
+            warn_threshold=image_warn,
+            critical_threshold=image_critical,
         )
 
         checks = {
@@ -339,24 +458,30 @@ async def _generate_catalog_quality_report() -> dict:
                 "count": active_without_valid_offers,
                 "total": active_products,
                 "ratio": active_without_offers_ratio,
-                "warn_threshold": settings.quality_report_active_without_offers_warn_ratio,
-                "critical_threshold": settings.quality_report_active_without_offers_critical_ratio,
+                "warn_threshold": active_warn,
+                "critical_threshold": active_critical,
+                "base_warn_threshold": settings.quality_report_active_without_offers_warn_ratio,
+                "base_critical_threshold": settings.quality_report_active_without_offers_critical_ratio,
             },
             "search_store_count_mismatch": {
                 "level": search_mismatch_level,
                 "count": search_mismatch_products,
                 "total": active_products,
                 "ratio": search_mismatch_ratio,
-                "warn_threshold": settings.quality_report_search_mismatch_warn_ratio,
-                "critical_threshold": settings.quality_report_search_mismatch_critical_ratio,
+                "warn_threshold": mismatch_warn,
+                "critical_threshold": mismatch_critical,
+                "base_warn_threshold": settings.quality_report_search_mismatch_warn_ratio,
+                "base_critical_threshold": settings.quality_report_search_mismatch_critical_ratio,
             },
             "stale_valid_offers": {
                 "level": stale_offer_level,
                 "count": stale_valid_offers,
                 "total": total_valid_offers,
                 "ratio": stale_offer_ratio,
-                "warn_threshold": settings.quality_report_stale_offer_warn_ratio,
-                "critical_threshold": settings.quality_report_stale_offer_critical_ratio,
+                "warn_threshold": stale_warn,
+                "critical_threshold": stale_critical,
+                "base_warn_threshold": settings.quality_report_stale_offer_warn_ratio,
+                "base_critical_threshold": settings.quality_report_stale_offer_critical_ratio,
                 "stale_offer_hours": settings.quality_report_stale_offer_hours,
             },
             "low_quality_main_image": {
@@ -364,8 +489,10 @@ async def _generate_catalog_quality_report() -> dict:
                 "count": low_quality_main_image_products,
                 "total": active_products,
                 "ratio": low_quality_image_ratio,
-                "warn_threshold": settings.quality_report_low_quality_image_warn_ratio,
-                "critical_threshold": settings.quality_report_low_quality_image_critical_ratio,
+                "warn_threshold": image_warn,
+                "critical_threshold": image_critical,
+                "base_warn_threshold": settings.quality_report_low_quality_image_warn_ratio,
+                "base_critical_threshold": settings.quality_report_low_quality_image_critical_ratio,
             },
         }
 
@@ -432,7 +559,15 @@ async def _generate_catalog_quality_report() -> dict:
         )
 
     min_alert_status = str(settings.quality_report_alert_min_status or "critical").strip().lower() or "critical"
-    if _status_rank(status) >= _status_rank(min_alert_status):
+    async with AsyncSessionLocal() as session:
+        should_send = await _should_send_quality_alert(
+            session,
+            report_id=report_id,
+            status=status,
+            min_alert_status=min_alert_status,
+            summary=summary,
+        )
+    if should_send:
         delivered = await _send_quality_alert_webhook(
             {
                 "source": "catalog_quality_report",

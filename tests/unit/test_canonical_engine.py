@@ -112,3 +112,15 @@ def test_confidence_calibration_is_separate_from_similarity_score() -> None:
     assert 0.0 <= emb_conf <= 1.0
     assert fuzzy_conf != raw
     assert emb_conf != raw
+
+
+def test_canonical_key_non_apple_samsung_brand_is_not_unknown() -> None:
+    key = canonical_key(extract_attributes("Xiaomi Redmi Note 13 Pro 12/512GB Black"))
+    assert key == "xiaomi|note13pro|512"
+
+
+def test_canonical_key_supports_extended_storage_values() -> None:
+    key_32 = canonical_key(extract_attributes("Xiaomi Redmi A3 4/32GB Green"))
+    key_2048 = canonical_key(extract_attributes("Huawei Pura 70 Ultra 16/2048GB Black"))
+    assert key_32.endswith("|32")
+    assert key_2048.endswith("|2048")

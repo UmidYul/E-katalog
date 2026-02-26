@@ -81,6 +81,7 @@
 - `DONE` Canonical match ledger/snapshot baseline: normalize pipeline writes immutable match events to `catalog_canonical_match_ledger`; scheduled compaction task creates daily snapshots in `catalog_canonical_match_snapshots`.
 - `DONE` Canonical scaling embedding baseline: `generate_embeddings_batch` migrated to incremental offset-driven processing with auto-followup chunk scheduling, and ANN vector index maintenance task (`refresh_embedding_ann_indexes`) added for daily `ANALYZE` plus optional concurrent reindex.
 - `DONE` Active-learning baseline for canonical matching: low-confidence AI matches are captured into `catalog_canonical_review_cases` with admin triage endpoints (`/api/v1/admin/canonical/review-cases`) to mark `open/applied/rejected`.
+- `DONE` Business-logic hardening (catalog quality and matching): extended brand support in canonical matching beyond Apple/Samsung, flexible storage parsing (including 32GB/2048GB), dedupe structural-key fallback without color, mojibake cleanup in title/spec normalization, and adaptive quality-alert thresholding with cooldown/delta suppression to reduce alert fatigue.
 
 ## 2026-02-26 EK.UA parity tracking (from strict matrix)
 

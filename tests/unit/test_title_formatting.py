@@ -54,3 +54,11 @@ def test_format_product_title_supports_russian_memory_config_key() -> None:
         specs={"\u041a\u043e\u043d\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044f \u043f\u0430\u043c\u044f\u0442\u0438": "12/256 \u0413\u0411"},
     )
     assert value == "Samsung Galaxy S25 Ultra 12/256GB"
+
+
+def test_format_product_title_supports_non_apple_samsung_brand_and_32gb() -> None:
+    value = format_product_title(
+        "Купить Xiaomi Redmi A3 32 гб dual sim",
+        brand_name="Xiaomi",
+    )
+    assert value == "Xiaomi Redmi A3 32GB"

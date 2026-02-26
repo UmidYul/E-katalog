@@ -56,8 +56,12 @@ class Settings(BaseSettings):
     quality_report_auto_deactivate_no_offer_enabled: bool = True
     quality_report_auto_deactivate_no_offer_hours: int = 72
     quality_report_auto_deactivate_no_offer_limit: int = 500
+    quality_report_adaptive_thresholds_enabled: bool = True
+    quality_report_adaptive_window_reports: int = 14
     quality_report_alert_webhook_url: str | None = None
     quality_report_alert_min_status: Literal["warning", "critical"] = "critical"
+    quality_report_alert_cooldown_minutes: int = 90
+    quality_report_alert_min_delta: float = 0.01
     offer_trust_score_enabled: bool = True
     offer_trust_score_refresh_limit: int = 200000
     offer_trust_score_freshness_hours: int = 72

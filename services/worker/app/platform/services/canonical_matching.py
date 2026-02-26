@@ -92,6 +92,44 @@ _CYRILLIC_CONFUSABLE_TRANSLATION = str.maketrans(
     }
 )
 _MODEL_VARIANT_SUFFIXES: tuple[str, ...] = ("promax", "ultra", "plus", "mini", "max", "pro", "fe", "lite")
+_GENERIC_MODEL_PREFIXES: tuple[str, ...] = (
+    "note",
+    "redmi",
+    "poco",
+    "pixel",
+    "nord",
+    "mate",
+    "nova",
+    "magic",
+    "reno",
+    "find",
+    "xperia",
+    "moto",
+    "edge",
+    "spark",
+    "camon",
+    "gt",
+)
+_GENERIC_STOPWORDS: set[str] = {
+    "smartphone",
+    "smartfon",
+    "phone",
+    "mobile",
+    "global",
+    "version",
+    "edition",
+    "dual",
+    "sim",
+    "esim",
+    "nanosim",
+    "nano",
+    "ram",
+    "gb",
+    "5g",
+    "4g",
+}
+_STORAGE_MIN_GB = 16
+_STORAGE_MAX_GB = 4096
 
 
 def _apply_aliases(value: str) -> str:
@@ -138,6 +176,34 @@ def _parse_brand(text: str) -> str:
         return "apple"
     if "samsung" in text or "galaxy" in text:
         return "samsung"
+    if "xiaomi" in text or "redmi" in text or "poco" in text:
+        return "xiaomi"
+    if "huawei" in text:
+        return "huawei"
+    if "honor" in text:
+        return "honor"
+    if "google" in text or "pixel" in text:
+        return "google"
+    if "oneplus" in text or "one plus" in text:
+        return "oneplus"
+    if "nothing" in text:
+        return "nothing"
+    if "oppo" in text:
+        return "oppo"
+    if "vivo" in text:
+        return "vivo"
+    if "realme" in text:
+        return "realme"
+    if "motorola" in text or "moto" in text:
+        return "motorola"
+    if "nokia" in text:
+        return "nokia"
+    if "sony" in text or "xperia" in text:
+        return "sony"
+    if "infinix" in text:
+        return "infinix"
+    if "tecno" in text:
+        return "tecno"
     return "unknown"
 
 
@@ -270,15 +336,52 @@ def _parse_model(text: str, brand: str) -> tuple[str, str]:
             z_variant = legacy_fold_flip.group(1).lower()
             return f"z{z_variant}{legacy_fold_flip.group(2)}", z_variant
 
+    if brand != "unknown":
+        tokens = [token.strip().lower() for token in text.split() if token.strip()]
+        brand_tokens = {
+            "xiaomi": {"xiaomi", "redmi", "poco"},
+            "huawei": {"huawei"},
+            "honor": {"honor"},
+            "google": {"google", "pixel"},
+            "oneplus": {"oneplus", "one", "plus"},
+            "nothing": {"nothing"},
+            "oppo": {"oppo"},
+            "vivo": {"vivo"},
+            "realme": {"realme"},
+            "motorola": {"motorola", "moto"},
+            "nokia": {"nokia"},
+            "sony": {"sony", "xperia"},
+            "infinix": {"infinix"},
+            "tecno": {"tecno"},
+        }.get(brand, {brand})
+        filtered = [token for token in tokens if token not in brand_tokens and token not in _GENERIC_STOPWORDS]
+        for idx, token in enumerate(filtered):
+            if not re.search(r"\d", token):
+                continue
+            parts: list[str] = []
+            if idx > 0 and filtered[idx - 1] in _GENERIC_MODEL_PREFIXES:
+                parts.append(filtered[idx - 1])
+            parts.append(token)
+            if idx + 1 < len(filtered) and filtered[idx + 1] in _MODEL_VARIANT_SUFFIXES:
+                parts.append(filtered[idx + 1])
+            model = re.sub(r"[^a-z0-9]+", "", "".join(parts))
+            if model:
+                variant = next((p for p in parts if p in _MODEL_VARIANT_SUFFIXES), "base")
+                return model, variant
+
     return "unknown", "unknown"
 
 
 def _parse_storage(text: str) -> str:
-    match = re.search(r"\b(64|128|256|512|1024)\s*gb\b", text)
-    if match:
-        return match.group(1)
-    packed = re.search(r"\b(64|128|256|512|1024)\b", text)
-    return packed.group(1) if packed else "unknown"
+    explicit = [int(item) for item in re.findall(r"\b(\d{2,4})\s*gb\b", text, flags=re.IGNORECASE)]
+    explicit = [value for value in explicit if _STORAGE_MIN_GB <= value <= _STORAGE_MAX_GB]
+    if explicit:
+        return str(max(explicit))
+    bare = [int(item) for item in re.findall(r"\b(\d{2,4})\b", text)]
+    bare = [value for value in bare if value in {32, 64, 128, 256, 512, 1024, 2048, 4096}]
+    if bare:
+        return str(max(bare))
+    return "unknown"
 
 
 def extract_attributes(title: str) -> ExtractedAttributes:

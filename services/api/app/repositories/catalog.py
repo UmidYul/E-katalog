@@ -193,28 +193,28 @@ _IMAGE_URL_EXTENSIONS: tuple[str, ...] = (
 )
 
 _TITLE_NOISE_TOKENS: set[str] = {
-    "РєСѓРїРёС‚СЊ",
-    "С†РµРЅР°",
-    "С†РµРЅС‹",
-    "СЃРјР°СЂС‚С„РѕРЅ",
-    "СЃРјР°СЂС‚С„РѕРЅС‹",
-    "С‚РµР»РµС„РѕРЅ",
-    "С‚РµР»РµС„РѕРЅС‹",
-    "РјР°РіР°Р·РёРЅ",
-    "РјР°РіР°Р·РёРЅРµ",
-    "РґРѕСЃС‚Р°РІРєР°",
-    "СЂР°СЃСЃСЂРѕС‡РєР°",
-    "РѕСЂРёРіРёРЅР°Р»",
-    "РѕСЂРёРіРёРЅР°Р»СЊРЅС‹Р№",
-    "РѕС„РёС†РёР°Р»СЊРЅС‹Р№",
+    "купить",
+    "цена",
+    "цены",
+    "смартфон",
+    "смартфоны",
+    "телефон",
+    "телефоны",
+    "магазин",
+    "магазине",
+    "доставка",
+    "рассрочка",
+    "оригинал",
+    "оригинальный",
+    "официальный",
     "official",
     "store",
     "shop",
     "new",
-    "РЅРѕРІРёРЅРєР°",
+    "новинка",
 }
 
-_MEMORY_VALUES: tuple[str, ...] = ("64", "128", "256", "512", "1024")
+_MEMORY_VALUES: tuple[str, ...] = ("16", "32", "64", "128", "256", "512", "1024", "2048", "4096")
 _LIKELY_RAM_VALUES: set[str] = {"2", "3", "4", "6", "8", "10", "12", "16", "18", "24"}
 _GB_PATTERN = r"(?:gb|\u0433\u0431)"
 _VARIANT_LABELS: dict[str, str] = {
@@ -242,7 +242,7 @@ def _normalize_title_source_for_display(raw_title: str, brand_name: str | None =
     brand_tokens = {brand_hint} if brand_hint else set()
     brand_tokens.update({"apple", "iphone", "samsung", "galaxy"})
 
-    for separator in (" - ", " вЂ” ", " вЂ“ ", ": "):
+    for separator in (" - ", " — ", " – ", ": "):
         if separator not in title:
             continue
         left, right = title.split(separator, 1)
@@ -254,18 +254,18 @@ def _normalize_title_source_for_display(raw_title: str, brand_name: str | None =
             title = right.strip()
             break
 
-    lowered = title.lower().replace("С‘", "Рµ")
+    lowered = title.lower().replace("ё", "е")
     lowered = lowered.replace("\u0451", "\u0435")
-    lowered = re.sub(r"\bРіР±\b", "gb", lowered, flags=re.IGNORECASE)
-    lowered = re.sub(r"\b(\d{1,2})\s*/\s*(\d{2,4})\s*(?:gb|РіР±)\b", r"\1/\2gb", lowered, flags=re.IGNORECASE)
-    lowered = re.sub(r"\b(" + "|".join(_MEMORY_VALUES) + r")\s*(?:gb|РіР±)\b", r"\1gb", lowered, flags=re.IGNORECASE)
+    lowered = re.sub(r"\bгб\b", "gb", lowered, flags=re.IGNORECASE)
+    lowered = re.sub(r"\b(\d{1,2})\s*/\s*(\d{2,4})\s*(?:gb|гб)\b", r"\1/\2gb", lowered, flags=re.IGNORECASE)
+    lowered = re.sub(r"\b(" + "|".join(_MEMORY_VALUES) + r")\s*(?:gb|гб)\b", r"\1gb", lowered, flags=re.IGNORECASE)
     lowered = re.sub(r"\b(?:\u0433\u0431)\b", "gb", lowered, flags=re.IGNORECASE)
     lowered = re.sub(r"\b(\d{1,2})\s*/\s*(\d{2,4})\s*gb\b", r"\1/\2gb", lowered, flags=re.IGNORECASE)
     lowered = re.sub(r"\b(" + "|".join(_MEMORY_VALUES) + r")\s*gb\b", r"\1gb", lowered, flags=re.IGNORECASE)
     lowered = lowered.replace("+", " plus ")
-    lowered = re.sub(r"([a-zР°-СЏ])(\d)", r"\1 \2", lowered, flags=re.IGNORECASE)
-    lowered = re.sub(r"(\d)([a-zР°-СЏ])", r"\1 \2", lowered, flags=re.IGNORECASE)
-    lowered = re.sub(r"[^a-zР°-СЏ0-9/\s-]", " ", lowered, flags=re.IGNORECASE)
+    lowered = re.sub(r"([a-zа-я])(\d)", r"\1 \2", lowered, flags=re.IGNORECASE)
+    lowered = re.sub(r"(\d)([a-zа-я])", r"\1 \2", lowered, flags=re.IGNORECASE)
+    lowered = re.sub(r"[^a-zа-я0-9/\s-]", " ", lowered, flags=re.IGNORECASE)
     lowered = re.sub(r"\s+", " ", lowered).strip()
     return lowered
 
@@ -277,7 +277,7 @@ def _extract_memory_from_specs(specs: dict | None) -> tuple[str | None, str | No
     def parse_value(value: object, *, allow_storage_only: bool) -> str | None:
         if value is None:
             return None
-        text_value = str(value).lower().replace("РіР±", "gb")
+        text_value = str(value).lower().replace("гб", "gb")
         text_value = text_value.replace("\u0433\u0431", "gb")
         pair_match = re.search(r"\b(\d{1,2})\s*/\s*(\d{2,4})\b", text_value)
         if pair_match:
@@ -318,18 +318,6 @@ def _extract_memory_from_specs(specs: dict | None) -> tuple[str | None, str | No
             return "storage"
         if key in {"memory", "\u043f\u0430\u043c\u044f\u0442\u044c", "memory config", "\u043a\u043e\u043d\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044f \u043f\u0430\u043c\u044f\u0442\u0438"}:
             return "both"
-        if "ram" in key or ("РѕРїРµСЂР°С‚РёРІ" in key and "РїР°РјСЏС‚" in key):
-            return "ram"
-        if (
-            "storage" in key
-            or "built in memory" in key
-            or "builtinmemory" in compact
-            or ("РІСЃС‚СЂРѕРµРЅ" in key and "РїР°РјСЏС‚" in key)
-            or ("РїРѕСЃС‚РѕСЏРЅ" in key and "РїР°РјСЏС‚" in key)
-        ):
-            return "storage"
-        if key in {"memory", "РїР°РјСЏС‚СЊ", "memory config", "РєРѕРЅС„РёРіСѓСЂР°С†РёСЏ РїР°РјСЏС‚Рё"}:
-            return "both"
         return "unknown"
 
     storage = None
@@ -348,7 +336,7 @@ def _extract_memory_from_specs(specs: dict | None) -> tuple[str | None, str | No
 
 def _extract_memory_from_text(text: str) -> tuple[str | None, str | None]:
     compact = str(text or "")
-    compact = re.sub(r"\b(?:\u0433\u0431|РіР±)\b", "gb", compact, flags=re.IGNORECASE)
+    compact = re.sub(r"\b(?:\u0433\u0431)\b", "gb", compact, flags=re.IGNORECASE)
     pair_match = re.search(
         r"\b(\d{1,2})\s*/\s*(" + "|".join(_MEMORY_VALUES) + r")\s*gb\b",
         compact,
@@ -395,7 +383,7 @@ def _extract_esim(text: str, specs: dict | None) -> bool:
         value_norm = str(value or "").strip().lower()
         if "esim" in key_norm and value_norm not in {"", "false", "0", "no"}:
             return True
-        if key_norm in {"sim", "sim_type", "sim_type_card", "type_sim", "С‚РёРї sim-РєР°СЂС‚С‹"} and "esim" in value_norm:
+        if key_norm in {"sim", "sim_type", "sim_type_card", "type_sim", "тип sim-карты"} and "esim" in value_norm:
             return True
     return False
 

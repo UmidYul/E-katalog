@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from services.worker.app.platform.services.dedupe import _pair_score, _spec_overlap_score
+from services.worker.app.platform.services.dedupe import _pair_score, _spec_overlap_score, _structural_key
 
 
 def _product(title: str, specs: dict, embedding: list[float] | None = None):
@@ -24,3 +24,13 @@ def test_pair_score_prefers_exact_title_and_specs() -> None:
     score, reason = _pair_score(left, right)
     assert score >= 0.95
     assert reason in {"same_normalized_title_and_specs", "title_specs_embedding"}
+
+
+def test_structural_key_falls_back_without_color() -> None:
+    product = SimpleNamespace(
+        normalized_title="xiaomi redmi note 13 pro 512gb",
+        specs={"storage_gb": "512"},
+        brand_id=None,
+    )
+    key = _structural_key(product)
+    assert key == "xiaomi|note13pro|512"
