@@ -362,6 +362,11 @@ def _extract_memory_from_text(text: str) -> tuple[str | None, str | None]:
     if spaced_pair_match:
         ram = spaced_pair_match.group(1)
         storage = spaced_pair_match.group(2)
+        prefix_tokens = compact[: spaced_pair_match.start()].strip().split()
+        prev_token = str(prefix_tokens[-1]).lower() if prefix_tokens else ""
+        # Avoid interpreting model suffixes like "A3 32GB" as "3/32GB".
+        if re.fullmatch(r"[a-zа-я]", prev_token, flags=re.IGNORECASE):
+            return None, storage
         if ram in _LIKELY_RAM_VALUES:
             return ram, storage
 
@@ -603,7 +608,12 @@ def format_product_title(raw_title: str, *, brand_name: str | None = None, specs
         memory_label = f"{ram}GB RAM"
 
     parts: list[str] = []
-    if brand_label:
+    model_starts_with_brand = bool(
+        brand_label
+        and model_label
+        and str(model_label).strip().lower().startswith(str(brand_label).strip().lower())
+    )
+    if brand_label and not model_starts_with_brand:
         parts.append(brand_label)
     if model_label:
         parts.append(model_label)
