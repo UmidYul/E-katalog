@@ -18,7 +18,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuthMe } from "@/features/auth/use-auth";
 import { useProduct } from "@/features/catalog/use-catalog-queries";
 import { useToggleFavorite, useFavorites } from "@/features/user/use-favorites";
-import { userApi } from "@/lib/api/openapi-client";
+import { useDeleteUserPriceAlert, useUpsertUserPriceAlert, useUserPriceAlerts } from "@/features/user/use-price-alerts";
+import { userApi, type UserPriceAlert } from "@/lib/api/openapi-client";
 import { buildPriceAlertSignal, toPositivePriceOrNull } from "@/lib/utils/price-alerts";
 import { formatPrice } from "@/lib/utils/format";
 import { COMPARE_LIMIT, useCompareStore } from "@/store/compare.store";
@@ -50,10 +51,14 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
   const favorites = useFavorites();
   const product = useProduct(productId);
   const toggleFavorite = useToggleFavorite();
+  const serverPriceAlerts = useUserPriceAlerts();
+  const upsertPriceAlert = useUpsertUserPriceAlert();
+  const deletePriceAlert = useDeleteUserPriceAlert();
   const pushRecentlyViewed = useRecentlyViewedStore((s) => s.push);
   const compareItemsStore = useCompareStore((s) => s.items);
   const toggleCompare = useCompareStore((s) => s.toggle);
   const alertMetas = usePriceAlertsStore((s) => s.metas);
+  const mergeServerMetas = usePriceAlertsStore((s) => s.mergeServerMetas);
   const ensureAlertMeta = usePriceAlertsStore((s) => s.ensureMeta);
   const setAlertsEnabled = usePriceAlertsStore((s) => s.setAlertsEnabled);
   const setTargetPrice = usePriceAlertsStore((s) => s.setTargetPrice);
@@ -76,6 +81,15 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
   );
   const currentProductId = product.data?.id;
   const currentProductTitle = product.data?.title;
+  const serverAlertMap = useMemo(() => {
+    const map = new Map<string, UserPriceAlert>();
+    for (const alert of serverPriceAlerts.data ?? []) {
+      if (alert?.product_id) {
+        map.set(alert.product_id, alert);
+      }
+    }
+    return map;
+  }, [serverPriceAlerts.data]);
 
   const isFavorite = Boolean(currentProductId && favoriteSet.has(currentProductId));
 
@@ -98,7 +112,12 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
     updateLastSeen(currentProductId, currentMinPrice);
   }, [currentMinPrice, currentProductId, ensureAlertMeta, isFavorite, updateLastSeen]);
 
-  const alertMeta = currentProductId ? alertMetas[currentProductId] : undefined;
+  useEffect(() => {
+    if (!serverPriceAlerts.data?.length) return;
+    mergeServerMetas(serverPriceAlerts.data);
+  }, [mergeServerMetas, serverPriceAlerts.data]);
+
+  const alertMeta = currentProductId ? serverAlertMap.get(currentProductId) ?? alertMetas[currentProductId] : undefined;
   const alertSignal = alertMeta ? buildPriceAlertSignal(alertMeta, currentMinPrice) : null;
 
   useEffect(() => {
@@ -133,8 +152,25 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
     if (nextFavorite) {
       ensureAlertMeta(id, currentMinPrice);
       setAlertsEnabled(id, true, currentMinPrice);
+      if (me.data?.id) {
+        void upsertPriceAlert
+          .mutateAsync({
+            productId: id,
+            alerts_enabled: true,
+            current_price: currentMinPrice,
+            channel: "telegram",
+          })
+          .catch(() => undefined);
+      }
     } else {
       removeAlertMeta(id);
+      const alertId =
+        alertMeta && typeof (alertMeta as { id?: unknown }).id === "string"
+          ? (alertMeta as unknown as { id: string }).id
+          : null;
+      if (me.data?.id && alertId) {
+        void deletePriceAlert.mutateAsync(alertId).catch(() => undefined);
+      }
     }
     toggleFavorite.mutate(id);
   };
@@ -143,11 +179,60 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
     if (!product.data) return;
     if (!targetPriceInput.trim()) {
       setTargetPrice(product.data.id, null);
+      if (me.data?.id) {
+        void upsertPriceAlert
+          .mutateAsync({
+            productId: product.data.id,
+            target_price: null,
+            current_price: currentMinPrice,
+            channel: "telegram",
+          })
+          .catch(() => undefined);
+      }
       return;
     }
     const numeric = Number(targetPriceInput.replace(/\s+/g, ""));
     if (!Number.isFinite(numeric) || numeric <= 0) return;
     setTargetPrice(product.data.id, numeric);
+    if (me.data?.id) {
+      void upsertPriceAlert
+        .mutateAsync({
+          productId: product.data.id,
+          target_price: numeric,
+          current_price: currentMinPrice,
+          channel: "telegram",
+        })
+        .catch(() => undefined);
+    }
+  };
+
+  const handleToggleAlertsEnabled = () => {
+    const nextEnabled = !Boolean(alertMeta?.alerts_enabled);
+    setAlertsEnabled(product.data.id, nextEnabled, currentMinPrice);
+    if (me.data?.id) {
+      void upsertPriceAlert
+        .mutateAsync({
+          productId: product.data.id,
+          alerts_enabled: nextEnabled,
+          current_price: currentMinPrice,
+          channel: "telegram",
+        })
+        .catch(() => undefined);
+    }
+  };
+
+  const handleResetBaseline = () => {
+    resetBaseline(product.data.id, currentMinPrice);
+    if (me.data?.id) {
+      void upsertPriceAlert
+        .mutateAsync({
+          productId: product.data.id,
+          baseline_price: currentMinPrice,
+          current_price: currentMinPrice,
+          channel: "telegram",
+        })
+        .catch(() => undefined);
+    }
   };
 
   return (
@@ -253,11 +338,11 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
               <Button
                 variant={alertMeta?.alerts_enabled ? "default" : "outline"}
                 size="sm"
-                onClick={() => setAlertsEnabled(product.data.id, !Boolean(alertMeta?.alerts_enabled), currentMinPrice)}
+                onClick={handleToggleAlertsEnabled}
               >
                 {alertMeta?.alerts_enabled ? "Алерты включены" : "Включить алерты"}
               </Button>
-              <Button variant="outline" size="sm" onClick={() => resetBaseline(product.data.id, currentMinPrice)}>
+              <Button variant="outline" size="sm" onClick={handleResetBaseline}>
                 Обновить базу
               </Button>
             </div>
@@ -322,3 +407,4 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
     </div>
   );
 }
+

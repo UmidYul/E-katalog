@@ -107,6 +107,26 @@ class CompareShareResolveOut(BaseModel):
     request_id: str
 
 
+class ProductPriceAlertUpsertIn(BaseModel):
+    alerts_enabled: bool | None = None
+    target_price: float | None = Field(default=None, ge=0)
+    baseline_price: float | None = Field(default=None, ge=0)
+    current_price: float | None = Field(default=None, ge=0)
+    channel: str = Field(default="telegram", pattern="^(telegram|email)$")
+
+
+class ProductPriceAlertOut(BaseModel):
+    id: str
+    product_id: str
+    channel: str
+    alerts_enabled: bool
+    baseline_price: float | None = None
+    target_price: float | None = None
+    last_seen_price: float | None = None
+    last_notified_at: str | None = None
+    updated_at: str
+
+
 class ProductReviewCreate(BaseModel):
     author: str = Field(min_length=2, max_length=120)
     rating: int = Field(ge=1, le=5)

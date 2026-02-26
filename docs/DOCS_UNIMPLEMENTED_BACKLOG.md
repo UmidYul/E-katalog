@@ -71,7 +71,7 @@ High-priority initiatives still listed as roadmap work:
 Immediate backlog from roadmap:
 - [ ] Quality report task + DB table.
 - [ ] Admin endpoint + dashboard panel for quality report.
-- [ ] Telegram-first price alert schema + API.
+- [~] Telegram-first price alert schema + API: DB table + API endpoints + frontend API wiring implemented on 2026-02-26; notification delivery worker is pending.
 - [x] Compare share link endpoint + frontend button.
 - [ ] Unit tests for all above.
 

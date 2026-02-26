@@ -7,6 +7,7 @@ import type {
   FilterBucket,
   Paginated,
   PriceHistoryPoint,
+  PriceAlertMeta,
   ProductAnswer,
   ProductDetail,
   ProductListItem,
@@ -240,6 +241,11 @@ export type RecentlyViewedItem = {
   viewed_at: string;
 };
 
+export type UserPriceAlert = PriceAlertMeta & {
+  id: string;
+  channel: "telegram" | "email" | string;
+};
+
 export const userApi = {
   favorites: () => apiClient.get<Array<{ product_id: string }>>("/users/favorites"),
   toggleFavorite: (productId: string) => apiClient.post(`/users/favorites/${productId}`),
@@ -248,6 +254,19 @@ export const userApi = {
   notificationPreferences: () => apiClient.get<NotificationPreferences>("/users/me/notification-preferences"),
   updateNotificationPreferences: (payload: NotificationPreferencesPatch) =>
     apiClient.patch<NotificationPreferences>("/users/me/notification-preferences", payload),
+  priceAlerts: (query?: { channel?: "telegram" | "email"; active_only?: boolean; limit?: number; offset?: number }) =>
+    apiClient.get<UserPriceAlert[]>("/users/me/alerts", { params: query }),
+  upsertPriceAlert: (
+    productId: string,
+    payload: {
+      alerts_enabled?: boolean;
+      target_price?: number | null;
+      baseline_price?: number | null;
+      current_price?: number | null;
+      channel?: "telegram" | "email";
+    },
+  ) => apiClient.post<UserPriceAlert>(`/products/${productId}/alerts`, payload),
+  deletePriceAlert: (alertId: string) => apiClient.delete<{ ok: boolean }>(`/users/me/alerts/${alertId}`),
   recentlyViewed: () => apiClient.get<RecentlyViewedItem[]>("/users/me/recently-viewed"),
   pushRecentlyViewed: (productId: string) => apiClient.post<RecentlyViewedItem>("/users/me/recently-viewed", { product_id: productId }),
   clearRecentlyViewed: () => apiClient.delete<{ ok: boolean }>("/users/me/recently-viewed")

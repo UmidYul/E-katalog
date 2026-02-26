@@ -1,17 +1,64 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.rate_limit import enforce_rate_limit
 from app.api.deps import get_db_session, get_redis
-from app.schemas.catalog import CanonicalProductDetailOut, OfferOut, PriceHistoryPoint, SearchResponse
+from app.api.v1.routers.auth import get_current_user
+from app.schemas.catalog import (
+    CanonicalProductDetailOut,
+    OfferOut,
+    PriceHistoryPoint,
+    ProductPriceAlertOut,
+    ProductPriceAlertUpsertIn,
+    SearchResponse,
+)
 from app.cache.redis_cache import CacheService
 from app.core.config import settings
 from app.repositories.catalog import CatalogRepository
+from shared.db.models import CatalogPriceAlert
 
 router = APIRouter(prefix="/products", tags=["products"])
 UUID_REF_PATTERN = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+
+
+def _as_decimal(value: float | None) -> Decimal | None:
+    if value is None:
+        return None
+    return Decimal(str(value))
+
+
+def _to_float(value: Decimal | None) -> float | None:
+    if value is None:
+        return None
+    return float(value)
+
+
+def _user_uuid_from_current(current_user: dict) -> str:
+    user_uuid = str(current_user.get("id") or "").strip().lower()
+    if not user_uuid:
+        raise HTTPException(status_code=401, detail="invalid user session")
+    return user_uuid
+
+
+def _build_price_alert_response(alert: CatalogPriceAlert, *, product_uuid: str) -> ProductPriceAlertOut:
+    updated_at = alert.updated_at or datetime.now(UTC)
+    return ProductPriceAlertOut(
+        id=str(alert.uuid),
+        product_id=product_uuid,
+        channel=str(alert.channel),
+        alerts_enabled=bool(alert.alerts_enabled),
+        baseline_price=_to_float(alert.baseline_price),
+        target_price=_to_float(alert.target_price),
+        last_seen_price=_to_float(alert.last_seen_price),
+        last_notified_at=alert.last_notified_at.isoformat() if alert.last_notified_at else None,
+        updated_at=updated_at.isoformat(),
+    )
 
 
 @router.get("", response_model=SearchResponse)
@@ -129,6 +176,74 @@ async def get_product(
     }
     await cache.set_json(cache_key, payload, ttl_seconds=60)
     return payload
+
+
+@router.post("/{product_id}/alerts", response_model=ProductPriceAlertOut)
+async def upsert_product_price_alert(
+    request: Request,
+    payload: ProductPriceAlertUpsertIn,
+    product_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    redis = get_redis()
+    await enforce_rate_limit(request, redis, bucket="price-alerts-write", limit=90)
+
+    repo = CatalogRepository(db, cursor_secret=settings.cursor_secret)
+    product = await repo.get_product(product_id)
+    if product is None:
+        raise HTTPException(status_code=404, detail="product not found")
+
+    product_uuid = str(product["id"])
+    product_internal_id = int(product["legacy_id"])
+    user_uuid = _user_uuid_from_current(current_user)
+    channel = str(payload.channel or "telegram").strip().lower()
+    now = datetime.now(UTC)
+    fields_set = payload.model_fields_set
+
+    current_price = payload.current_price
+    if current_price is None:
+        compare_meta = await repo.get_product_compare_meta(product_internal_id)
+        price_min = compare_meta.get("price_min")
+        current_price = float(price_min) if price_min is not None else None
+
+    stmt = (
+        select(CatalogPriceAlert)
+        .where(CatalogPriceAlert.user_uuid == user_uuid)
+        .where(CatalogPriceAlert.product_id == product_internal_id)
+        .where(CatalogPriceAlert.channel == channel)
+        .limit(1)
+    )
+    alert = (await db.execute(stmt)).scalar_one_or_none()
+    if alert is None:
+        alert = CatalogPriceAlert(
+            user_uuid=user_uuid,
+            product_id=product_internal_id,
+            channel=channel,
+            alerts_enabled=payload.alerts_enabled if payload.alerts_enabled is not None else True,
+            baseline_price=_as_decimal(payload.baseline_price if "baseline_price" in fields_set else current_price),
+            target_price=_as_decimal(payload.target_price if "target_price" in fields_set else None),
+            last_seen_price=_as_decimal(current_price),
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(alert)
+    else:
+        if "alerts_enabled" in fields_set and payload.alerts_enabled is not None:
+            alert.alerts_enabled = bool(payload.alerts_enabled)
+        if "target_price" in fields_set:
+            alert.target_price = _as_decimal(payload.target_price)
+        if "baseline_price" in fields_set:
+            alert.baseline_price = _as_decimal(payload.baseline_price)
+        if current_price is not None:
+            alert.last_seen_price = _as_decimal(current_price)
+            if "baseline_price" not in fields_set and alert.baseline_price is None:
+                alert.baseline_price = _as_decimal(current_price)
+        alert.updated_at = now
+
+    await db.commit()
+    await db.refresh(alert)
+    return _build_price_alert_response(alert, product_uuid=product_uuid)
 
 
 @router.get("/{product_id}/offers", response_model=list[OfferOut])

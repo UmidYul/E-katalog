@@ -356,6 +356,34 @@ class CatalogDataQualityReport(CatalogUuidMixin, Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class CatalogPriceAlert(CatalogUuidMixin, Base):
+    __tablename__ = "catalog_price_alerts"
+    __table_args__ = (
+        UniqueConstraint("user_uuid", "product_id", "channel", name="uq_catalog_price_alert_user_product_channel"),
+        CheckConstraint("channel in ('telegram','email')", name="ck_catalog_price_alert_channel"),
+        CheckConstraint("target_price is null or target_price >= 0", name="ck_catalog_price_alert_target_nonnegative"),
+        CheckConstraint("baseline_price is null or baseline_price >= 0", name="ck_catalog_price_alert_baseline_nonnegative"),
+        CheckConstraint("last_seen_price is null or last_seen_price >= 0", name="ck_catalog_price_alert_last_seen_nonnegative"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_uuid: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    product_id: Mapped[int] = mapped_column(
+        ForeignKey("catalog_canonical_products.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    channel: Mapped[str] = mapped_column(String(16), nullable=False, default="telegram", server_default="telegram")
+    alerts_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
+    baseline_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    target_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    last_seen_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    last_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class AdminAlertEvent(CatalogUuidMixin, Base):
     __tablename__ = "admin_alert_events"
 
@@ -524,6 +552,10 @@ Index("ix_catalog_ai_jobs_status_stage", CatalogAIEnrichmentJob.status, CatalogA
 Index("ix_catalog_ai_jobs_product_id", CatalogAIEnrichmentJob.product_id)
 Index("ix_catalog_quality_reports_created_at", CatalogDataQualityReport.created_at.desc())
 Index("ix_catalog_quality_reports_status_created", CatalogDataQualityReport.status, CatalogDataQualityReport.created_at.desc())
+Index("ix_catalog_price_alert_user_channel", CatalogPriceAlert.user_uuid, CatalogPriceAlert.channel)
+Index("ix_catalog_price_alert_user_enabled", CatalogPriceAlert.user_uuid, CatalogPriceAlert.alerts_enabled)
+Index("ix_catalog_price_alert_product_enabled", CatalogPriceAlert.product_id, CatalogPriceAlert.alerts_enabled)
+Index("ix_catalog_price_alert_updated_at", CatalogPriceAlert.updated_at.desc())
 Index("ix_admin_alert_events_created_at", AdminAlertEvent.created_at.desc())
 Index("ix_admin_alert_events_status_severity_created", AdminAlertEvent.status, AdminAlertEvent.severity, AdminAlertEvent.created_at.desc())
 Index("ix_admin_alert_events_source_code", AdminAlertEvent.source, AdminAlertEvent.code)

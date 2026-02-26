@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useFavorites, useToggleFavorite } from "@/features/user/use-favorites";
+import { useDeleteUserPriceAlert, useUpsertUserPriceAlert, useUserPriceAlerts } from "@/features/user/use-price-alerts";
 import { catalogApi } from "@/lib/api/openapi-client";
 import { formatPrice } from "@/lib/utils/format";
 import { buildPriceAlertSignal, toPositivePriceOrNull } from "@/lib/utils/price-alerts";
@@ -22,9 +23,13 @@ import type { WatchlistFilter } from "@/types/domain";
 export function FavoritesWatchlistClient() {
   const favorites = useFavorites();
   const toggleFavorite = useToggleFavorite();
+  const serverPriceAlerts = useUserPriceAlerts();
+  const upsertPriceAlert = useUpsertUserPriceAlert();
+  const deletePriceAlert = useDeleteUserPriceAlert();
   const compareItems = useCompareStore((s) => s.items);
   const toggleCompare = useCompareStore((s) => s.toggle);
   const alertMetas = usePriceAlertsStore((s) => s.metas);
+  const mergeServerMetas = usePriceAlertsStore((s) => s.mergeServerMetas);
   const ensureAlertMeta = usePriceAlertsStore((s) => s.ensureMeta);
   const setAlertsEnabled = usePriceAlertsStore((s) => s.setAlertsEnabled);
   const setTargetPrice = usePriceAlertsStore((s) => s.setTargetPrice);
@@ -39,6 +44,14 @@ export function FavoritesWatchlistClient() {
   const compareFull = compareItems.length >= COMPARE_LIMIT;
   const referenceCompareCategory = useMemo(() => getReferenceCategory(compareItems.map((item) => item.category)), [compareItems]);
   const favoriteIds = useMemo(() => (favorites.data ?? []).map((item) => item.product_id), [favorites.data]);
+  const serverAlertByProductId = useMemo(() => {
+    const map = new Map<string, { id: string }>();
+    for (const alert of serverPriceAlerts.data ?? []) {
+      if (!alert?.product_id || !alert?.id) continue;
+      map.set(alert.product_id, { id: alert.id });
+    }
+    return map;
+  }, [serverPriceAlerts.data]);
 
   const productQueries = useQueries({
     queries: favoriteIds.map((productId) => ({
@@ -90,6 +103,11 @@ export function FavoritesWatchlistClient() {
   }, [favoriteIds, syncWithFavorites]);
 
   useEffect(() => {
+    if (!serverPriceAlerts.data?.length) return;
+    mergeServerMetas(serverPriceAlerts.data);
+  }, [mergeServerMetas, serverPriceAlerts.data]);
+
+  useEffect(() => {
     products.forEach(({ id, data }) => {
       const minPrice = toPositivePriceOrNull(data.offers_by_store.reduce((acc, store) => Math.min(acc, store.minimal_price), Number.POSITIVE_INFINITY));
       ensureAlertMeta(id, minPrice);
@@ -136,11 +154,58 @@ export function FavoritesWatchlistClient() {
     const raw = targetDrafts[productId] ?? "";
     if (!raw.trim()) {
       setTargetPrice(productId, null);
+      void upsertPriceAlert
+        .mutateAsync({
+          productId,
+          target_price: null,
+          channel: "telegram",
+        })
+        .catch(() => undefined);
       return;
     }
     const numeric = Number(raw.replace(/\s+/g, ""));
     if (!Number.isFinite(numeric) || numeric <= 0) return;
     setTargetPrice(productId, numeric);
+    void upsertPriceAlert
+      .mutateAsync({
+        productId,
+        target_price: numeric,
+        channel: "telegram",
+      })
+      .catch(() => undefined);
+  };
+
+  const handleResetBaseline = (productId: string, minPrice: number | null) => {
+    resetBaseline(productId, minPrice);
+    void upsertPriceAlert
+      .mutateAsync({
+        productId,
+        baseline_price: minPrice,
+        current_price: minPrice,
+        channel: "telegram",
+      })
+      .catch(() => undefined);
+  };
+
+  const handleToggleAlertsEnabled = (productId: string, enabled: boolean, minPrice: number | null) => {
+    setAlertsEnabled(productId, enabled, minPrice);
+    void upsertPriceAlert
+      .mutateAsync({
+        productId,
+        alerts_enabled: enabled,
+        current_price: minPrice,
+        channel: "telegram",
+      })
+      .catch(() => undefined);
+  };
+
+  const handleRemoveFavorite = (productId: string) => {
+    removeAlertMeta(productId);
+    const serverAlert = serverAlertByProductId.get(productId);
+    if (serverAlert?.id) {
+      void deletePriceAlert.mutateAsync(serverAlert.id).catch(() => undefined);
+    }
+    toggleFavorite.mutate(productId);
   };
 
   if (favorites.isLoading) {
@@ -218,13 +283,13 @@ export function FavoritesWatchlistClient() {
                           <Button size="sm" variant="outline" onClick={() => saveTarget(item.id)}>
                             Сохранить цель
                           </Button>
-                          <Button size="sm" variant="outline" onClick={() => resetBaseline(item.id, item.minPrice)}>
+                          <Button size="sm" variant="outline" onClick={() => handleResetBaseline(item.id, item.minPrice)}>
                             Обновить базу
                           </Button>
                           <Button
                             size="sm"
                             variant={item.meta?.alerts_enabled ? "default" : "outline"}
-                            onClick={() => setAlertsEnabled(item.id, !Boolean(item.meta?.alerts_enabled), item.minPrice)}
+                            onClick={() => handleToggleAlertsEnabled(item.id, !Boolean(item.meta?.alerts_enabled), item.minPrice)}
                           >
                             {item.meta?.alerts_enabled ? "Алерт включён" : "Включить алерт"}
                           </Button>
@@ -290,10 +355,7 @@ export function FavoritesWatchlistClient() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => {
-                          removeAlertMeta(id);
-                          toggleFavorite.mutate(id);
-                        }}
+                        onClick={() => handleRemoveFavorite(id)}
                         disabled={toggleFavorite.isPending}
                       >
                         Убрать
@@ -311,10 +373,7 @@ export function FavoritesWatchlistClient() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => {
-                      removeAlertMeta(id);
-                      toggleFavorite.mutate(id);
-                    }}
+                    onClick={() => handleRemoveFavorite(id)}
                     disabled={toggleFavorite.isPending}
                   >
                     Убрать

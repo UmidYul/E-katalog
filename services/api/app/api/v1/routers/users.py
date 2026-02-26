@@ -3,15 +3,18 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db_session, get_redis
 from app.api.v1.routers.auth import _ensure_user_uuid, get_current_user
 from app.core.config import settings
 from app.repositories.catalog import CatalogRepository
+from app.schemas.catalog import ProductPriceAlertOut
+from shared.db.models import CatalogCanonicalProduct, CatalogPriceAlert
 
 router = APIRouter(prefix="/users", tags=["users"])
 UUID_REF_PATTERN = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
@@ -132,6 +135,37 @@ def _current_user_internal_id(current_user: dict) -> int:
         return int(fallback)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=401, detail="invalid user session") from exc
+
+
+def _current_user_uuid(current_user: dict) -> str:
+    user_uuid = str(current_user.get("id") or "").strip().lower()
+    if not user_uuid:
+        raise HTTPException(status_code=401, detail="invalid user session")
+    return user_uuid
+
+
+def _to_float_or_none(value) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _map_price_alert_row(alert: CatalogPriceAlert, *, product_uuid: str) -> ProductPriceAlertOut:
+    updated_at = alert.updated_at or datetime.now(UTC)
+    return ProductPriceAlertOut(
+        id=str(alert.uuid),
+        product_id=product_uuid,
+        channel=str(alert.channel),
+        alerts_enabled=bool(alert.alerts_enabled),
+        baseline_price=_to_float_or_none(alert.baseline_price),
+        target_price=_to_float_or_none(alert.target_price),
+        last_seen_price=_to_float_or_none(alert.last_seen_price),
+        last_notified_at=alert.last_notified_at.isoformat() if alert.last_notified_at else None,
+        updated_at=updated_at.isoformat(),
+    )
 
 
 def _default_notification_preferences() -> dict:
@@ -354,6 +388,55 @@ async def patch_notification_preferences(
         },
     )
     return next_preferences
+
+
+@router.get("/me/alerts", response_model=list[ProductPriceAlertOut])
+async def list_my_price_alerts(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+    channel: str | None = Query(default=None, pattern="^(telegram|email)$"),
+    active_only: bool = Query(default=False),
+    limit: int = Query(default=200, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+):
+    user_uuid = _current_user_uuid(current_user)
+
+    stmt = (
+        select(CatalogPriceAlert, CatalogCanonicalProduct.uuid.label("product_uuid"))
+        .join(CatalogCanonicalProduct, CatalogCanonicalProduct.id == CatalogPriceAlert.product_id)
+        .where(CatalogPriceAlert.user_uuid == user_uuid)
+        .order_by(CatalogPriceAlert.updated_at.desc(), CatalogPriceAlert.id.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    if channel:
+        stmt = stmt.where(CatalogPriceAlert.channel == channel)
+    if active_only:
+        stmt = stmt.where(CatalogPriceAlert.alerts_enabled.is_(True))
+
+    rows = (await db.execute(stmt)).all()
+    return [_map_price_alert_row(alert, product_uuid=str(product_uuid)) for alert, product_uuid in rows]
+
+
+@router.delete("/me/alerts/{alert_id}")
+async def delete_my_price_alert(
+    alert_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    user_uuid = _current_user_uuid(current_user)
+    stmt = (
+        select(CatalogPriceAlert)
+        .where(CatalogPriceAlert.user_uuid == user_uuid)
+        .where(CatalogPriceAlert.uuid == alert_id.lower())
+        .limit(1)
+    )
+    alert = (await db.execute(stmt)).scalar_one_or_none()
+    if alert is None:
+        raise HTTPException(status_code=404, detail="alert not found")
+    await db.delete(alert)
+    await db.commit()
+    return {"ok": True}
 
 
 @router.get("/me/recently-viewed", response_model=list[RecentlyViewedItem])
