@@ -83,9 +83,12 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_cursor_secret(self) -> "Settings":
+        env_name = str(self.environment or "").strip().lower()
         secret = str(self.cursor_secret or "").strip()
-        if not secret or secret == "change-me-cursor-secret":
-            raise ValueError("CURSOR_SECRET must be explicitly set to a non-default secret")
+        if env_name in {"staging", "production"} and (not secret or secret == "change-me-cursor-secret"):
+            raise ValueError("CURSOR_SECRET must be explicitly set to a non-default secret in staging/production")
+        if env_name == "local" and (not secret or secret == "change-me-cursor-secret"):
+            self.cursor_secret = "dev-local-cursor-secret"
         return self
 
 
