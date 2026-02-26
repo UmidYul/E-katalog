@@ -16,10 +16,14 @@ This file aggregates items that are still not fully implemented based on explici
 - [ ] Unified RBAC policy layer for API (`TODO`).
 - [ ] Audit log for admin operations (`TODO`).
 - [ ] Idempotency keys for critical write endpoints (`TODO`).
+- [ ] Anti-bruteforce hardening for auth (`TODO` in P0 list; later update marks this as `DONE`, needs status reconciliation).
 - [ ] Observability hardening (Sentry + metrics + tracing) (`TODO`).
+- [ ] Expanded readiness/liveness checks (`TODO` in P0 list; later update marks this as `DONE`, needs status reconciliation).
 - [ ] Backups + restore validation (runbook + automation) (`TODO`).
 - [ ] OpenAPI contract testing + API versioning work is still in progress (`IN_PROGRESS`).
+- [ ] Cleanup tasks for sessions/tokens/temporary entities are still in progress (`IN_PROGRESS`).
 - [ ] Notifications pipeline for price/stock (email/telegram/webhook) (`TODO`).
+- [ ] Stage B dual-write transition still has open TODO markers in source doc (`dual` writes in both stores, reads from Redis during transition).
 - [ ] Stage C cutover tasks:
 - [ ] switch reads to pure Postgres everywhere (`TODO` / `IN_PROGRESS`);
 - [ ] leave Redis only for cache/rate-limit (`TODO`);
@@ -110,3 +114,11 @@ These docs are operational runbooks/checklists and do not define product-feature
 - `docs/MVP_DEV_ROLLOUT_CHECKLIST.md`
 - `docs/WINDOWS_SERVER_GUIDE.md`
 - `docs/theme-palette-preview.html`
+
+## 9) Additional Prod Readiness Gaps (manual additions)
+
+These items are important for production quality but are not explicitly tracked as TODOs in the source docs above:
+- [ ] Security baseline hardening checklist (strict CORS, security headers, HTTPS-only assumptions, secret rotation policy).
+- [ ] Queue reliability standards (DLQ, retry/backoff policy, stuck-job monitoring, idempotent worker handlers).
+- [ ] Release management hardening (staging parity, post-deploy smoke tests, rollback runbook).
+- [ ] Legal/compliance storefront baseline (privacy policy, terms, cookie policy, contacts, status page).
