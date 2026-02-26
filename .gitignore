@@ -1,5 +1,6 @@
 __pycache__/
 *.pyc
+.pytest_cache/
 .env
 .venv/
 node_modules/
@@ -7,3 +8,9 @@ node_modules/
 frontend/.next/
 frontend/node_modules/
 frontend/tsconfig.tsbuildinfo
+tmp_*.html
+tmp_*.txt
+mediapark_chunk_*.js
+docs/reports/*.log
+docs/reports/*.jsonl
+docs/reports/*canonical_report*.json
