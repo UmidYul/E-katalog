@@ -2,6 +2,8 @@ import { apiClient } from "@/lib/api/client";
 import type {
   BrandListItem,
   CompareMatrixResponse,
+  CompareShareCreateResponse,
+  CompareShareResolveResponse,
   FilterBucket,
   Paginated,
   PriceHistoryPoint,
@@ -102,6 +104,17 @@ export const catalogApi = {
     const { data } = await apiClient.post<CompareMatrixResponse>("/compare", {
       product_ids: productIds
     });
+    return data;
+  },
+  async createCompareShare(productIds: string[], ttlDays: number = 30): Promise<CompareShareCreateResponse> {
+    const { data } = await apiClient.post<CompareShareCreateResponse>("/compare/share", {
+      product_ids: productIds,
+      ttl_days: ttlDays
+    });
+    return data;
+  },
+  async resolveCompareShare(token: string): Promise<CompareShareResolveResponse> {
+    const { data } = await apiClient.get<CompareShareResolveResponse>(`/compare/share/${token}`);
     return data;
   }
 };
@@ -268,6 +281,46 @@ export const productFeedbackApi = {
     payload: { author?: string; text: string; is_official?: boolean }
   ): Promise<ProductAnswer> => {
     const { data } = await apiClient.post<ProductAnswer>(`/products/questions/${questionId}/answers`, payload);
+    return data;
+  },
+  voteReview: async (reviewId: string, payload: { helpful: boolean }) => {
+    const { data } = await apiClient.post<{
+      ok: boolean;
+      review_id: string;
+      helpful_votes: number;
+      not_helpful_votes: number;
+      user_vote: "helpful" | "not_helpful";
+    }>(`/products/reviews/${reviewId}/votes`, payload);
+    return data;
+  },
+  reportReview: async (reviewId: string, payload: { reason: string }) => {
+    const { data } = await apiClient.post<{
+      ok: boolean;
+      target_id: string;
+      kind: "review";
+      reports_total: number;
+      created_at: string;
+    }>(`/products/reviews/${reviewId}/report`, payload);
+    return data;
+  },
+  reportQuestion: async (questionId: string, payload: { reason: string }) => {
+    const { data } = await apiClient.post<{
+      ok: boolean;
+      target_id: string;
+      kind: "question";
+      reports_total: number;
+      created_at: string;
+    }>(`/products/questions/${questionId}/report`, payload);
+    return data;
+  },
+  pinAnswer: async (answerId: string, payload: { pinned: boolean }) => {
+    const { data } = await apiClient.post<{
+      ok: boolean;
+      answer_id: string;
+      pinned: boolean;
+      pinned_at?: string | null;
+      pinned_by?: string | null;
+    }>(`/products/answers/${answerId}/pin`, payload);
     return data;
   },
   moderateReview: async (reviewId: string, payload: { status: "published" | "pending" | "rejected" }) => {

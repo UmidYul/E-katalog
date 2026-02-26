@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import hashlib
 import re
 from datetime import UTC, datetime
@@ -16,7 +17,11 @@ from app.core.rate_limit import enforce_rate_limit
 from app.repositories.catalog import CatalogRepository
 from app.schemas.catalog import (
     ProductAnswerCreate,
+    ProductAnswerPinIn,
+    ProductAnswerPinOut,
     ProductAnswerOut,
+    ProductFeedbackReportIn,
+    ProductFeedbackReportOut,
     ProductFeedbackModerationIn,
     ProductFeedbackModerationOut,
     ProductFeedbackQueueItem,
@@ -24,6 +29,8 @@ from app.schemas.catalog import (
     ProductQuestionCreate,
     ProductQuestionOut,
     ProductReviewCreate,
+    ProductReviewVoteIn,
+    ProductReviewVoteOut,
     ProductReviewOut,
 )
 
@@ -34,6 +41,7 @@ REVIEW_AUTHOR_COOLDOWN_SECONDS = 300
 REVIEW_AUTHOR_DAILY_LIMIT = 3
 REVIEW_DUPLICATE_WINDOW_SECONDS = 30 * 24 * 3600
 REVIEW_DAILY_COUNTER_TTL_SECONDS = 2 * 24 * 3600
+FEEDBACK_REPORT_EVENTS_LIMIT = 100
 
 
 def _now_iso() -> str:
@@ -62,6 +70,26 @@ def _questions_index_key(product_id: int) -> str:
 
 def _answers_index_key(question_id: str) -> str:
     return f"feedback:question:{question_id}:answers"
+
+
+def _review_votes_key(review_id: str) -> str:
+    return f"feedback:review:{review_id}:votes"
+
+
+def _review_reports_actors_key(review_id: str) -> str:
+    return f"feedback:review:{review_id}:report:actors"
+
+
+def _review_reports_events_key(review_id: str) -> str:
+    return f"feedback:review:{review_id}:report:events"
+
+
+def _question_reports_actors_key(question_id: str) -> str:
+    return f"feedback:question:{question_id}:report:actors"
+
+
+def _question_reports_events_key(question_id: str) -> str:
+    return f"feedback:question:{question_id}:report:events"
 
 
 def _normalize_whitespace(value: str) -> str:
@@ -267,6 +295,27 @@ def _to_int(value: str | None, *, default: int = 0) -> int:
         return default
 
 
+def _current_user_internal_id(current_user: dict) -> int:
+    candidate = current_user.get("internal_id")
+    if candidate is None:
+        candidate = current_user.get("id")
+    try:
+        return int(candidate)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=401, detail="invalid user session") from exc
+
+
+def _feedback_actor_key(current_user: dict) -> str:
+    return f"user:{_current_user_internal_id(current_user)}"
+
+
+def _normalize_vote(value: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"helpful", "not_helpful"}:
+        return normalized
+    return ""
+
+
 def _iso_to_sort_ts(value: str | None) -> float:
     if not value:
         return 0.0
@@ -289,6 +338,9 @@ def _parse_review(payload: dict[str, str]) -> ProductReviewOut:
         comment=str(payload["comment"]),
         pros=payload.get("pros") or None,
         cons=payload.get("cons") or None,
+        is_verified_purchase=_to_bool(payload.get("is_verified_purchase")),
+        helpful_votes=_to_int(payload.get("helpful_votes"), default=0),
+        not_helpful_votes=_to_int(payload.get("not_helpful_votes"), default=0),
         status=str(payload.get("status", "published")),
         created_at=str(payload["created_at"]),
         updated_at=str(payload.get("updated_at", payload["created_at"])),
@@ -307,6 +359,9 @@ def _parse_answer(payload: dict[str, str]) -> ProductAnswerOut:
         text=str(payload["text"]),
         status=str(payload.get("status", "published")),
         is_official=_to_bool(payload.get("is_official")),
+        is_pinned=_to_bool(payload.get("is_pinned")),
+        pinned_at=payload.get("pinned_at") or None,
+        pinned_by=payload.get("pinned_by") or None,
         created_at=str(payload["created_at"]),
         updated_at=str(payload.get("updated_at", payload["created_at"])),
         moderated_by=payload.get("moderated_by") or None,
@@ -366,7 +421,7 @@ async def _load_answers(
     *,
     limit: int = 100,
 ) -> list[ProductAnswerOut]:
-    answer_ids = await redis.zrange(_answers_index_key(question_id), 0, max(limit - 1, 0))
+    answer_ids = await redis.zrevrange(_answers_index_key(question_id), 0, max(limit - 1, 0))
     answers: list[ProductAnswerOut] = []
     for answer_id in answer_ids:
         payload = await redis.hgetall(_answer_key(answer_id))
@@ -376,7 +431,72 @@ async def _load_answers(
         if status_value != "published":
             continue
         answers.append(_parse_answer(payload))
+    answers.sort(key=lambda item: (0 if item.is_pinned else 1, -_iso_to_sort_ts(item.created_at)))
     return answers
+
+
+async def _register_feedback_report(
+    redis: Redis,
+    *,
+    target_key: str,
+    actors_key: str,
+    events_key: str,
+    actor_key: str,
+    reason: str,
+) -> tuple[int, str]:
+    now = _now_iso()
+    reason_clean = _clean_required(reason, field="reason", min_len=3, max_len=400)
+    actor_added = await redis.sadd(actors_key, actor_key)
+    if actor_added:
+        payload = {"actor": actor_key, "reason": reason_clean, "created_at": now}
+        pipe = redis.pipeline()
+        pipe.lpush(events_key, json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+        pipe.ltrim(events_key, 0, FEEDBACK_REPORT_EVENTS_LIMIT - 1)
+        pipe.hincrby(target_key, "report_count", 1)
+        pipe.hset(target_key, mapping={"last_reported_at": now, "updated_at": now})
+        await pipe.execute()
+    reports_total = _to_int(await redis.hget(target_key, "report_count"), default=0)
+    return reports_total, now
+
+
+async def _apply_review_vote(
+    redis: Redis,
+    *,
+    review_id: str,
+    actor_key: str,
+    helpful: bool,
+) -> tuple[int, int, str]:
+    review_key = _review_key(review_id)
+    votes_key = _review_votes_key(review_id)
+    next_vote = "helpful" if helpful else "not_helpful"
+    prev_vote = _normalize_vote(await redis.hget(votes_key, actor_key))
+    helpful_votes = _to_int(await redis.hget(review_key, "helpful_votes"), default=0)
+    not_helpful_votes = _to_int(await redis.hget(review_key, "not_helpful_votes"), default=0)
+
+    if prev_vote == next_vote:
+        return helpful_votes, not_helpful_votes, next_vote
+
+    if prev_vote == "helpful":
+        helpful_votes = max(0, helpful_votes - 1)
+    elif prev_vote == "not_helpful":
+        not_helpful_votes = max(0, not_helpful_votes - 1)
+
+    if next_vote == "helpful":
+        helpful_votes += 1
+    else:
+        not_helpful_votes += 1
+
+    now = _now_iso()
+    await redis.hset(
+        review_key,
+        mapping={
+            "helpful_votes": str(helpful_votes),
+            "not_helpful_votes": str(not_helpful_votes),
+            "updated_at": now,
+        },
+    )
+    await redis.hset(votes_key, mapping={actor_key: next_vote})
+    return helpful_votes, not_helpful_votes, next_vote
 
 
 @router.get("/moderation/queue", response_model=ProductFeedbackQueueOut)
@@ -432,13 +552,14 @@ async def list_product_reviews(
     request: Request,
     product_id: str = Path(..., pattern=UUID_REF_PATTERN),
     limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db_session),
 ):
     redis = get_redis()
     await enforce_rate_limit(request, redis, bucket="product-feedback-read", limit=180)
     _, product_legacy_id = await _ensure_product_exists(db, product_id)
 
-    review_ids = await redis.zrevrange(_reviews_index_key(product_legacy_id), 0, limit - 1)
+    review_ids = await redis.zrevrange(_reviews_index_key(product_legacy_id), offset, offset + limit - 1)
     reviews: list[ProductReviewOut] = []
     for review_id in review_ids:
         payload = await redis.hgetall(_review_key(review_id))
@@ -485,6 +606,10 @@ async def create_product_review(
         "comment": comment,
         "pros": pros,
         "cons": cons,
+        "is_verified_purchase": "false",
+        "helpful_votes": "0",
+        "not_helpful_votes": "0",
+        "report_count": "0",
         "status": "pending",
         "created_at": now,
         "updated_at": now,
@@ -499,13 +624,14 @@ async def list_product_questions(
     request: Request,
     product_id: str = Path(..., pattern=UUID_REF_PATTERN),
     limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db_session),
 ):
     redis = get_redis()
     await enforce_rate_limit(request, redis, bucket="product-feedback-read", limit=180)
     _, product_legacy_id = await _ensure_product_exists(db, product_id)
 
-    question_ids = await redis.zrevrange(_questions_index_key(product_legacy_id), 0, limit - 1)
+    question_ids = await redis.zrevrange(_questions_index_key(product_legacy_id), offset, offset + limit - 1)
     questions: list[ProductQuestionOut] = []
     for question_id in question_ids:
         payload = await redis.hgetall(_question_key(question_id))
@@ -538,6 +664,7 @@ async def create_product_question(
         "product_legacy_id": str(product_legacy_id),
         "author": _clean_required(payload.author, field="author", min_len=2, max_len=120),
         "question": _clean_required(payload.question, field="question", min_len=8, max_len=2000),
+        "report_count": "0",
         "status": "pending",
         "created_at": now,
         "updated_at": now,
@@ -579,6 +706,7 @@ async def create_question_answer(
         "text": _clean_required(payload.text, field="text", min_len=2, max_len=2000),
         "status": "published",
         "is_official": "true" if bool(payload.is_official) else "false",
+        "is_pinned": "false",
         "created_at": now,
         "updated_at": now,
     }
@@ -586,6 +714,142 @@ async def create_question_answer(
     await redis.zadd(_answers_index_key(question_id), {answer_id: time()})
     await redis.hset(_question_key(question_id), mapping={"updated_at": now})
     return _parse_answer(mapping)
+
+
+@router.post("/reviews/{review_id}/votes", response_model=ProductReviewVoteOut)
+async def vote_review(
+    review_id: str,
+    payload: ProductReviewVoteIn,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    redis = get_redis()
+    await enforce_rate_limit(request, redis, bucket="product-feedback-vote", limit=120)
+
+    review_key = _review_key(review_id)
+    review_payload = await redis.hgetall(review_key)
+    if not review_payload:
+        raise HTTPException(status_code=404, detail="review not found")
+
+    helpful_votes, not_helpful_votes, user_vote = await _apply_review_vote(
+        redis,
+        review_id=review_id,
+        actor_key=_feedback_actor_key(current_user),
+        helpful=payload.helpful,
+    )
+    return ProductReviewVoteOut(
+        ok=True,
+        review_id=review_id,
+        helpful_votes=helpful_votes,
+        not_helpful_votes=not_helpful_votes,
+        user_vote=user_vote,
+    )
+
+
+@router.post("/reviews/{review_id}/report", response_model=ProductFeedbackReportOut)
+async def report_review(
+    review_id: str,
+    payload: ProductFeedbackReportIn,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    redis = get_redis()
+    await enforce_rate_limit(request, redis, bucket="product-feedback-report", limit=60)
+
+    review_key = _review_key(review_id)
+    review_payload = await redis.hgetall(review_key)
+    if not review_payload:
+        raise HTTPException(status_code=404, detail="review not found")
+
+    reports_total, created_at = await _register_feedback_report(
+        redis,
+        target_key=review_key,
+        actors_key=_review_reports_actors_key(review_id),
+        events_key=_review_reports_events_key(review_id),
+        actor_key=_feedback_actor_key(current_user),
+        reason=payload.reason,
+    )
+    return ProductFeedbackReportOut(
+        ok=True,
+        target_id=review_id,
+        kind="review",
+        reports_total=reports_total,
+        created_at=created_at,
+    )
+
+
+@router.post("/questions/{question_id}/report", response_model=ProductFeedbackReportOut)
+async def report_question(
+    question_id: str,
+    payload: ProductFeedbackReportIn,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    redis = get_redis()
+    await enforce_rate_limit(request, redis, bucket="product-feedback-report", limit=60)
+
+    question_key = _question_key(question_id)
+    question_payload = await redis.hgetall(question_key)
+    if not question_payload:
+        raise HTTPException(status_code=404, detail="question not found")
+
+    reports_total, created_at = await _register_feedback_report(
+        redis,
+        target_key=question_key,
+        actors_key=_question_reports_actors_key(question_id),
+        events_key=_question_reports_events_key(question_id),
+        actor_key=_feedback_actor_key(current_user),
+        reason=payload.reason,
+    )
+    return ProductFeedbackReportOut(
+        ok=True,
+        target_id=question_id,
+        kind="question",
+        reports_total=reports_total,
+        created_at=created_at,
+    )
+
+
+@router.post("/answers/{answer_id}/pin", response_model=ProductAnswerPinOut)
+async def pin_answer(
+    answer_id: str,
+    payload: ProductAnswerPinIn,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    redis = get_redis()
+    await enforce_rate_limit(request, redis, bucket="product-feedback-moderation", limit=60)
+    if not _is_staff(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="staff privileges required")
+
+    answer_key = _answer_key(answer_id)
+    answer_payload = await redis.hgetall(answer_key)
+    if not answer_payload:
+        raise HTTPException(status_code=404, detail="answer not found")
+
+    now = _now_iso()
+    pinned = bool(payload.pinned)
+    updates = {
+        "is_pinned": "true" if pinned else "false",
+        "pinned_at": now if pinned else "",
+        "pinned_by": str(current_user.get("email") or current_user.get("full_name") or "staff") if pinned else "",
+        "updated_at": now,
+    }
+    if pinned:
+        updates["is_official"] = "true"
+    await redis.hset(answer_key, mapping=updates)
+
+    question_id = str(answer_payload.get("question_id", "")).strip()
+    if question_id:
+        await redis.hset(_question_key(question_id), mapping={"updated_at": now})
+
+    return ProductAnswerPinOut(
+        ok=True,
+        answer_id=answer_id,
+        pinned=pinned,
+        pinned_at=updates["pinned_at"] or None,
+        pinned_by=updates["pinned_by"] or None,
+    )
 
 
 @router.post("/reviews/{review_id}/moderation", response_model=ProductFeedbackModerationOut)

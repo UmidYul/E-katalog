@@ -84,6 +84,20 @@ export type CompareMatrixResponse = {
   request_id: string;
 };
 
+export type CompareShareCreateResponse = {
+  token: string;
+  product_ids: string[];
+  share_path: string;
+  expires_at: string;
+  request_id: string;
+};
+
+export type CompareShareResolveResponse = {
+  product_ids: string[];
+  expires_at: string;
+  request_id: string;
+};
+
 export type ProductReview = {
   id: string;
   product_id: string;
@@ -92,6 +106,9 @@ export type ProductReview = {
   comment: string;
   pros?: string | null;
   cons?: string | null;
+  is_verified_purchase?: boolean;
+  helpful_votes?: number;
+  not_helpful_votes?: number;
   status: "published" | "pending" | "rejected" | string;
   created_at: string;
   updated_at: string;
@@ -107,6 +124,9 @@ export type ProductAnswer = {
   text: string;
   status: "published" | "pending" | "rejected" | string;
   is_official?: boolean;
+  is_pinned?: boolean;
+  pinned_at?: string | null;
+  pinned_by?: string | null;
   created_at: string;
   updated_at: string;
   moderated_by?: string | null;

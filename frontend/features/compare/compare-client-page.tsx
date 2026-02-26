@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { EmptyState } from "@/components/common/empty-state";
@@ -9,7 +10,8 @@ import { ErrorState } from "@/components/common/error-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useCompareProducts } from "@/features/compare/use-compare";
+import { useCompareProducts, useCreateCompareShare, useResolveCompareShare } from "@/features/compare/use-compare";
+import { catalogApi } from "@/lib/api/openapi-client";
 import { formatColorValue } from "@/lib/utils/color-name";
 import { cn } from "@/lib/utils/cn";
 import { formatSpecLabel, normalizeSpecsMap } from "@/lib/utils/specs";
@@ -159,16 +161,28 @@ const isImageUrl = (value: unknown): value is string => {
 };
 
 export function CompareClientPage() {
+  const searchParams = useSearchParams();
   const compareItems = useCompareStore((s) => s.items);
   const history = useCompareStore((s) => s.history);
   const remove = useCompareStore((s) => s.remove);
+  const replace = useCompareStore((s) => s.replace);
   const clear = useCompareStore((s) => s.clear);
   const saveSnapshot = useCompareStore((s) => s.saveSnapshot);
   const restoreSnapshot = useCompareStore((s) => s.restoreSnapshot);
   const clearHistory = useCompareStore((s) => s.clearHistory);
   const [onlyDiff, setOnlyDiff] = useState(false);
+  const [shareStatus, setShareStatus] = useState<string | null>(null);
+  const [appliedShareToken, setAppliedShareToken] = useState<string | null>(null);
   const productIds = useMemo(() => compareItems.map((item) => item.id), [compareItems]);
+  const shareToken = useMemo(() => {
+    const raw = searchParams.get("share");
+    if (!raw) return null;
+    const normalized = raw.trim();
+    return normalized || null;
+  }, [searchParams]);
   const compareQuery = useCompareProducts(productIds);
+  const createShare = useCreateCompareShare();
+  const sharedCompareQuery = useResolveCompareShare(shareToken);
   const productMetaById = useMemo(() => new Map(compareItems.map((item) => [item.id, item])), [compareItems]);
   const matrixMetaById = useMemo(() => new Map((compareQuery.data?.items ?? []).map((item) => [item.id, item])), [compareQuery.data?.items]);
   const categoryScope = useMemo(() => {
@@ -183,6 +197,54 @@ export function CompareClientPage() {
     if (!compareQuery.isSuccess || compareItems.length < 2) return;
     saveSnapshot(compareItems);
   }, [compareItems, compareQuery.isSuccess, saveSnapshot]);
+
+  useEffect(() => {
+    setAppliedShareToken(null);
+  }, [shareToken]);
+
+  useEffect(() => {
+    if (!shareToken || !sharedCompareQuery.data || appliedShareToken === shareToken) return;
+    let cancelled = false;
+    const hydrateSharedCompare = async () => {
+      const incomingIds = sharedCompareQuery.data.product_ids ?? [];
+      const nextItems: Array<{ id: string; title: string; slug: string; category?: string }> = [];
+      for (const id of incomingIds) {
+        const local = compareItems.find((item) => item.id === id);
+        if (local) {
+          nextItems.push({ id: local.id, title: local.title, slug: local.slug, category: local.category });
+          continue;
+        }
+        try {
+          const product = await catalogApi.getProduct(id);
+          nextItems.push({
+            id,
+            title: product.title || id,
+            slug: `${id}-${slugify(product.title || id)}`,
+            category: typeof product.category === "string" ? product.category : undefined
+          });
+        } catch {
+          continue;
+        }
+      }
+      if (cancelled) return;
+      if (nextItems.length < 2) {
+        setShareStatus("Не удалось восстановить сравнение по ссылке.");
+        return;
+      }
+      replace(nextItems);
+      setAppliedShareToken(shareToken);
+      setShareStatus("Сравнение загружено по общей ссылке.");
+    };
+    void hydrateSharedCompare();
+    return () => {
+      cancelled = true;
+    };
+  }, [appliedShareToken, compareItems, replace, shareToken, sharedCompareQuery.data]);
+
+  useEffect(() => {
+    if (!shareToken || !sharedCompareQuery.isError) return;
+    setShareStatus("Ссылка сравнения недействительна или устарела.");
+  }, [shareToken, sharedCompareQuery.isError]);
 
   const rows = useMemo(() => {
     const items = compareQuery.data?.items ?? [];
@@ -207,9 +269,33 @@ export function CompareClientPage() {
     return allRows.filter((row) => hasDiffInRow(row.values));
   }, [compareQuery.data?.items, onlyDiff]);
 
+  const onCreateShareLink = async () => {
+    if (productIds.length < 2) {
+      setShareStatus("Для общей ссылки выберите минимум 2 товара.");
+      return;
+    }
+    try {
+      const response = await createShare.mutateAsync({ productIds, ttlDays: 30 });
+      const shareUrl = typeof window !== "undefined" ? `${window.location.origin}${response.share_path}` : response.share_path;
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareUrl);
+        setShareStatus("Ссылка сравнения скопирована в буфер.");
+      } else {
+        setShareStatus(`Ссылка сравнения: ${shareUrl}`);
+      }
+    } catch {
+      setShareStatus("Не удалось создать ссылку сравнения.");
+    }
+  };
+
   if (compareItems.length === 0) {
     return (
       <div className="container space-y-3 py-6">
+        {shareToken ? (
+          <p className="text-sm text-muted-foreground">
+            {sharedCompareQuery.isPending ? "Загружаем сравнение по ссылке..." : shareStatus ?? "Ожидаем данные сравнения..."}
+          </p>
+        ) : null}
         <EmptyState title="Сравнение пока пустое" message="Добавьте товары из каталога или карточки товара, чтобы начать сравнение." />
         <Link href="/catalog">
           <Button>Перейти в каталог</Button>
@@ -314,10 +400,14 @@ export function CompareClientPage() {
             </span>
             <span>Подсветка лучшего значения рассчитывается по эвристике.</span>
           </div>
+          {shareStatus ? <p className="text-xs text-primary">{shareStatus}</p> : null}
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant={onlyDiff ? "default" : "outline"} size="sm" onClick={() => setOnlyDiff((prev) => !prev)}>
             {onlyDiff ? "Показаны отличия" : "Показать только отличия"}
+          </Button>
+          <Button variant="outline" size="sm" onClick={onCreateShareLink} disabled={createShare.isPending || productIds.length < 2}>
+            {createShare.isPending ? "Готовим ссылку..." : "Поделиться"}
           </Button>
           <Button variant="ghost" size="sm" onClick={clear}>
             Очистить всё

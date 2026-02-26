@@ -27,6 +27,7 @@ type CompareState = {
   items: CompareItem[];
   history: CompareHistoryEntry[];
   add: (item: Omit<CompareItem, "addedAt">) => CompareToggleResult;
+  replace: (items: Omit<CompareItem, "addedAt">[]) => void;
   remove: (id: string) => void;
   toggle: (item: Omit<CompareItem, "addedAt">) => CompareToggleResult;
   clear: () => void;
@@ -151,6 +152,28 @@ const appendItem = (current: CompareItem[], next: Omit<CompareItem, "addedAt">) 
   return { type: "added" as const, items: nextItems };
 };
 
+const sanitizeIncomingItems = (items: Omit<CompareItem, "addedAt">[]) => {
+  const normalized: CompareItem[] = [];
+  let referenceCategory: string | undefined;
+  for (const raw of items) {
+    const id = normalizeUuid(raw.id);
+    if (!id) continue;
+    if (normalized.some((item) => item.id === id)) continue;
+    const category = normalizeCategory(raw.category);
+    if (referenceCategory && category && category !== referenceCategory) continue;
+    if (!referenceCategory && category) referenceCategory = category;
+    normalized.push({
+      id,
+      title: normalizeText(raw.title) ?? id,
+      slug: normalizeText(raw.slug) ?? id,
+      category,
+      addedAt: new Date().toISOString()
+    });
+    if (normalized.length >= COMPARE_LIMIT) break;
+  }
+  return normalized;
+};
+
 export const useCompareStore = create<CompareState>()(
   persist(
     (set, get) => ({
@@ -163,6 +186,9 @@ export const useCompareStore = create<CompareState>()(
           set({ items: result.items });
         }
         return result.type;
+      },
+      replace: (items) => {
+        set({ items: sanitizeIncomingItems(items) });
       },
       remove: (id) => {
         const normalizedId = normalizeText(id);

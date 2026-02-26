@@ -57,3 +57,47 @@ export const useCreateQuestionAnswer = (productId: string) => {
     }
   });
 };
+
+export const useVoteProductReview = (productId: string) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: { reviewId: string; helpful: boolean }) =>
+      productFeedbackApi.voteReview(payload.reviewId, { helpful: payload.helpful }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: productFeedbackKeys.reviews(productId) });
+    }
+  });
+};
+
+export const useReportProductReview = (productId: string) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: { reviewId: string; reason: string }) =>
+      productFeedbackApi.reportReview(payload.reviewId, { reason: payload.reason }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: productFeedbackKeys.reviews(productId) });
+    }
+  });
+};
+
+export const useReportProductQuestion = (productId: string) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: { questionId: string; reason: string }) =>
+      productFeedbackApi.reportQuestion(payload.questionId, { reason: payload.reason }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: productFeedbackKeys.questions(productId) });
+    }
+  });
+};
+
+export const usePinProductAnswer = (productId: string) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: { answerId: string; pinned: boolean }) =>
+      productFeedbackApi.pinAnswer(payload.answerId, { pinned: payload.pinned }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: productFeedbackKeys.questions(productId) });
+    }
+  });
+};

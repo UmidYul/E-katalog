@@ -27,7 +27,7 @@ This file aggregates items that are still not fully implemented based on explici
 
 ## 2) EK.UA MVP Features (`docs/EK_UA_MVP_FEATURES.md`)
 
-- [ ] Advanced feedback workflow (votes, report-abuse, pinned answers).  
+- [~] Advanced feedback workflow (votes, report-abuse, pinned answers): API + UI baseline implemented on 2026-02-26, needs extra polishing/tests.  
 
 Phase 2 / post-MVP backlog from this file:
 - [ ] Full comparison matrix improvements.
@@ -41,22 +41,22 @@ Phase 2 / post-MVP backlog from this file:
 ## 3) Product Feedback Future (`docs/PRODUCT_FEEDBACK_FUTURE_FEATURES.md`)
 
 Planned API:
-- [ ] `POST /api/v1/products/reviews/{review_id}/votes`
-- [ ] `POST /api/v1/products/reviews/{review_id}/report`
-- [ ] `POST /api/v1/products/questions/{question_id}/report`
-- [ ] `POST /api/v1/products/answers/{answer_id}/pin`
+- [x] `POST /api/v1/products/reviews/{review_id}/votes`
+- [x] `POST /api/v1/products/reviews/{review_id}/report`
+- [x] `POST /api/v1/products/questions/{question_id}/report`
+- [x] `POST /api/v1/products/answers/{answer_id}/pin`
 
 Planned model extensions:
-- [ ] `is_verified_purchase` in reviews.
-- [ ] `helpful_votes` and `not_helpful_votes` counters.
+- [~] `is_verified_purchase` in reviews (field exposed; no purchase-proof pipeline yet).
+- [x] `helpful_votes` and `not_helpful_votes` counters.
 - [ ] Extended moderation/status fields for feedback entities.
 
 Planned client tasks:
-- [ ] Helpful-vote UI for reviews.
-- [ ] Report actions for reviews/questions.
-- [ ] Pin/unpin UI for official answers.
+- [x] Helpful-vote UI for reviews.
+- [x] Report actions for reviews/questions.
+- [x] Pin/unpin UI for official answers.
 - [ ] Optimistic updates for votes/reports.
-- [ ] Pagination for high-volume products.
+- [~] Pagination for high-volume products (backend `limit/offset` added; frontend pagers pending).
 
 ## 4) Business + Tech Scale Roadmap (`docs/BUSINESS_TECH_SCALE_ROADMAP_2026Q2.md`)
 
@@ -64,7 +64,7 @@ High-priority initiatives still listed as roadmap work:
 - [ ] Data quality guardrails + auto-heal (A).
 - [ ] Price alerts MVP (Telegram/Email) (B).
 - [ ] Offer trust score and trust-aware ranking (C).
-- [ ] Compare share links + entry points (D).
+- [~] Compare share links + entry points (D): backend share token endpoints + frontend share button implemented on 2026-02-26, needs final UX polish/telemetry.
 - [ ] Config-driven normalization rules (F).
 - [ ] SLO/observability hardening (G).
 
@@ -72,7 +72,7 @@ Immediate backlog from roadmap:
 - [ ] Quality report task + DB table.
 - [ ] Admin endpoint + dashboard panel for quality report.
 - [ ] Telegram-first price alert schema + API.
-- [ ] Compare share link endpoint + frontend button.
+- [x] Compare share link endpoint + frontend button.
 - [ ] Unit tests for all above.
 
 ## 5) Canonical Matching (`docs/CANONICAL_MATCHING.md`)
@@ -110,4 +110,3 @@ These docs are operational runbooks/checklists and do not define product-feature
 - `docs/MVP_DEV_ROLLOUT_CHECKLIST.md`
 - `docs/WINDOWS_SERVER_GUIDE.md`
 - `docs/theme-palette-preview.html`
-

@@ -46,6 +46,12 @@ def test_openapi_contract_contains_core_auth_endpoints() -> None:
         "/api/v1/auth/me": {"get"},
         "/api/v1/auth/password-reset/request": {"post"},
         "/api/v1/auth/password-reset/confirm": {"post"},
+        "/api/v1/compare/share": {"post"},
+        "/api/v1/compare/share/{token}": {"get"},
+        "/api/v1/products/reviews/{review_id}/votes": {"post"},
+        "/api/v1/products/reviews/{review_id}/report": {"post"},
+        "/api/v1/products/questions/{question_id}/report": {"post"},
+        "/api/v1/products/answers/{answer_id}/pin": {"post"},
     }
     for path, methods in expected_methods.items():
         assert path in paths

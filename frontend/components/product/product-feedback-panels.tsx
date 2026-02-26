@@ -14,8 +14,12 @@ import {
   useCreateProductQuestion,
   useCreateProductReview,
   useCreateQuestionAnswer,
+  usePinProductAnswer,
   useProductQuestions,
-  useProductReviews
+  useProductReviews,
+  useReportProductQuestion,
+  useReportProductReview,
+  useVoteProductReview
 } from "@/features/product/use-product-feedback";
 import { authStore } from "@/store/auth.store";
 
@@ -47,6 +51,8 @@ export function ProductReviewsPanel({ productId }: { productId: string }) {
   const authUserStore = authStore((s) => s.user);
   const reviewsQuery = useProductReviews(productId);
   const createReview = useCreateProductReview(productId);
+  const voteReview = useVoteProductReview(productId);
+  const reportReview = useReportProductReview(productId);
   const reviews = useMemo(() => reviewsQuery.data ?? [], [reviewsQuery.data]);
   const [mounted, setMounted] = useState(false);
 
@@ -102,6 +108,26 @@ export function ProductReviewsPanel({ productId }: { productId: string }) {
       setStatus("Отзыв отправлен на модерацию.");
     } catch (error) {
       setStatus(normalizeApiError(error, "Не удалось отправить отзыв."));
+    }
+  };
+
+  const onVoteReview = async (reviewId: string, helpful: boolean) => {
+    try {
+      await voteReview.mutateAsync({ reviewId, helpful });
+      setStatus(helpful ? "Голос за полезность учтён." : "Отметка «не полезно» учтена.");
+    } catch (error) {
+      setStatus(normalizeApiError(error, "Не удалось отправить голос."));
+    }
+  };
+
+  const onReportReview = async (reviewId: string) => {
+    const reason = window.prompt("Причина жалобы на отзыв (минимум 3 символа):", "Нарушение правил") ?? "";
+    if (!reason.trim()) return;
+    try {
+      await reportReview.mutateAsync({ reviewId, reason });
+      setStatus("Жалоба на отзыв отправлена.");
+    } catch (error) {
+      setStatus(normalizeApiError(error, "Не удалось отправить жалобу."));
     }
   };
 
@@ -177,11 +203,23 @@ export function ProductReviewsPanel({ productId }: { productId: string }) {
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-semibold">{review.author}</p>
                     <div className="flex items-center gap-1">{renderStars(review.rating)}</div>
+                    {review.is_verified_purchase ? <Badge className="border-primary/40 bg-primary/15 text-primary">Покупка подтверждена</Badge> : null}
                     <Badge className={statusBadgeClass(review.status)}>{review.status}</Badge>
                   </div>
                   <p className="text-xs text-muted-foreground">{formatDateTime(review.created_at)}</p>
                 </div>
                 <p className="text-sm">{review.comment}</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={() => onVoteReview(review.id, true)} disabled={voteReview.isPending}>
+                    Полезно ({review.helpful_votes ?? 0})
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => onVoteReview(review.id, false)} disabled={voteReview.isPending}>
+                    Не полезно ({review.not_helpful_votes ?? 0})
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => onReportReview(review.id)} disabled={reportReview.isPending}>
+                    Пожаловаться
+                  </Button>
+                </div>
                 {review.pros || review.cons ? (
                   <div className="grid gap-2 md:grid-cols-2">
                     {review.pros ? (
@@ -211,6 +249,8 @@ export function ProductQuestionsPanel({ productId }: { productId: string }) {
   const questionsQuery = useProductQuestions(productId);
   const createQuestion = useCreateProductQuestion(productId);
   const createAnswer = useCreateQuestionAnswer(productId);
+  const reportQuestion = useReportProductQuestion(productId);
+  const pinAnswer = usePinProductAnswer(productId);
   const questions = useMemo(() => questionsQuery.data ?? [], [questionsQuery.data]);
   const [mounted, setMounted] = useState(false);
 
@@ -289,6 +329,30 @@ export function ProductQuestionsPanel({ productId }: { productId: string }) {
     }
   };
 
+  const onReportQuestion = async (questionId: string) => {
+    const reason = window.prompt("Причина жалобы на вопрос (минимум 3 символа):", "Нарушение правил") ?? "";
+    if (!reason.trim()) return;
+    try {
+      await reportQuestion.mutateAsync({ questionId, reason });
+      setStatus("Жалоба на вопрос отправлена.");
+    } catch (error) {
+      setStatus(normalizeApiError(error, "Не удалось отправить жалобу."));
+    }
+  };
+
+  const onTogglePinAnswer = async (answerId: string, pinned: boolean) => {
+    if (!isStaff) {
+      setStatus("Только сотрудники могут закреплять ответы.");
+      return;
+    }
+    try {
+      await pinAnswer.mutateAsync({ answerId, pinned });
+      setStatus(pinned ? "Ответ закреплён." : "Закрепление ответа снято.");
+    } catch (error) {
+      setStatus(normalizeApiError(error, "Не удалось изменить закрепление ответа."));
+    }
+  };
+
   return (
     <div className="space-y-4">
       <Card>
@@ -338,7 +402,12 @@ export function ProductQuestionsPanel({ productId }: { productId: string }) {
                       <p className="text-sm font-semibold">{question.author}</p>
                       <Badge className={statusBadgeClass(question.status)}>{question.status}</Badge>
                     </div>
-                    <p className="text-xs text-muted-foreground">{formatDateTime(question.created_at)}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs text-muted-foreground">{formatDateTime(question.created_at)}</p>
+                      <Button size="sm" variant="ghost" onClick={() => onReportQuestion(question.id)} disabled={reportQuestion.isPending}>
+                        Пожаловаться
+                      </Button>
+                    </div>
                   </div>
                   <p className="text-sm">{question.question}</p>
 
@@ -349,8 +418,19 @@ export function ProductQuestionsPanel({ productId }: { productId: string }) {
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="text-xs font-semibold">{answer.author}</p>
                             {answer.is_official ? <Badge className="h-5 bg-primary text-primary-foreground">Официальный</Badge> : null}
+                            {answer.is_pinned ? <Badge className="h-5 border-warning/40 bg-warning/15 text-warning">Закреплён</Badge> : null}
                             <Badge className={statusBadgeClass(answer.status)}>{answer.status}</Badge>
                             <p className="text-xs text-muted-foreground">{formatDateTime(answer.created_at)}</p>
+                            {isStaff ? (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => onTogglePinAnswer(answer.id, !Boolean(answer.is_pinned))}
+                                disabled={pinAnswer.isPending}
+                              >
+                                {answer.is_pinned ? "Открепить" : "Закрепить"}
+                              </Button>
+                            ) : null}
                           </div>
                           <p className="mt-1 text-sm">{answer.text}</p>
                         </div>

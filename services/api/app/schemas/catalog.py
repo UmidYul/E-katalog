@@ -88,6 +88,25 @@ class CompareRequest(BaseModel):
     product_ids: list[UUIDRef] = Field(min_length=2, max_length=4)
 
 
+class CompareShareCreateRequest(BaseModel):
+    product_ids: list[UUIDRef] = Field(min_length=2, max_length=4)
+    ttl_days: int = Field(default=30, ge=1, le=180)
+
+
+class CompareShareCreateOut(BaseModel):
+    token: str
+    product_ids: list[str]
+    share_path: str
+    expires_at: str
+    request_id: str
+
+
+class CompareShareResolveOut(BaseModel):
+    product_ids: list[str]
+    expires_at: str
+    request_id: str
+
+
 class ProductReviewCreate(BaseModel):
     author: str = Field(min_length=2, max_length=120)
     rating: int = Field(ge=1, le=5)
@@ -104,6 +123,9 @@ class ProductReviewOut(BaseModel):
     comment: str
     pros: str | None = None
     cons: str | None = None
+    is_verified_purchase: bool = False
+    helpful_votes: int = 0
+    not_helpful_votes: int = 0
     status: str
     created_at: str
     updated_at: str
@@ -130,6 +152,9 @@ class ProductAnswerOut(BaseModel):
     text: str
     status: str
     is_official: bool = False
+    is_pinned: bool = False
+    pinned_at: str | None = None
+    pinned_by: str | None = None
     created_at: str
     updated_at: str
     moderated_by: str | None = None
@@ -156,6 +181,42 @@ class ProductFeedbackModerationIn(BaseModel):
 class ProductFeedbackModerationOut(BaseModel):
     ok: bool
     status: str
+
+
+class ProductReviewVoteIn(BaseModel):
+    helpful: bool
+
+
+class ProductReviewVoteOut(BaseModel):
+    ok: bool
+    review_id: str
+    helpful_votes: int
+    not_helpful_votes: int
+    user_vote: str
+
+
+class ProductFeedbackReportIn(BaseModel):
+    reason: str = Field(min_length=3, max_length=400)
+
+
+class ProductFeedbackReportOut(BaseModel):
+    ok: bool
+    target_id: str
+    kind: str
+    reports_total: int
+    created_at: str
+
+
+class ProductAnswerPinIn(BaseModel):
+    pinned: bool = True
+
+
+class ProductAnswerPinOut(BaseModel):
+    ok: bool
+    answer_id: str
+    pinned: bool
+    pinned_at: str | None = None
+    pinned_by: str | None = None
 
 
 class ProductFeedbackQueueItem(BaseModel):
