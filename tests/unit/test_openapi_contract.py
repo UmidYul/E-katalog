@@ -21,7 +21,11 @@ def _run_api_python(script: str) -> str:
         capture_output=True,
         text=True,
     )
-    return completed.stdout.strip()
+    output = completed.stdout.strip()
+    if not output:
+        return ""
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    return lines[-1] if lines else ""
 
 
 def _load_openapi_schema() -> dict:
