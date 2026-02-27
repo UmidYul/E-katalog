@@ -5,8 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db_session, get_redis
 from app.api.idempotency import execute_idempotent_json
-from app.api.v1.routers.auth import get_current_user
-from app.api.v1.routers.b2b_common import ensure_b2b_enabled, resolve_org_context
+from app.api.v1.routers.b2b_common import ensure_b2b_enabled, get_current_b2b_user, resolve_org_context
 from app.core.config import settings
 from app.core.rate_limit import enforce_rate_limit
 from app.repositories.b2b import B2BRepository
@@ -29,7 +28,7 @@ router = APIRouter(prefix="/b2b", tags=["b2b-orgs"])
 @router.get("/me", response_model=B2BMeOut)
 async def b2b_me(
     request: Request,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_b2b_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     ensure_b2b_enabled()
@@ -53,7 +52,7 @@ async def b2b_me(
 async def create_b2b_org(
     request: Request,
     payload: B2BOrganizationCreateIn,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_b2b_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     ensure_b2b_enabled()
@@ -90,7 +89,7 @@ async def create_org_invite(
     request: Request,
     payload: B2BOrgInviteIn,
     org_id: str = Path(..., pattern=UUID_REF_PATTERN),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_b2b_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     ensure_b2b_enabled()
@@ -127,7 +126,7 @@ async def patch_org_member(
     payload: B2BOrgMemberPatchIn,
     org_id: str = Path(..., pattern=UUID_REF_PATTERN),
     member_id: str = Path(..., pattern=UUID_REF_PATTERN),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_b2b_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     ensure_b2b_enabled()

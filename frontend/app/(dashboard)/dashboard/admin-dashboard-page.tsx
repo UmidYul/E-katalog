@@ -1,15 +1,24 @@
 "use client";
 
 import Link from "next/link";
-import { Bell, DatabaseZap, Package, ShoppingCart, Users } from "lucide-react";
 import { useMemo, useState } from "react";
+import {
+  AlertTriangle,
+  Bell,
+  DatabaseZap,
+  Package,
+  Play,
+  ShieldAlert,
+  ShoppingCart,
+  Users,
+} from "lucide-react";
 
 import { AreaTimeseriesChart } from "@/components/charts/area-timeseries-chart";
 import { DonutChartWidget } from "@/components/charts/donut-chart";
 import { MultiLineChartWidget } from "@/components/charts/line-multi-chart";
 import { StackedBarChartWidget } from "@/components/charts/stacked-bar-chart";
 import { StatCard } from "@/components/common/stat-card";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RadioGroup } from "@/components/ui/radio-group";
 import {
@@ -18,6 +27,12 @@ import {
   useAdminOverviewAnalytics,
   useResolveAdminAlert,
 } from "@/features/analytics/use-admin-analytics";
+import {
+  useAdminB2BDisputes,
+  useAdminB2BOnboardingApplications,
+  useAdminB2BRiskFlags,
+  useRunAdminB2BJob,
+} from "@/features/b2b/use-admin-b2b";
 import { useAdminProductsWithoutValidOffers, useAdminTaskStatus, useRunAdminTask } from "@/features/products/use-admin-products";
 import { formatPrice } from "@/lib/utils/format";
 
@@ -27,28 +42,30 @@ const formatPercent = (value: number) => `${(value * 100).toFixed(1)}%`;
 
 export function AdminDashboardPage() {
   const [period, setPeriod] = useState<"7d" | "30d" | "90d" | "365d">("30d");
+
   const overview = useAdminOverviewAnalytics(period);
   const alerts = useAdminAlertEvents({ status: "open", limit: 6, offset: 0, refresh: true });
+  const productsWithoutOffers = useAdminProductsWithoutValidOffers({ limit: 6, offset: 0, active_only: true });
+
+  const onboardingQueue = useAdminB2BOnboardingApplications({ status: "submitted", limit: 5, offset: 0 });
+  const disputesQueue = useAdminB2BDisputes({ status: "open", limit: 5, offset: 0 });
+  const criticalRiskFlags = useAdminB2BRiskFlags({ level: "critical", limit: 5, offset: 0 });
+  const runB2BJob = useRunAdminB2BJob();
+
   const runTask = useRunAdminTask();
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [activeTaskType, setActiveTaskType] = useState<PipelineTask | null>(null);
   const taskStatus = useAdminTaskStatus(activeTaskId);
+
   const ackAlert = useAcknowledgeAdminAlert();
   const resolveAlert = useResolveAdminAlert();
-  const productsWithoutOffers = useAdminProductsWithoutValidOffers({ limit: 6, offset: 0, active_only: true });
 
   const data = overview.data;
   const progress = taskStatus.data?.progress ?? 0;
   const state = taskStatus.data?.state ?? "IDLE";
   const stateLabel = useMemo(() => {
-    if (activeTaskType === "scrape") return `Scrape: ${state}`;
-    if (activeTaskType === "embedding") return `Embedding: ${state}`;
-    if (activeTaskType === "dedupe") return `Dedupe: ${state}`;
-    if (activeTaskType === "reindex") return `Reindex: ${state}`;
-    if (activeTaskType === "quality") return `Quality: ${state}`;
-    if (activeTaskType === "catalog") return `Catalog rebuild: ${state}`;
-    if (activeTaskType === "quality_alert_test") return `Quality alert test: ${state}`;
-    return "Нет активной задачи";
+    if (!activeTaskType) return "No active task";
+    return `${activeTaskType}: ${state}`;
   }, [activeTaskType, state]);
 
   const triggerTask = (task: PipelineTask) => {
@@ -66,6 +83,10 @@ export function AdminDashboardPage() {
     color: ["#0ea5e9", "#22c55e", "#f59e0b", "#ef4444", "#94a3b8"][index % 5] ?? "#94a3b8",
   }));
 
+  const b2bOnboardingCount = onboardingQueue.data?.total ?? 0;
+  const b2bDisputesCount = disputesQueue.data?.total ?? 0;
+  const b2bRiskCount = criticalRiskFlags.data?.total ?? 0;
+
   return (
     <div className="space-y-4">
       <RadioGroup
@@ -80,39 +101,39 @@ export function AdminDashboardPage() {
       />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-        <StatCard title="Выручка" value={formatPrice(data?.kpis.revenue ?? 0)} icon={DatabaseZap} />
-        <StatCard title="Заказы" value={String(data?.kpis.orders ?? 0)} icon={ShoppingCart} />
-        <StatCard title="Средний чек" value={formatPrice(data?.kpis.aov ?? 0)} icon={Bell} />
-        <StatCard title="Активные товары" value={String(data?.kpis.active_products ?? 0)} icon={Package} />
-        <StatCard title="Риск качества" value={formatPercent(data?.kpis.quality_risk_ratio ?? 0)} icon={Package} />
-        <StatCard title="Pending модерация" value={String(data?.kpis.moderation_pending ?? 0)} icon={Users} />
+        <StatCard title="Revenue" value={formatPrice(data?.kpis.revenue ?? 0)} icon={DatabaseZap} />
+        <StatCard title="Orders" value={String(data?.kpis.orders ?? 0)} icon={ShoppingCart} />
+        <StatCard title="AOV" value={formatPrice(data?.kpis.aov ?? 0)} icon={Bell} />
+        <StatCard title="Active products" value={String(data?.kpis.active_products ?? 0)} icon={Package} />
+        <StatCard title="Quality risk" value={formatPercent(data?.kpis.quality_risk_ratio ?? 0)} icon={AlertTriangle} />
+        <StatCard title="Pending moderation" value={String(data?.kpis.moderation_pending ?? 0)} icon={Users} />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
         <AreaTimeseriesChart
-          title="Выручка по дням"
-          description="GMV за выбранный период"
+          title="Revenue trend"
+          description="GMV by selected period"
           data={(data?.revenue_series ?? []) as Array<Record<string, string | number>>}
           dataKey="value"
           valueFormatter={(value) => formatPrice(value)}
         />
-        <DonutChartWidget title="Статусы заказов" description="Распределение по статусам" data={statusDonut} />
+        <DonutChartWidget title="Order status mix" description="Order distribution by state" data={statusDonut} />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
         <MultiLineChartWidget
-          title="Тренд качества каталога"
-          description="Ключевые риски качества"
+          title="Catalog quality trend"
+          description="Critical quality ratios"
           data={(data?.quality_series ?? []) as Array<Record<string, string | number>>}
           lines={[
-            { key: "active_without_valid_offers_ratio", label: "Без валидных офферов", color: "#ef4444" },
+            { key: "active_without_valid_offers_ratio", label: "No valid offers", color: "#ef4444" },
             { key: "search_mismatch_ratio", label: "Search mismatch", color: "#f59e0b" },
-            { key: "low_quality_image_ratio", label: "Плохие изображения", color: "#0ea5e9" },
+            { key: "low_quality_image_ratio", label: "Low quality images", color: "#0ea5e9" },
           ]}
           valueFormatter={(value) => formatPercent(value)}
         />
         <StackedBarChartWidget
-          title="Динамика модерации"
+          title="Moderation throughput"
           description="Pending / Published / Rejected"
           data={(data?.moderation_series ?? []) as Array<Record<string, string | number>>}
           bars={[
@@ -126,7 +147,7 @@ export function AdminDashboardPage() {
       <div className="grid gap-4 xl:grid-cols-[1.2fr_1fr]">
         <Card>
           <CardHeader>
-            <CardTitle>Инциденты и алерты</CardTitle>
+            <CardTitle>Incidents and alerts</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             {alerts.data?.items?.length ? (
@@ -152,17 +173,17 @@ export function AdminDashboardPage() {
                 </div>
               ))
             ) : (
-              <p className="text-sm text-muted-foreground">Открытых алертов нет.</p>
+              <p className="text-sm text-muted-foreground">No open alerts.</p>
             )}
             <Link href="/dashboard/analytics" className="inline-block text-xs text-primary hover:underline">
-              Открыть Analytics Center
+              Open analytics center
             </Link>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>Операционные действия</CardTitle>
+            <CardTitle>Core pipeline actions</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             <Button className="w-full" onClick={() => triggerTask("scrape")}>
@@ -196,27 +217,78 @@ export function AdminDashboardPage() {
         </Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Товары без валидных офферов</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {productsWithoutOffers.data?.items?.length ? (
-            productsWithoutOffers.data.items.map((item) => (
-              <div key={item.id} className="rounded-xl border border-border p-3">
-                <Link href={`/dashboard/products/${item.id}`} className="line-clamp-1 text-sm font-medium hover:text-primary">
-                  {item.normalized_title}
-                </Link>
-                <p className="text-xs text-muted-foreground">
-                  {item.brand?.name ?? "Без бренда"} | stores: {item.store_count} | offers: {item.total_offers}
-                </p>
+      <div className="grid gap-4 xl:grid-cols-[1.2fr_1fr]">
+        <Card className="border-sky-300/60 bg-gradient-to-br from-sky-100/50 to-cyan-100/45">
+          <CardHeader className="flex flex-row items-center justify-between gap-2">
+            <CardTitle className="flex items-center gap-2">
+              <ShieldAlert className="h-4 w-4 text-primary" />
+              B2B command center
+            </CardTitle>
+            <Link href="/dashboard/b2b" className={buttonVariants({ size: "sm", variant: "secondary" })}>
+              Open /dashboard/b2b
+            </Link>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border border-border/70 bg-white/80 p-3 text-xs">
+                <p className="text-muted-foreground">Submitted onboarding</p>
+                <p className="text-lg font-semibold">{b2bOnboardingCount}</p>
               </div>
-            ))
-          ) : (
-            <p className="text-sm text-muted-foreground">Критичных позиций сейчас нет.</p>
-          )}
-        </CardContent>
-      </Card>
+              <div className="rounded-xl border border-border/70 bg-white/80 p-3 text-xs">
+                <p className="text-muted-foreground">Open disputes</p>
+                <p className="text-lg font-semibold">{b2bDisputesCount}</p>
+              </div>
+              <div className="rounded-xl border border-border/70 bg-white/80 p-3 text-xs">
+                <p className="text-muted-foreground">Critical risk flags</p>
+                <p className="text-lg font-semibold">{b2bRiskCount}</p>
+              </div>
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Button variant="secondary" onClick={() => runB2BJob.mutate("invoices")} disabled={runB2BJob.isPending}>
+                <Play className="mr-1 h-3.5 w-3.5" />
+                Run invoices
+              </Button>
+              <Button variant="secondary" onClick={() => runB2BJob.mutate("acts")} disabled={runB2BJob.isPending}>
+                <Play className="mr-1 h-3.5 w-3.5" />
+                Run acts
+              </Button>
+              <Button variant="outline" onClick={() => runB2BJob.mutate("fraud-scan")} disabled={runB2BJob.isPending}>
+                <Play className="mr-1 h-3.5 w-3.5" />
+                Run fraud scan
+              </Button>
+              <Button variant="outline" onClick={() => runB2BJob.mutate("feed-health")} disabled={runB2BJob.isPending}>
+                <Play className="mr-1 h-3.5 w-3.5" />
+                Run feed health
+              </Button>
+            </div>
+
+            <p className="text-xs text-muted-foreground">Use `/dashboard/b2b` for approvals, dispute decisions, plan management, and audit-ready actions.</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Products without valid offers</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {productsWithoutOffers.data?.items?.length ? (
+              productsWithoutOffers.data.items.map((item) => (
+                <div key={item.id} className="rounded-xl border border-border p-3">
+                  <Link href={`/dashboard/products/${item.id}`} className="line-clamp-1 text-sm font-medium hover:text-primary">
+                    {item.normalized_title}
+                  </Link>
+                  <p className="text-xs text-muted-foreground">
+                    {item.brand?.name ?? "No brand"} | stores: {item.store_count} | offers: {item.total_offers}
+                  </p>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-muted-foreground">No critical products found.</p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

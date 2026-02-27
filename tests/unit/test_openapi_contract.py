@@ -71,8 +71,10 @@ def test_openapi_contract_contains_core_auth_endpoints() -> None:
         "/api/v1/b2b/billing/plans": {"get"},
         "/api/v1/b2b/billing/subscriptions": {"post"},
         "/api/v1/b2b/support/tickets": {"get", "post"},
+        "/api/v1/b2b/partners/leads": {"post"},
         "/api/v1/go/{offer_id}": {"post"},
         "/api/v1/admin/b2b/onboarding/applications": {"get"},
+        "/api/v1/admin/b2b/partner-leads": {"get"},
         "/api/v1/admin/b2b/disputes": {"get"},
         "/api/v1/admin/b2b/risk-flags": {"get"},
     }

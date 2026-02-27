@@ -1,5 +1,5 @@
-import { B2BOnboardingPage } from "@/features/b2b/b2b-onboarding-page";
+import { redirect } from "next/navigation";
 
-export default function Page() {
-  return <B2BOnboardingPage />;
+export default function LegacyB2BOnboardingRedirectPage() {
+  redirect("/seller/onboarding");
 }

@@ -3,39 +3,45 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
-  Activity,
-  BadgeCheck,
-  BarChart3,
+  AlertTriangle,
+  ArrowUpRight,
+  CheckCircle2,
+  CircleDotDashed,
   CreditCard,
-  FolderSync,
-  type LucideIcon,
+  Filter,
   Megaphone,
   MessageSquareWarning,
+  PackageCheck,
   Wallet,
 } from "lucide-react";
 
 import { AreaTimeseriesChart } from "@/components/charts/area-timeseries-chart";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useB2BAnalyticsOverview, useB2BCampaigns, useB2BFeeds, useB2BInvoices, useB2BMe, useB2BTickets } from "@/features/b2b/use-b2b";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  useB2BAnalyticsAttribution,
+  useB2BAnalyticsOffers,
+  useB2BAnalyticsOverview,
+  useB2BCampaigns,
+  useB2BFeeds,
+  useB2BInvoices,
+  useB2BMe,
+  useB2BTickets,
+  useCreateB2BTicket,
+} from "@/features/b2b/use-b2b";
 import { cn } from "@/lib/utils/cn";
 
 const PERIODS = [
-  { label: "7d", value: 7 },
-  { label: "30d", value: 30 },
-  { label: "90d", value: 90 },
+  { label: "7 days", value: 7 },
+  { label: "30 days", value: 30 },
+  { label: "90 days", value: 90 },
 ] as const;
-
-type MetricTileProps = {
-  label: string;
-  value: string;
-  hint?: string;
-  tone?: "neutral" | "good" | "warn";
-  icon: LucideIcon;
-};
 
 const numberFormatter = new Intl.NumberFormat("ru-RU");
 const moneyFormatter = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 });
-const percentFormatter = new Intl.NumberFormat("ru-RU", { style: "percent", minimumFractionDigits: 1, maximumFractionDigits: 2 });
 
 const toNumber = (value: unknown) => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -47,7 +53,6 @@ const toNumber = (value: unknown) => {
 };
 
 const formatMoney = (value: number, currency: string) => `${moneyFormatter.format(value)} ${currency}`;
-const formatPercent = (value: number) => percentFormatter.format(Math.max(0, value));
 
 const formatDateLabel = (value: unknown) => {
   if (typeof value !== "string" || !value.trim()) return "-";
@@ -56,31 +61,21 @@ const formatDateLabel = (value: unknown) => {
   return date.toLocaleDateString("ru-RU", { day: "2-digit", month: "short" });
 };
 
-function MetricTile({ label, value, hint, tone = "neutral", icon: Icon }: MetricTileProps) {
+function SummaryMetric({ label, value, hint, tone = "default" }: { label: string; value: string; hint?: string; tone?: "default" | "warn" | "good" }) {
   return (
     <Card
       className={cn(
-        "border-slate-200/90 bg-white/95",
-        tone === "good" && "border-emerald-200/90",
-        tone === "warn" && "border-amber-200/90",
+        "border-border/80 bg-card/90",
+        tone === "warn" && "border-amber-300/60",
+        tone === "good" && "border-emerald-300/70",
       )}
     >
       <CardHeader className="pb-2">
-        <CardTitle className="flex items-center justify-between text-sm font-medium text-slate-600">
-          {label}
-          <Icon
-            className={cn(
-              "h-4 w-4",
-              tone === "neutral" && "text-sky-700",
-              tone === "good" && "text-emerald-600",
-              tone === "warn" && "text-amber-600",
-            )}
-          />
-        </CardTitle>
+        <CardTitle className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">{label}</CardTitle>
       </CardHeader>
       <CardContent>
-        <p className="text-2xl font-semibold tracking-tight text-slate-900">{value}</p>
-        {hint ? <p className="mt-1 text-xs text-slate-500">{hint}</p> : null}
+        <p className="text-2xl font-semibold">{value}</p>
+        {hint ? <p className="mt-1 text-xs text-muted-foreground">{hint}</p> : null}
       </CardContent>
     </Card>
   );
@@ -88,37 +83,47 @@ function MetricTile({ label, value, hint, tone = "neutral", icon: Icon }: Metric
 
 export function B2BDashboardPage() {
   const [periodDays, setPeriodDays] = useState<(typeof PERIODS)[number]["value"]>(30);
-  const meQuery = useB2BMe();
+  const [ticketSubject, setTicketSubject] = useState("");
+  const [ticketCategory, setTicketCategory] = useState("technical");
+  const [ticketPriority, setTicketPriority] = useState("normal");
+  const [ticketBody, setTicketBody] = useState("");
+  const [ticketMessage, setTicketMessage] = useState<string | null>(null);
 
+  const meQuery = useB2BMe();
   const primaryOrg = useMemo(() => meQuery.data?.organizations?.[0], [meQuery.data?.organizations]);
   const orgId = primaryOrg?.id;
   const currency = primaryOrg?.default_currency ?? "UZS";
 
   const analyticsQuery = useB2BAnalyticsOverview(orgId, periodDays);
+  const offersQuery = useB2BAnalyticsOffers(orgId, 10);
+  const attributionQuery = useB2BAnalyticsAttribution(orgId, periodDays);
   const campaignsQuery = useB2BCampaigns(orgId);
   const feedsQuery = useB2BFeeds(orgId);
   const invoicesQuery = useB2BInvoices(orgId);
   const ticketsQuery = useB2BTickets(orgId);
+  const createTicketMutation = useCreateB2BTicket(orgId);
 
   if (meQuery.isLoading) {
-    return <div className="rounded-3xl border border-slate-200 bg-white p-6 text-sm text-slate-600">Loading B2B dashboard...</div>;
+    return <div className="rounded-3xl border border-border bg-card p-6 text-sm text-muted-foreground">Loading seller control center...</div>;
   }
 
   if (meQuery.isError || !meQuery.data) {
     return (
-      <div className="rounded-3xl border border-rose-200 bg-rose-50 p-6 text-sm text-rose-700">
-        Failed to load B2B profile. Please refresh page.
+      <div className="rounded-3xl border border-rose-300 bg-rose-50 p-6 text-sm text-rose-700">
+        Failed to load seller profile. Please refresh and try again.
       </div>
     );
   }
 
   if (!orgId) {
     return (
-      <div className="rounded-3xl border border-slate-200 bg-white p-6">
-        <h2 className="text-lg font-semibold text-slate-900">B2B dashboard</h2>
-        <p className="mt-2 text-sm text-slate-600">Организация еще не создана. Сначала пройдите onboarding и добавьте компанию.</p>
-        <Link href="/b2b/onboarding" className="mt-4 inline-flex rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800">
-          Перейти в onboarding
+      <div className="space-y-4 rounded-3xl border border-border bg-card p-6">
+        <h2 className="text-xl font-semibold">Seller account is not initialized</h2>
+        <p className="text-sm text-muted-foreground">
+          Create your first organization and pass onboarding to unlock feed management, campaigns, billing, and analytics.
+        </p>
+        <Link href="/seller/onboarding" className={buttonVariants()}>
+          Start onboarding
         </Link>
       </div>
     );
@@ -132,13 +137,13 @@ export function B2BDashboardPage() {
   const ctr = toNumber(summary.ctr);
   const uniqueSessions = toNumber(summary.unique_sessions);
 
-  const series = (analyticsQuery.data?.series ?? []).map((item) => {
-    const row = item as Record<string, unknown>;
+  const chartSeries = (analyticsQuery.data?.series ?? []).map((row) => {
+    const item = row as Record<string, unknown>;
     return {
-      label: formatDateLabel(row.ts),
-      clicks: toNumber(row.clicks),
-      billable_clicks: toNumber(row.billable_clicks),
-      spend: toNumber(row.spend),
+      ts: formatDateLabel(item.ts),
+      clicks: toNumber(item.clicks),
+      spend: toNumber(item.spend),
+      billable_clicks: toNumber(item.billable_clicks),
     };
   });
 
@@ -146,173 +151,298 @@ export function B2BDashboardPage() {
   const feeds = feedsQuery.data ?? [];
   const invoices = invoicesQuery.data ?? [];
   const tickets = ticketsQuery.data ?? [];
+  const topOffers = offersQuery.data ?? [];
+  const attributionRows = attributionQuery.data ?? [];
 
   const activeCampaigns = campaigns.filter((item) => item.status === "active").length;
-  const draftCampaigns = campaigns.filter((item) => item.status === "draft").length;
-  const pausedCampaigns = campaigns.filter((item) => item.status === "paused").length;
-
   const activeFeeds = feeds.filter((item) => item.is_active).length;
-  const feedsWithValidation = feeds.filter((item) => Boolean(item.last_validated_at)).length;
-
+  const overdueInvoices = invoices.filter((item) => item.status === "overdue").length;
   const openTickets = tickets.filter((item) => item.status === "open" || item.status === "in_progress").length;
 
   const outstandingAmount = invoices
     .filter((item) => item.status !== "paid" && item.status !== "void")
     .reduce((sum, item) => sum + Math.max(item.total_amount - item.paid_amount, 0), 0);
-  const overdueInvoices = invoices.filter((item) => item.status === "overdue").length;
 
-  const lastUpdate = analyticsQuery.data?.generated_at ? new Date(analyticsQuery.data.generated_at).toLocaleString("ru-RU") : "-";
+  const topOffersSpend = topOffers.reduce((sum, item) => sum + item.spend, 0);
+  const lastSync = analyticsQuery.data?.generated_at ? new Date(analyticsQuery.data.generated_at).toLocaleString("ru-RU") : "-";
+  const onboardingStatus = meQuery.data.onboarding_status_by_org[orgId] ?? "draft";
+  const billingStatus = meQuery.data.billing_status_by_org[orgId] ?? "inactive";
+
+  const checklist = [
+    { label: "Onboarding approved", ok: onboardingStatus === "approved", hint: onboardingStatus },
+    { label: "At least one active feed", ok: activeFeeds > 0, hint: `${activeFeeds} active` },
+    { label: "At least one active campaign", ok: activeCampaigns > 0, hint: `${activeCampaigns} active` },
+    { label: "No overdue invoices", ok: overdueInvoices === 0, hint: `${overdueInvoices} overdue` },
+  ];
+
+  const createTicket = () => {
+    setTicketMessage(null);
+    if (!ticketSubject.trim() || !ticketBody.trim()) {
+      setTicketMessage("Subject and description are required.");
+      return;
+    }
+    createTicketMutation.mutate(
+      {
+        subject: ticketSubject.trim(),
+        category: ticketCategory,
+        priority: ticketPriority,
+        body: ticketBody.trim(),
+      },
+      {
+        onSuccess: () => {
+          setTicketSubject("");
+          setTicketBody("");
+          setTicketMessage("Ticket was created and sent to support.");
+        },
+        onError: () => {
+          setTicketMessage("Failed to create ticket. Try again.");
+        },
+      },
+    );
+  };
 
   return (
     <div className="space-y-6">
-      <section className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="pointer-events-none absolute -right-16 -top-20 h-52 w-52 rounded-full bg-sky-100 blur-3xl" />
-        <div className="pointer-events-none absolute -left-16 bottom-0 h-40 w-40 rounded-full bg-emerald-100 blur-3xl" />
-        <div className="relative grid gap-5 lg:grid-cols-[1.5fr_1fr]">
+      <section className="relative overflow-hidden rounded-3xl border border-sky-200/70 bg-gradient-to-br from-sky-100 via-cyan-50 to-emerald-100 p-6 shadow-soft">
+        <div className="absolute -right-20 -top-24 h-52 w-52 rounded-full bg-sky-300/35 blur-3xl" />
+        <div className="absolute -left-16 bottom-0 h-44 w-44 rounded-full bg-emerald-300/30 blur-3xl" />
+        <div className="relative grid gap-5 lg:grid-cols-[1.4fr_1fr]">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-sky-700">Merchant Dashboard</p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">{primaryOrg.name}</h1>
-            <p className="mt-2 max-w-2xl text-sm text-slate-600">
-              Контроль рекламной эффективности, качества фидов и платежной дисциплины в одном кабинете.
+            <p className="inline-flex items-center gap-2 rounded-full border border-sky-300/70 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-sky-900">
+              <CircleDotDashed className="h-3.5 w-3.5" />
+              Seller performance hub
             </p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-medium text-white">status: {primaryOrg.status}</span>
-              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
-                onboarding: {meQuery.data.onboarding_status_by_org[primaryOrg.id] ?? "draft"}
-              </span>
-              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
-                billing: {meQuery.data.billing_status_by_org[primaryOrg.id] ?? "inactive"}
-              </span>
+            <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">{primaryOrg.name}</h1>
+            <p className="mt-2 max-w-2xl text-sm text-slate-700">
+              One cockpit for traffic quality, monetization health, feed reliability, and campaign pacing.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2 text-xs">
+              <span className="rounded-full bg-slate-900 px-3 py-1 font-semibold text-white">org: {primaryOrg.status}</span>
+              <span className="rounded-full bg-white px-3 py-1 font-semibold text-slate-700">onboarding: {onboardingStatus}</span>
+              <span className="rounded-full bg-white px-3 py-1 font-semibold text-slate-700">billing: {billingStatus}</span>
+              <span className="rounded-full bg-white px-3 py-1 font-semibold text-slate-700">tickets open: {openTickets}</span>
             </div>
           </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Quick actions</p>
-            <div className="mt-3 grid gap-2">
-              <Link href="/b2b/campaigns" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-slate-300">
-                Управлять кампаниями
-              </Link>
-              <Link href="/b2b/feeds" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-slate-300">
-                Проверить фиды
-              </Link>
-              <Link href="/b2b/billing" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-slate-300">
-                Оплатить счета
-              </Link>
-            </div>
-            <p className="mt-3 text-xs text-slate-500">Last analytics sync: {lastUpdate}</p>
-          </div>
-        </div>
-      </section>
 
-      <section className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-900">Аналитика</h2>
-          <p className="text-sm text-slate-600">Клики, расходы и качество трафика</p>
-        </div>
-        <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1">
-          {PERIODS.map((period) => (
-            <button
-              key={period.value}
-              type="button"
-              onClick={() => setPeriodDays(period.value)}
-              className={cn(
-                "rounded-lg px-3 py-1.5 text-sm font-medium transition",
-                periodDays === period.value ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100",
-              )}
-            >
-              {period.label}
-            </button>
-          ))}
+          <div className="rounded-2xl border border-sky-200/70 bg-white/80 p-4 backdrop-blur">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">Analytics period</p>
+              <p className="text-xs text-muted-foreground">Synced: {lastSync}</p>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {PERIODS.map((period) => (
+                <button
+                  key={period.value}
+                  type="button"
+                  onClick={() => setPeriodDays(period.value)}
+                  className={cn(
+                    "rounded-lg px-3 py-1.5 text-sm font-semibold transition",
+                    periodDays === period.value ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-100",
+                  )}
+                >
+                  {period.label}
+                </button>
+              ))}
+            </div>
+            <div className="mt-4 grid gap-2">
+              <Link href="/seller/campaigns" className={cn(buttonVariants(), "justify-between")}>
+                Manage campaigns
+                <ArrowUpRight className="h-4 w-4" />
+              </Link>
+              <Link href="/seller/feeds" className={cn(buttonVariants({ variant: "secondary" }), "justify-between")}>
+                Validate feeds
+                <ArrowUpRight className="h-4 w-4" />
+              </Link>
+              <Link href="/seller/billing" className={cn(buttonVariants({ variant: "outline" }), "justify-between")}>
+                Review invoices
+                <ArrowUpRight className="h-4 w-4" />
+              </Link>
+            </div>
+          </div>
         </div>
       </section>
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricTile label="Total clicks" value={numberFormatter.format(totalClicks)} hint={`${numberFormatter.format(uniqueSessions)} unique sessions`} icon={Activity} />
-        <MetricTile
+        <SummaryMetric label="Total clicks" value={numberFormatter.format(totalClicks)} hint={`${numberFormatter.format(uniqueSessions)} unique sessions`} />
+        <SummaryMetric
           label="Billable clicks"
           value={numberFormatter.format(billableClicks)}
-          hint={totalClicks > 0 ? `${((billableClicks / totalClicks) * 100).toFixed(1)}% от всех кликов` : "Нет данных"}
+          hint={totalClicks > 0 ? `${((billableClicks / totalClicks) * 100).toFixed(1)}% billable share` : "No traffic yet"}
           tone="good"
-          icon={BadgeCheck}
         />
-        <MetricTile label="Spend" value={formatMoney(spend, currency)} hint="Период CPC-начислений" icon={Wallet} />
-        <MetricTile label="Avg CPC" value={formatMoney(avgCpc, currency)} hint={`CTR ${formatPercent(ctr)}`} tone="warn" icon={BarChart3} />
+        <SummaryMetric label="Spend" value={formatMoney(spend, currency)} hint={`Avg CPC ${formatMoney(avgCpc, currency)}`} />
+        <SummaryMetric label="Outstanding" value={formatMoney(outstandingAmount, currency)} hint={`CTR ${(ctr * 100).toFixed(2)}%`} tone={outstandingAmount > 0 ? "warn" : "good"} />
       </section>
 
       <section className="grid gap-4 xl:grid-cols-2">
         <AreaTimeseriesChart
           title="Clicks trend"
-          description="Динамика кликов по дням"
-          data={series}
+          description="Traffic and paid interactions over selected period"
+          data={chartSeries}
           dataKey="clicks"
-          xKey="label"
           color="#0f766e"
           valueFormatter={(value) => numberFormatter.format(value)}
         />
         <AreaTimeseriesChart
           title="Spend trend"
-          description="Расходы CPC по дням"
-          data={series}
+          description="Monetization dynamics and CPC accumulation"
+          data={chartSeries}
           dataKey="spend"
-          xKey="label"
-          color="#0369a1"
+          color="#0284c7"
           valueFormatter={(value) => formatMoney(value, currency)}
         />
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
-        <Card className="border-slate-200/90 bg-white">
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between text-sm text-slate-700">
-              Campaigns
-              <Megaphone className="h-4 w-4 text-sky-700" />
+      <section className="grid gap-4 xl:grid-cols-2">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <Wallet className="h-4 w-4 text-primary" />
+              Top monetized offers
             </CardTitle>
+            <span className="text-xs text-muted-foreground">{formatMoney(topOffersSpend, currency)} total</span>
           </CardHeader>
-          <CardContent className="space-y-1 text-sm text-slate-600">
-            <div className="flex items-center justify-between"><span>Active</span><span className="font-semibold text-slate-900">{activeCampaigns}</span></div>
-            <div className="flex items-center justify-between"><span>Draft</span><span className="font-semibold text-slate-900">{draftCampaigns}</span></div>
-            <div className="flex items-center justify-between"><span>Paused</span><span className="font-semibold text-slate-900">{pausedCampaigns}</span></div>
+          <CardContent className="space-y-2">
+            {topOffers.length ? (
+              topOffers.map((offer) => (
+                <div key={offer.offer_id} className="rounded-xl border border-border/70 bg-background/60 p-3">
+                  <p className="truncate text-sm font-semibold">{offer.offer_id}</p>
+                  <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
+                    <span>Clicks: {numberFormatter.format(offer.clicks)}</span>
+                    <span>Billable: {numberFormatter.format(offer.billable_clicks)}</span>
+                    <span>Spend: {formatMoney(offer.spend, currency)}</span>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-muted-foreground">No offer-level analytics yet.</p>
+            )}
           </CardContent>
         </Card>
 
-        <Card className="border-slate-200/90 bg-white">
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between text-sm text-slate-700">
-              Feed health
-              <FolderSync className="h-4 w-4 text-emerald-600" />
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <Filter className="h-4 w-4 text-primary" />
+              Attribution split
             </CardTitle>
+            <span className="text-xs text-muted-foreground">{periodDays}d</span>
           </CardHeader>
-          <CardContent className="space-y-1 text-sm text-slate-600">
-            <div className="flex items-center justify-between"><span>Connected feeds</span><span className="font-semibold text-slate-900">{feeds.length}</span></div>
-            <div className="flex items-center justify-between"><span>Active feeds</span><span className="font-semibold text-slate-900">{activeFeeds}</span></div>
-            <div className="flex items-center justify-between"><span>Validated at least once</span><span className="font-semibold text-slate-900">{feedsWithValidation}</span></div>
+          <CardContent className="space-y-2">
+            {attributionRows.length ? (
+              attributionRows.slice(0, 8).map((row, index) => (
+                <div key={`${row.source_page}-${row.placement}-${index}`} className="rounded-xl border border-border/70 bg-background/60 p-3">
+                  <p className="text-sm font-semibold">
+                    {row.source_page} / {row.placement}
+                  </p>
+                  <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
+                    <span>Clicks: {numberFormatter.format(row.clicks)}</span>
+                    <span>Billable: {numberFormatter.format(row.billable_clicks)}</span>
+                    <span>Spend: {formatMoney(row.spend, currency)}</span>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-muted-foreground">Attribution data is not available yet.</p>
+            )}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[1fr_1.1fr]">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Operational checklist</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {checklist.map((item) => (
+              <div key={item.label} className="flex items-center justify-between rounded-xl border border-border/70 bg-background/60 px-3 py-2">
+                <div>
+                  <p className="text-sm font-medium">{item.label}</p>
+                  <p className="text-xs text-muted-foreground">{item.hint}</p>
+                </div>
+                {item.ok ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <AlertTriangle className="h-4 w-4 text-amber-600" />}
+              </div>
+            ))}
+
+            <div className="grid gap-2 pt-2 md:grid-cols-2">
+              <div className="rounded-xl border border-border/70 bg-background/60 p-3">
+                <p className="text-xs text-muted-foreground">Campaigns</p>
+                <p className="mt-1 flex items-center gap-2 text-sm font-semibold">
+                  <Megaphone className="h-4 w-4 text-primary" />
+                  {activeCampaigns} active / {campaigns.length} total
+                </p>
+              </div>
+              <div className="rounded-xl border border-border/70 bg-background/60 p-3">
+                <p className="text-xs text-muted-foreground">Feeds</p>
+                <p className="mt-1 flex items-center gap-2 text-sm font-semibold">
+                  <PackageCheck className="h-4 w-4 text-primary" />
+                  {activeFeeds} active / {feeds.length} total
+                </p>
+              </div>
+              <div className="rounded-xl border border-border/70 bg-background/60 p-3">
+                <p className="text-xs text-muted-foreground">Billing risk</p>
+                <p className="mt-1 flex items-center gap-2 text-sm font-semibold">
+                  <CreditCard className="h-4 w-4 text-primary" />
+                  {overdueInvoices} overdue invoices
+                </p>
+              </div>
+              <div className="rounded-xl border border-border/70 bg-background/60 p-3">
+                <p className="text-xs text-muted-foreground">Support load</p>
+                <p className="mt-1 flex items-center gap-2 text-sm font-semibold">
+                  <MessageSquareWarning className="h-4 w-4 text-primary" />
+                  {openTickets} open / in progress
+                </p>
+              </div>
+            </div>
           </CardContent>
         </Card>
 
-        <Card className="border-slate-200/90 bg-white">
+        <Card>
           <CardHeader>
-            <CardTitle className="flex items-center justify-between text-sm text-slate-700">
-              Billing risk
-              <CreditCard className="h-4 w-4 text-amber-600" />
-            </CardTitle>
+            <CardTitle className="text-base">Quick support escalation</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-1 text-sm text-slate-600">
-            <div className="flex items-center justify-between"><span>Open invoices</span><span className="font-semibold text-slate-900">{invoices.filter((item) => item.status !== "paid" && item.status !== "void").length}</span></div>
-            <div className="flex items-center justify-between"><span>Overdue invoices</span><span className="font-semibold text-slate-900">{overdueInvoices}</span></div>
-            <div className="flex items-center justify-between"><span>Outstanding amount</span><span className="font-semibold text-slate-900">{formatMoney(outstandingAmount, currency)}</span></div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-slate-200/90 bg-white">
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between text-sm text-slate-700">
-              Support queue
-              <MessageSquareWarning className="h-4 w-4 text-slate-700" />
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1 text-sm text-slate-600">
-            <div className="flex items-center justify-between"><span>Open or in progress</span><span className="font-semibold text-slate-900">{openTickets}</span></div>
-            <div className="flex items-center justify-between"><span>Total tickets</span><span className="font-semibold text-slate-900">{tickets.length}</span></div>
-            <div className="flex items-center justify-between"><span>Analytics period</span><span className="font-semibold text-slate-900">{periodDays} days</span></div>
+          <CardContent className="space-y-3">
+            <Input placeholder="Subject" value={ticketSubject} onChange={(event) => setTicketSubject(event.target.value)} />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Select value={ticketCategory} onValueChange={setTicketCategory}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Category" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="technical">Technical</SelectItem>
+                  <SelectItem value="billing">Billing</SelectItem>
+                  <SelectItem value="campaign">Campaign</SelectItem>
+                  <SelectItem value="feed">Feed quality</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={ticketPriority} onValueChange={setTicketPriority}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Priority" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="low">Low</SelectItem>
+                  <SelectItem value="normal">Normal</SelectItem>
+                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="critical">Critical</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <Textarea
+              placeholder="Describe issue, affected IDs, expected result, and deadline."
+              value={ticketBody}
+              onChange={(event) => setTicketBody(event.target.value)}
+              rows={5}
+            />
+            {ticketMessage ? <p className="text-xs text-muted-foreground">{ticketMessage}</p> : null}
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={createTicket} disabled={createTicketMutation.isPending}>
+                {createTicketMutation.isPending ? "Creating..." : "Create ticket"}
+              </Button>
+              <Link href="/seller/support" className={buttonVariants({ variant: "secondary" })}>
+                Open full support center
+              </Link>
+            </div>
           </CardContent>
         </Card>
       </section>

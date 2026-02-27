@@ -134,3 +134,81 @@ export type B2BSupportTicket = {
   created_at: string;
   updated_at: string;
 };
+
+export type B2BPartnerLead = {
+  id: string;
+  status: "submitted" | "review" | "approved" | "rejected";
+  company_name: string;
+  legal_name?: string | null;
+  brand_name?: string | null;
+  tax_id?: string | null;
+  website_url?: string | null;
+  contact_name: string;
+  contact_role?: string | null;
+  email: string;
+  phone: string;
+  telegram?: string | null;
+  country_code: string;
+  city?: string | null;
+  categories: string[];
+  monthly_orders?: number | null;
+  avg_order_value?: number | null;
+  feed_url?: string | null;
+  logistics_model: "own_warehouse" | "dropshipping" | "marketplace_fulfillment" | "hybrid";
+  warehouses_count?: number | null;
+  marketplaces: string[];
+  returns_policy?: string | null;
+  goals?: string | null;
+  notes?: string | null;
+  review_note?: string | null;
+  reviewed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AdminB2BListResponse<T> = {
+  items: T[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export type AdminB2BOnboardingApplication = {
+  id: string;
+  org_id: string;
+  status: "draft" | "submitted" | "review" | "approved" | "rejected";
+  company_name: string;
+  billing_email: string;
+  contact_name: string;
+  tax_id?: string | null;
+  rejection_reason?: string | null;
+  submitted_at?: string | null;
+  reviewed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AdminB2BDispute = {
+  id: string;
+  org_id: string;
+  click_charge_id: string;
+  status: "open" | "review" | "accepted" | "rejected";
+  reason?: string | null;
+  message?: string | null;
+  resolution_note?: string | null;
+  created_at: string;
+  updated_at: string;
+  resolved_at?: string | null;
+};
+
+export type AdminB2BRiskFlag = {
+  id: string;
+  level: "low" | "medium" | "high" | "critical";
+  code: string;
+  details: Record<string, unknown>;
+  click_event_id: string;
+  org_id?: string | null;
+  created_at: string;
+};
+
+export type AdminB2BPartnerLead = B2BPartnerLead;

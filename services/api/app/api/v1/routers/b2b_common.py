@@ -1,20 +1,38 @@
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Any, Iterable, Mapping
 
-from fastapi import HTTPException
+from fastapi import Depends, HTTPException
 
+from app.api.v1.routers.auth import get_current_user
 from app.repositories.b2b import B2BRepository
 from app.core.config import settings
 
 
 B2B_WRITE_ROLES = {"owner", "admin", "marketing", "finance"}
+PLATFORM_STAFF_ROLES = {"admin", "moderator", "seller_support"}
 
 
 def _normalize_roles(roles: Iterable[str] | None) -> set[str]:
     if roles is None:
         return set()
     return {str(role).strip().lower() for role in roles if str(role).strip()}
+
+
+def _normalize_platform_role(value: str | None) -> str:
+    return str(value or "").strip().lower().replace("-", "_")
+
+
+def ensure_b2b_actor(current_user: Mapping[str, Any] | None) -> None:
+    user = current_user or {}
+    role = _normalize_platform_role(str(user.get("role", "")))
+    if role in PLATFORM_STAFF_ROLES:
+        raise HTTPException(status_code=403, detail="platform staff cannot access seller b2b workspace")
+
+
+async def get_current_b2b_user(current_user: dict = Depends(get_current_user)) -> dict:
+    ensure_b2b_actor(current_user)
+    return current_user
 
 
 async def resolve_org_context(

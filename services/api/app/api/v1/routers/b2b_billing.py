@@ -5,8 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db_session, get_redis
 from app.api.idempotency import execute_idempotent_json
-from app.api.v1.routers.auth import get_current_user
-from app.api.v1.routers.b2b_common import ensure_b2b_enabled, resolve_org_context
+from app.api.v1.routers.b2b_common import ensure_b2b_enabled, get_current_b2b_user, resolve_org_context
 from app.core.config import settings
 from app.core.rate_limit import enforce_rate_limit
 from app.repositories.b2b import B2BRepository
@@ -31,7 +30,7 @@ router = APIRouter(prefix="/b2b/billing", tags=["b2b-billing"])
 @router.get("/plans", response_model=list[B2BBillingPlanOut])
 async def list_b2b_billing_plans(
     request: Request,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_b2b_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     del current_user
@@ -47,7 +46,7 @@ async def list_b2b_billing_plans(
 async def subscribe_b2b_plan(
     request: Request,
     payload: B2BBillingSubscribeIn,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_b2b_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     ensure_b2b_enabled()
@@ -85,7 +84,7 @@ async def list_b2b_invoices(
     org_id: str | None = Query(default=None, pattern=UUID_REF_PATTERN),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0, le=5000),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_b2b_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     ensure_b2b_enabled()
@@ -108,7 +107,7 @@ async def pay_b2b_invoice(
     payload: B2BInvoicePayIn,
     invoice_id: str = Path(..., pattern=UUID_REF_PATTERN),
     org_id: str | None = Query(default=None, pattern=UUID_REF_PATTERN),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_b2b_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     ensure_b2b_enabled()
@@ -148,7 +147,7 @@ async def pay_b2b_invoice(
 async def list_b2b_acts(
     request: Request,
     org_id: str | None = Query(default=None, pattern=UUID_REF_PATTERN),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_b2b_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     ensure_b2b_enabled()

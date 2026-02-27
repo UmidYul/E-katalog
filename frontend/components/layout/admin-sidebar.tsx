@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { BarChart3, Boxes, LayoutDashboard, MessageSquare, Package, Settings, ShoppingCart, Users } from "lucide-react";
+import { BarChart3, Boxes, LayoutDashboard, MessageSquare, Package, Settings, ShieldAlert, ShoppingCart, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -9,14 +9,15 @@ import { cn } from "@/lib/utils/cn";
 import { useUiStore } from "@/store/ui.store";
 
 const nav = [
-  { href: "/dashboard", label: "Хаб", icon: LayoutDashboard },
-  { href: "/dashboard/users", label: "Пользователи", icon: Users },
-  { href: "/dashboard/products", label: "Товары", icon: Package },
-  { href: "/dashboard/categories", label: "Категории", icon: Boxes },
-  { href: "/dashboard/orders", label: "Заказы", icon: ShoppingCart },
-  { href: "/dashboard/feedback", label: "Модерация", icon: MessageSquare },
-  { href: "/dashboard/analytics", label: "Аналитика 360", icon: BarChart3 },
-  { href: "/dashboard/settings", label: "Настройки", icon: Settings },
+  { href: "/dashboard", label: "Hub", icon: LayoutDashboard },
+  { href: "/dashboard/users", label: "Users", icon: Users },
+  { href: "/dashboard/products", label: "Products", icon: Package },
+  { href: "/dashboard/categories", label: "Categories", icon: Boxes },
+  { href: "/dashboard/orders", label: "Orders", icon: ShoppingCart },
+  { href: "/dashboard/feedback", label: "Moderation", icon: MessageSquare },
+  { href: "/dashboard/analytics", label: "Analytics 360", icon: BarChart3 },
+  { href: "/dashboard/b2b", label: "B2B Control", icon: ShieldAlert },
+  { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ];
 
 export function AdminSidebar() {
@@ -42,7 +43,7 @@ export function AdminSidebar() {
               href={item.href}
               className={cn(
                 "flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition",
-                active ? "bg-primary text-primary-foreground shadow-soft" : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                active ? "bg-primary text-primary-foreground shadow-soft" : "text-muted-foreground hover:bg-secondary hover:text-foreground",
               )}
             >
               <Icon className="h-4 w-4 shrink-0" />

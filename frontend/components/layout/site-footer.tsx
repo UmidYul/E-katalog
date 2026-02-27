@@ -20,7 +20,7 @@ const footerColumns = [
   {
     title: "Сервис",
     links: [
-      { href: "/for-shops", label: "Для магазинов" },
+      { href: "/partners", label: "Partners" },
       { href: "/status", label: "Статус сервиса" },
       { href: "/contacts", label: "Контакты" },
       { href: "/", label: "Главная" }

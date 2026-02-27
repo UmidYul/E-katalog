@@ -13,6 +13,7 @@ from app.repositories.b2b import B2BRepository
 from app.schemas.b2b import (
     AdminB2BDisputePatchIn,
     AdminB2BOnboardingPatchIn,
+    AdminB2BPartnerLeadPatchIn,
     AdminB2BPlanUpsertIn,
     B2BBillingPlanOut,
 )
@@ -44,6 +45,56 @@ async def admin_list_b2b_onboarding_applications(
     await enforce_rate_limit(request, redis, bucket="admin-b2b-read", limit=240)
     repo = B2BRepository(db, cursor_secret=settings.cursor_secret)
     return await repo.list_admin_onboarding_applications(status=status, limit=limit, offset=offset)
+
+
+@router.get("/partner-leads")
+async def admin_list_b2b_partner_leads(
+    request: Request,
+    status: str | None = Query(default=None, pattern=r"^(submitted|review|approved|rejected)$"),
+    q: str | None = Query(default=None, min_length=2, max_length=120),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0, le=5000),
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    db: AsyncSession = Depends(get_db_session),
+):
+    del current_user
+    ensure_b2b_enabled()
+    redis = get_redis()
+    await enforce_rate_limit(request, redis, bucket="admin-b2b-read", limit=240)
+    repo = B2BRepository(db, cursor_secret=settings.cursor_secret)
+    return await repo.list_admin_partner_leads(status=status, q=q, limit=limit, offset=offset)
+
+
+@router.patch("/partner-leads/{lead_id}")
+async def admin_patch_b2b_partner_lead(
+    request: Request,
+    payload: AdminB2BPartnerLeadPatchIn,
+    lead_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    db: AsyncSession = Depends(get_db_session),
+):
+    ensure_b2b_enabled()
+    redis = get_redis()
+
+    async def _op():
+        await enforce_rate_limit(request, redis, bucket="admin-b2b-write", limit=120)
+        repo = B2BRepository(db, cursor_secret=settings.cursor_secret)
+        updated = await repo.patch_admin_partner_lead(
+            lead_uuid=lead_id,
+            status=payload.status,
+            review_note=payload.review_note,
+            reviewer_uuid=str(current_user.get("id")),
+        )
+        if not updated:
+            raise HTTPException(status_code=404, detail="partner lead not found")
+        return updated
+
+    return await execute_idempotent_json(
+        request,
+        redis,
+        scope=f"admin.b2b.partner_leads.patch:{lead_id.lower()}:{payload.status}",
+        handler=_op,
+    )
 
 
 @router.patch("/onboarding/applications/{application_id}")

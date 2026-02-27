@@ -6,8 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db_session, get_redis
 from app.api.idempotency import execute_idempotent_json
-from app.api.v1.routers.auth import get_current_user
-from app.api.v1.routers.b2b_common import B2B_WRITE_ROLES, ensure_b2b_enabled, resolve_org_context
+from app.api.v1.routers.b2b_common import B2B_WRITE_ROLES, ensure_b2b_enabled, get_current_b2b_user, resolve_org_context
 from app.core.config import settings
 from app.core.rate_limit import enforce_rate_limit
 from app.repositories.b2b import B2BRepository
@@ -30,7 +29,7 @@ router = APIRouter(prefix="/b2b/onboarding", tags=["b2b-onboarding"])
 async def upsert_onboarding_application(
     request: Request,
     payload: B2BOnboardingApplicationIn,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_b2b_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     ensure_b2b_enabled()
@@ -74,7 +73,7 @@ async def upsert_onboarding_application(
 async def create_kyc_document(
     request: Request,
     payload: B2BKycDocumentIn,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_b2b_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     ensure_b2b_enabled()
@@ -122,7 +121,7 @@ async def create_kyc_document(
 async def accept_public_offer(
     request: Request,
     payload: B2BContractAcceptanceIn,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_b2b_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     ensure_b2b_enabled()

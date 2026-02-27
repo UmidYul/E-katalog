@@ -5,8 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db_session, get_redis
 from app.api.idempotency import execute_idempotent_json
-from app.api.v1.routers.auth import get_current_user
-from app.api.v1.routers.b2b_common import B2B_WRITE_ROLES, ensure_b2b_enabled, resolve_org_context
+from app.api.v1.routers.b2b_common import B2B_WRITE_ROLES, ensure_b2b_enabled, get_current_b2b_user, resolve_org_context
 from app.core.config import settings
 from app.core.rate_limit import enforce_rate_limit
 from app.repositories.b2b import B2BRepository
@@ -23,7 +22,7 @@ router = APIRouter(prefix="/b2b/campaigns", tags=["b2b-campaigns"])
 async def list_b2b_campaigns(
     request: Request,
     org_id: str | None = Query(default=None, pattern=UUID_REF_PATTERN),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_b2b_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     ensure_b2b_enabled()
@@ -44,7 +43,7 @@ async def list_b2b_campaigns(
 async def create_b2b_campaign(
     request: Request,
     payload: B2BCampaignCreateIn,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_b2b_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     ensure_b2b_enabled()
@@ -94,7 +93,7 @@ async def patch_b2b_campaign(
     payload: B2BCampaignPatchIn,
     campaign_id: str = Path(..., pattern=UUID_REF_PATTERN),
     org_id: str | None = Query(default=None, pattern=UUID_REF_PATTERN),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_b2b_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     ensure_b2b_enabled()

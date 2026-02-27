@@ -1,5 +1,5 @@
-import { B2BFeedsPage } from "@/features/b2b/b2b-feeds-page";
+import { redirect } from "next/navigation";
 
-export default function Page() {
-  return <B2BFeedsPage />;
+export default function LegacyB2BFeedsRedirectPage() {
+  redirect("/seller/feeds");
 }

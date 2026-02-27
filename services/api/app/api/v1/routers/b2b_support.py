@@ -5,8 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db_session, get_redis
 from app.api.idempotency import execute_idempotent_json
-from app.api.v1.routers.auth import get_current_user
-from app.api.v1.routers.b2b_common import ensure_b2b_enabled, resolve_org_context
+from app.api.v1.routers.b2b_common import ensure_b2b_enabled, get_current_b2b_user, resolve_org_context
 from app.core.config import settings
 from app.core.rate_limit import enforce_rate_limit
 from app.repositories.b2b import B2BRepository
@@ -23,7 +22,7 @@ router = APIRouter(prefix="/b2b/support", tags=["b2b-support"])
 async def create_b2b_support_ticket(
     request: Request,
     payload: B2BSupportTicketCreateIn,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_b2b_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     ensure_b2b_enabled()
@@ -63,7 +62,7 @@ async def list_b2b_support_tickets(
     status: str | None = Query(default=None, pattern=r"^(open|in_progress|waiting_merchant|resolved|closed)$"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0, le=5000),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_b2b_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     ensure_b2b_enabled()

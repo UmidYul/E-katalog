@@ -1,5 +1,5 @@
-import { B2BDashboardPage } from "@/features/b2b/b2b-dashboard-page";
+import { redirect } from "next/navigation";
 
-export default function Page() {
-  return <B2BDashboardPage />;
+export default function LegacyB2BDashboardRedirectPage() {
+  redirect("/seller");
 }

@@ -18,7 +18,19 @@ branch_labels = None
 depends_on = None
 
 
+def _table_exists(table_name: str) -> bool:
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    return inspector.has_table(table_name)
+
+
 def upgrade() -> None:
+    # This revision targets a legacy scraper table (`offers`).
+    # In the production catalog schema we only have `catalog_offers`,
+    # so the migration must be a no-op on fresh environments.
+    if not _table_exists("offers"):
+        return
+
     op.add_column(
         "offers",
         sa.Column("variant_key", sa.String(length=190), nullable=False, server_default="default"),
@@ -35,6 +47,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if not _table_exists("offers"):
+        return
+
     op.execute("alter table offers drop constraint if exists uq_offer_shop_link_variant")
     op.create_unique_constraint("uq_offer_shop_link", "offers", ["shop_id", "link"])
     op.drop_column("offers", "variant_attrs")

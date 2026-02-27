@@ -1,5 +1,5 @@
-import { B2BCampaignsPage } from "@/features/b2b/b2b-campaigns-page";
+import { redirect } from "next/navigation";
 
-export default function Page() {
-  return <B2BCampaignsPage />;
+export default function LegacyB2BCampaignsRedirectPage() {
+  redirect("/seller/campaigns");
 }

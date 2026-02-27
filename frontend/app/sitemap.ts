@@ -82,6 +82,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   add("", { changeFrequency: "daily", priority: 1 });
   add("/catalog", { changeFrequency: "daily", priority: 0.9 });
   add("/compare", { changeFrequency: "weekly", priority: 0.4 });
+  add("/partners", { changeFrequency: "weekly", priority: 0.7 });
 
   const [categories, brands] = await Promise.all([
     fetchApi<Category[]>("/categories"),

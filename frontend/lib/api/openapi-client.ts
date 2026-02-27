@@ -42,6 +42,11 @@ import type {
   Severity,
 } from "@/types/admin";
 import type {
+  AdminB2BDispute,
+  AdminB2BListResponse,
+  AdminB2BOnboardingApplication,
+  AdminB2BPartnerLead,
+  AdminB2BRiskFlag,
   B2BAct,
   B2BAnalyticsOverview,
   B2BCampaign,
@@ -50,6 +55,7 @@ import type {
   B2BInvoice,
   B2BBillingPlan,
   B2BMe,
+  B2BPartnerLead,
   B2BSupportTicket,
 } from "@/types/b2b";
 
@@ -608,21 +614,50 @@ export const b2bApi = {
     apiClient.get<B2BSupportTicket[]>("/b2b/support/tickets", { params: query }),
   createTicket: (payload: { org_id: string; subject: string; category?: string; priority?: string; body: string }) =>
     apiClient.post<B2BSupportTicket>("/b2b/support/tickets", payload),
+  createPartnerLead: (payload: {
+    company_name: string;
+    legal_name?: string | null;
+    brand_name?: string | null;
+    tax_id?: string | null;
+    website_url?: string | null;
+    contact_name: string;
+    contact_role?: string | null;
+    email: string;
+    phone: string;
+    telegram?: string | null;
+    country_code?: string;
+    city?: string | null;
+    categories?: string[];
+    monthly_orders?: number | null;
+    avg_order_value?: number | null;
+    feed_url?: string | null;
+    logistics_model?: "own_warehouse" | "dropshipping" | "marketplace_fulfillment" | "hybrid";
+    warehouses_count?: number | null;
+    marketplaces?: string[];
+    returns_policy?: string | null;
+    goals?: string | null;
+    notes?: string | null;
+    accepts_terms: boolean;
+  }) => apiClient.post<B2BPartnerLead>("/b2b/partners/leads", payload),
 };
 
 export const adminB2bApi = {
   onboardingApplications: (query: { status?: string; limit?: number; offset?: number } = {}) =>
-    apiClient.get<{ items: Array<Record<string, unknown>>; total: number; limit: number; offset: number }>("/admin/b2b/onboarding/applications", {
+    apiClient.get<AdminB2BListResponse<AdminB2BOnboardingApplication>>("/admin/b2b/onboarding/applications", {
       params: query,
     }),
   patchOnboardingApplication: (applicationId: string, payload: { status: string; rejection_reason?: string | null }) =>
     apiClient.patch(`/admin/b2b/onboarding/applications/${applicationId}`, payload),
   disputes: (query: { status?: string; limit?: number; offset?: number } = {}) =>
-    apiClient.get<{ items: Array<Record<string, unknown>>; total: number; limit: number; offset: number }>("/admin/b2b/disputes", { params: query }),
+    apiClient.get<AdminB2BListResponse<AdminB2BDispute>>("/admin/b2b/disputes", { params: query }),
   patchDispute: (disputeId: string, payload: { status: string; resolution_note?: string | null }) =>
     apiClient.patch(`/admin/b2b/disputes/${disputeId}`, payload),
   riskFlags: (query: { level?: string; limit?: number; offset?: number } = {}) =>
-    apiClient.get<{ items: Array<Record<string, unknown>>; total: number; limit: number; offset: number }>("/admin/b2b/risk-flags", { params: query }),
+    apiClient.get<AdminB2BListResponse<AdminB2BRiskFlag>>("/admin/b2b/risk-flags", { params: query }),
+  partnerLeads: (query: { status?: string; q?: string; limit?: number; offset?: number } = {}) =>
+    apiClient.get<AdminB2BListResponse<AdminB2BPartnerLead>>("/admin/b2b/partner-leads", { params: query }),
+  patchPartnerLead: (leadId: string, payload: { status: string; review_note?: string | null }) =>
+    apiClient.patch(`/admin/b2b/partner-leads/${leadId}`, payload),
   plans: () => apiClient.get<B2BBillingPlan[]>("/admin/b2b/plans"),
   upsertPlan: (payload: {
     code: string;

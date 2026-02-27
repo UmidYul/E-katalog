@@ -11,6 +11,7 @@ from app.api.v1.routers import (
     b2b_campaigns,
     b2b_feeds,
     b2b_onboarding,
+    b2b_partners,
     b2b_orgs,
     b2b_support,
     brands,
@@ -40,6 +41,7 @@ api_router.include_router(stores.router)
 api_router.include_router(compare.router)
 api_router.include_router(admin.router)
 api_router.include_router(b2b_orgs.router)
+api_router.include_router(b2b_partners.router)
 api_router.include_router(b2b_onboarding.router)
 api_router.include_router(b2b_feeds.router)
 api_router.include_router(b2b_campaigns.router)

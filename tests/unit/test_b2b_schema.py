@@ -49,3 +49,19 @@ def test_admin_b2b_plan_upsert_defaults() -> None:
         click_price=35,
     )
     assert payload.limits == {}
+
+
+def test_b2b_partner_lead_requires_terms_acceptance() -> None:
+    module = _load_b2b_schema_module()
+    try:
+        module.B2BPartnerLeadCreateIn(
+            company_name="ACME",
+            contact_name="Alice",
+            email="alice@acme.uz",
+            phone="+998901112233",
+            accepts_terms=False,
+        )
+    except Exception as exc:  # noqa: BLE001
+        assert "terms must be accepted" in str(exc)
+        return
+    raise AssertionError("B2BPartnerLeadCreateIn should reject payload without terms acceptance")

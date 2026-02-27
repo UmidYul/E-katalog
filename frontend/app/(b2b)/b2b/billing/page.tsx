@@ -1,5 +1,5 @@
-import { B2BBillingPage } from "@/features/b2b/b2b-billing-page";
+import { redirect } from "next/navigation";
 
-export default function Page() {
-  return <B2BBillingPage />;
+export default function LegacyB2BBillingRedirectPage() {
+  redirect("/seller/billing");
 }

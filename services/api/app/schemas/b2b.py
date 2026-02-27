@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints, field_validator
 
 UUID_REF_PATTERN = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
 UUIDRef = Annotated[str, StringConstraints(pattern=UUID_REF_PATTERN)]
@@ -16,6 +16,7 @@ B2BCampaignStatus = Literal["draft", "active", "paused", "archived"]
 B2BInvoiceStatus = Literal["draft", "issued", "partially_paid", "paid", "overdue", "void"]
 B2BPaymentStatus = Literal["pending", "succeeded", "failed", "refunded"]
 B2BTicketStatus = Literal["open", "in_progress", "waiting_merchant", "resolved", "closed"]
+B2BPartnerLeadStatus = Literal["submitted", "review", "approved", "rejected"]
 
 
 class B2BOrganizationOut(BaseModel):
@@ -335,6 +336,73 @@ class B2BSupportTicketOut(BaseModel):
     updated_at: str
 
 
+class B2BPartnerLeadCreateIn(BaseModel):
+    company_name: str = Field(min_length=2, max_length=255)
+    legal_name: str | None = Field(default=None, max_length=255)
+    brand_name: str | None = Field(default=None, max_length=255)
+    tax_id: str | None = Field(default=None, max_length=64)
+    website_url: str | None = Field(default=None, max_length=2000)
+    contact_name: str = Field(min_length=2, max_length=160)
+    contact_role: str | None = Field(default=None, max_length=120)
+    email: str = Field(min_length=5, max_length=255)
+    phone: str = Field(min_length=5, max_length=64)
+    telegram: str | None = Field(default=None, max_length=64)
+    country_code: str = Field(default="UZ", min_length=2, max_length=2)
+    city: str | None = Field(default=None, max_length=120)
+    categories: list[str] = Field(default_factory=list)
+    monthly_orders: int | None = Field(default=None, ge=0, le=100000000)
+    avg_order_value: float | None = Field(default=None, ge=0)
+    feed_url: str | None = Field(default=None, max_length=2000)
+    logistics_model: str = Field(
+        default="own_warehouse",
+        pattern=r"^(own_warehouse|dropshipping|marketplace_fulfillment|hybrid)$",
+    )
+    warehouses_count: int | None = Field(default=None, ge=0, le=10000)
+    marketplaces: list[str] = Field(default_factory=list)
+    returns_policy: str | None = Field(default=None, max_length=2000)
+    goals: str | None = Field(default=None, max_length=2000)
+    notes: str | None = Field(default=None, max_length=4000)
+    accepts_terms: bool = Field(default=False)
+
+    @field_validator("accepts_terms")
+    @classmethod
+    def validate_accepts_terms(cls, value: bool) -> bool:
+        if not value:
+            raise ValueError("terms must be accepted")
+        return value
+
+
+class B2BPartnerLeadOut(BaseModel):
+    id: str
+    status: B2BPartnerLeadStatus
+    company_name: str
+    legal_name: str | None = None
+    brand_name: str | None = None
+    tax_id: str | None = None
+    website_url: str | None = None
+    contact_name: str
+    contact_role: str | None = None
+    email: str
+    phone: str
+    telegram: str | None = None
+    country_code: str
+    city: str | None = None
+    categories: list[str]
+    monthly_orders: int | None = None
+    avg_order_value: float | None = None
+    feed_url: str | None = None
+    logistics_model: str
+    warehouses_count: int | None = None
+    marketplaces: list[str]
+    returns_policy: str | None = None
+    goals: str | None = None
+    notes: str | None = None
+    review_note: str | None = None
+    reviewed_at: str | None = None
+    created_at: str
+    updated_at: str
+
+
 class B2BGoRedirectOut(BaseModel):
     click_event_id: str
     destination_url: str
@@ -359,3 +427,8 @@ class AdminB2BPlanUpsertIn(BaseModel):
     included_clicks: int = Field(ge=0)
     click_price: float = Field(ge=0)
     limits: dict = Field(default_factory=dict)
+
+
+class AdminB2BPartnerLeadPatchIn(BaseModel):
+    status: B2BPartnerLeadStatus
+    review_note: str | None = Field(default=None, max_length=2000)

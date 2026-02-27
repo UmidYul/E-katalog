@@ -4,7 +4,6 @@ import { Manrope, Source_Sans_3 } from "next/font/google";
 import "./globals.css";
 
 import { Providers } from "@/components/common/providers";
-import { RootShell } from "@/components/layout/root-shell";
 import { env } from "@/config/env";
 
 const manrope = Manrope({
@@ -44,7 +43,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="ru" suppressHydrationWarning>
       <body className={`${sourceSans3.variable} ${manrope.variable} ${sourceSans3.className}`}>
         <Providers>
-          <RootShell>{children}</RootShell>
+          {children}
         </Providers>
       </body>
     </html>

@@ -10,14 +10,15 @@ import { AdminTopbar } from "@/components/layout/admin-topbar";
 import { useAdminAccess } from "@/features/auth/use-admin-access";
 
 const titles: Record<string, { title: string; subtitle: string }> = {
-  "/dashboard": { title: "Executive Hub", subtitle: "Ключевые KPI, риски и приоритеты платформы" },
-  "/dashboard/users": { title: "Пользователи", subtitle: "Аккаунты, роли и активность" },
-  "/dashboard/products": { title: "Товары", subtitle: "Канонические товары и офферы магазинов" },
-  "/dashboard/categories": { title: "Категории", subtitle: "Таксономия каталога и структура" },
-  "/dashboard/orders": { title: "Заказы", subtitle: "Поток заказов и статусы" },
-  "/dashboard/feedback": { title: "Модерация", subtitle: "Очередь отзывов и вопросов" },
-  "/dashboard/analytics": { title: "Аналитика 360", subtitle: "Revenue, Quality, Operations, Moderation, Users" },
-  "/dashboard/settings": { title: "Настройки", subtitle: "Параметры платформы и источников" },
+  "/dashboard": { title: "Executive Hub", subtitle: "Platform KPIs, risks, and operational priorities" },
+  "/dashboard/users": { title: "Users", subtitle: "Accounts, roles, and activity" },
+  "/dashboard/products": { title: "Products", subtitle: "Canonical products and merchant offers" },
+  "/dashboard/categories": { title: "Categories", subtitle: "Taxonomy and catalog structure" },
+  "/dashboard/orders": { title: "Orders", subtitle: "Order flow and status control" },
+  "/dashboard/feedback": { title: "Moderation", subtitle: "Reviews and questions queue" },
+  "/dashboard/analytics": { title: "Analytics 360", subtitle: "Revenue, quality, operations, moderation, users" },
+  "/dashboard/b2b": { title: "B2B Control", subtitle: "Onboarding, disputes, risk flags, plans, and jobs" },
+  "/dashboard/settings": { title: "Settings", subtitle: "Platform and scraper configuration" },
 };
 
 export function DashboardShell({ children }: { children: ReactNode }) {
@@ -38,8 +39,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const header = useMemo(() => {
     const found = Object.keys(titles).find((route) => pathname === route || pathname.startsWith(`${route}/`));
     return found
-      ? titles[found] ?? { title: "Админка", subtitle: "Рабочее пространство платформы" }
-      : { title: "Админка", subtitle: "Рабочее пространство платформы" };
+      ? titles[found] ?? { title: "Admin", subtitle: "Platform workspace" }
+      : { title: "Admin", subtitle: "Platform workspace" };
   }, [pathname]);
 
   if (!me.isFetched || me.isLoading || !canAccessDashboard) {

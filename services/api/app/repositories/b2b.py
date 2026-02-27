@@ -68,6 +68,20 @@ class B2BRepository:
         except (TypeError, ValueError):
             return default
 
+    @staticmethod
+    def _to_str_list(value: Any, *, max_items: int = 40, max_len: int = 120) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        rows: list[str] = []
+        for item in value:
+            text_value = str(item or "").strip()
+            if not text_value:
+                continue
+            rows.append(text_value[:max_len])
+            if len(rows) >= max(1, int(max_items)):
+                break
+        return rows
+
     async def resolve_org_id(self, org_ref: str) -> int | None:
         value = (
             await self.session.execute(
@@ -503,6 +517,168 @@ class B2BRepository:
             "user_id": str(row["user_uuid"]),
             "role": str(row["role"]),
             "status": str(row["status"]),
+            "created_at": self._iso(row.get("created_at")),
+            "updated_at": self._iso(row.get("updated_at")),
+        }
+
+    async def create_partner_lead(
+        self,
+        *,
+        payload: dict[str, Any],
+        submitted_ip: str,
+        submitted_user_agent: str,
+    ) -> dict[str, Any]:
+        categories = self._to_str_list(payload.get("categories"), max_items=40, max_len=80)
+        marketplaces = self._to_str_list(payload.get("marketplaces"), max_items=40, max_len=80)
+        monthly_orders = self._to_int(payload.get("monthly_orders"), default=0)
+        warehouses_count = self._to_int(payload.get("warehouses_count"), default=0)
+        avg_order_value = self._to_float(payload.get("avg_order_value"), default=0.0)
+
+        row = (
+            await self.session.execute(
+                text(
+                    """
+                    insert into b2b_partner_leads (
+                        status,
+                        company_name,
+                        legal_name,
+                        brand_name,
+                        tax_id,
+                        website_url,
+                        contact_name,
+                        contact_role,
+                        email,
+                        phone,
+                        telegram,
+                        country_code,
+                        city,
+                        categories,
+                        monthly_orders,
+                        avg_order_value,
+                        feed_url,
+                        logistics_model,
+                        warehouses_count,
+                        marketplaces,
+                        returns_policy,
+                        goals,
+                        notes,
+                        submitted_ip,
+                        submitted_user_agent
+                    ) values (
+                        'submitted',
+                        :company_name,
+                        :legal_name,
+                        :brand_name,
+                        :tax_id,
+                        :website_url,
+                        :contact_name,
+                        :contact_role,
+                        :email,
+                        :phone,
+                        :telegram,
+                        :country_code,
+                        :city,
+                        cast(:categories as jsonb),
+                        :monthly_orders,
+                        :avg_order_value,
+                        :feed_url,
+                        :logistics_model,
+                        :warehouses_count,
+                        cast(:marketplaces as jsonb),
+                        :returns_policy,
+                        :goals,
+                        :notes,
+                        :submitted_ip,
+                        :submitted_user_agent
+                    )
+                    returning
+                        uuid,
+                        status,
+                        company_name,
+                        legal_name,
+                        brand_name,
+                        tax_id,
+                        website_url,
+                        contact_name,
+                        contact_role,
+                        email,
+                        phone,
+                        telegram,
+                        country_code,
+                        city,
+                        categories,
+                        monthly_orders,
+                        avg_order_value,
+                        feed_url,
+                        logistics_model,
+                        warehouses_count,
+                        marketplaces,
+                        returns_policy,
+                        goals,
+                        notes,
+                        review_note,
+                        reviewed_at,
+                        created_at,
+                        updated_at
+                    """
+                ),
+                {
+                    "company_name": str(payload.get("company_name") or "").strip(),
+                    "legal_name": str(payload.get("legal_name") or "").strip() or None,
+                    "brand_name": str(payload.get("brand_name") or "").strip() or None,
+                    "tax_id": str(payload.get("tax_id") or "").strip() or None,
+                    "website_url": str(payload.get("website_url") or "").strip() or None,
+                    "contact_name": str(payload.get("contact_name") or "").strip(),
+                    "contact_role": str(payload.get("contact_role") or "").strip() or None,
+                    "email": str(payload.get("email") or "").strip().lower(),
+                    "phone": str(payload.get("phone") or "").strip(),
+                    "telegram": str(payload.get("telegram") or "").strip() or None,
+                    "country_code": (str(payload.get("country_code") or "UZ").strip().upper() or "UZ")[:2],
+                    "city": str(payload.get("city") or "").strip() or None,
+                    "categories": json.dumps(categories),
+                    "monthly_orders": monthly_orders if monthly_orders > 0 else None,
+                    "avg_order_value": avg_order_value if avg_order_value > 0 else None,
+                    "feed_url": str(payload.get("feed_url") or "").strip() or None,
+                    "logistics_model": str(payload.get("logistics_model") or "own_warehouse").strip().lower() or "own_warehouse",
+                    "warehouses_count": warehouses_count if warehouses_count > 0 else None,
+                    "marketplaces": json.dumps(marketplaces),
+                    "returns_policy": str(payload.get("returns_policy") or "").strip() or None,
+                    "goals": str(payload.get("goals") or "").strip() or None,
+                    "notes": str(payload.get("notes") or "").strip() or None,
+                    "submitted_ip": str(submitted_ip or "").strip()[:128] or None,
+                    "submitted_user_agent": str(submitted_user_agent or "").strip()[:512] or None,
+                },
+            )
+        ).mappings().one()
+        await self.session.commit()
+
+        return {
+            "id": str(row["uuid"]),
+            "status": str(row["status"]),
+            "company_name": str(row["company_name"]),
+            "legal_name": row.get("legal_name"),
+            "brand_name": row.get("brand_name"),
+            "tax_id": row.get("tax_id"),
+            "website_url": row.get("website_url"),
+            "contact_name": str(row["contact_name"]),
+            "contact_role": row.get("contact_role"),
+            "email": str(row["email"]),
+            "phone": str(row["phone"]),
+            "telegram": row.get("telegram"),
+            "country_code": str(row.get("country_code") or "UZ"),
+            "city": row.get("city"),
+            "categories": self._to_str_list(row.get("categories"), max_items=40, max_len=80),
+            "monthly_orders": self._to_int(row.get("monthly_orders"), default=0) or None,
+            "avg_order_value": self._to_float(row.get("avg_order_value"), default=0.0) or None,
+            "feed_url": row.get("feed_url"),
+            "logistics_model": str(row.get("logistics_model") or "own_warehouse"),
+            "warehouses_count": self._to_int(row.get("warehouses_count"), default=0) or None,
+            "marketplaces": self._to_str_list(row.get("marketplaces"), max_items=40, max_len=80),
+            "returns_policy": row.get("returns_policy"),
+            "goals": row.get("goals"),
+            "notes": row.get("notes"),
+            "review_note": row.get("review_note"),
+            "reviewed_at": self._iso(row.get("reviewed_at")),
             "created_at": self._iso(row.get("created_at")),
             "updated_at": self._iso(row.get("updated_at")),
         }
@@ -2134,6 +2310,149 @@ class B2BRepository:
             {"click_event_id": click_event_id, "attribution_token": attribution_token},
         )
         await self.session.commit()
+
+    async def list_admin_partner_leads(self, *, status: str | None, q: str | None, limit: int, offset: int) -> dict[str, Any]:
+        where = ["1=1"]
+        params: dict[str, Any] = {"limit": max(1, min(int(limit), 200)), "offset": max(0, int(offset))}
+        if status:
+            where.append("pl.status = :status")
+            params["status"] = status
+        normalized_q = str(q or "").strip()
+        if normalized_q:
+            where.append("(pl.company_name ilike :q or pl.email ilike :q or pl.contact_name ilike :q)")
+            params["q"] = f"%{normalized_q}%"
+        where_sql = " and ".join(where)
+        total = int(
+            (
+                await self.session.execute(
+                    text(f"select count(*)::int from b2b_partner_leads pl where {where_sql}"),
+                    params,
+                )
+            ).scalar_one()
+            or 0
+        )
+        rows = (
+            await self.session.execute(
+                text(
+                    f"""
+                    select
+                        pl.uuid,
+                        pl.status,
+                        pl.company_name,
+                        pl.legal_name,
+                        pl.brand_name,
+                        pl.tax_id,
+                        pl.website_url,
+                        pl.contact_name,
+                        pl.contact_role,
+                        pl.email,
+                        pl.phone,
+                        pl.telegram,
+                        pl.country_code,
+                        pl.city,
+                        pl.categories,
+                        pl.monthly_orders,
+                        pl.avg_order_value,
+                        pl.feed_url,
+                        pl.logistics_model,
+                        pl.warehouses_count,
+                        pl.marketplaces,
+                        pl.returns_policy,
+                        pl.goals,
+                        pl.notes,
+                        pl.review_note,
+                        pl.reviewed_at,
+                        pl.created_at,
+                        pl.updated_at
+                    from b2b_partner_leads pl
+                    where {where_sql}
+                    order by pl.updated_at desc, pl.id desc
+                    limit :limit
+                    offset :offset
+                    """
+                ),
+                params,
+            )
+        ).mappings().all()
+        return {
+            "items": [
+                {
+                    "id": str(row["uuid"]),
+                    "status": str(row["status"]),
+                    "company_name": str(row["company_name"]),
+                    "legal_name": row.get("legal_name"),
+                    "brand_name": row.get("brand_name"),
+                    "tax_id": row.get("tax_id"),
+                    "website_url": row.get("website_url"),
+                    "contact_name": str(row["contact_name"]),
+                    "contact_role": row.get("contact_role"),
+                    "email": str(row["email"]),
+                    "phone": str(row["phone"]),
+                    "telegram": row.get("telegram"),
+                    "country_code": str(row.get("country_code") or "UZ"),
+                    "city": row.get("city"),
+                    "categories": self._to_str_list(row.get("categories"), max_items=40, max_len=80),
+                    "monthly_orders": self._to_int(row.get("monthly_orders"), default=0) or None,
+                    "avg_order_value": self._to_float(row.get("avg_order_value"), default=0.0) or None,
+                    "feed_url": row.get("feed_url"),
+                    "logistics_model": str(row.get("logistics_model") or "own_warehouse"),
+                    "warehouses_count": self._to_int(row.get("warehouses_count"), default=0) or None,
+                    "marketplaces": self._to_str_list(row.get("marketplaces"), max_items=40, max_len=80),
+                    "returns_policy": row.get("returns_policy"),
+                    "goals": row.get("goals"),
+                    "notes": row.get("notes"),
+                    "review_note": row.get("review_note"),
+                    "reviewed_at": self._iso(row.get("reviewed_at")),
+                    "created_at": self._iso(row.get("created_at")),
+                    "updated_at": self._iso(row.get("updated_at")),
+                }
+                for row in rows
+            ],
+            "total": total,
+            "limit": params["limit"],
+            "offset": params["offset"],
+        }
+
+    async def patch_admin_partner_lead(
+        self,
+        *,
+        lead_uuid: str,
+        status: str,
+        review_note: str | None,
+        reviewer_uuid: str,
+    ) -> dict[str, Any] | None:
+        row = (
+            await self.session.execute(
+                text(
+                    """
+                    update b2b_partner_leads
+                    set
+                        status = :status,
+                        review_note = :review_note,
+                        reviewed_by_user_uuid = cast(:reviewer_uuid as uuid),
+                        reviewed_at = now(),
+                        updated_at = now()
+                    where uuid = cast(:lead_uuid as uuid)
+                    returning uuid, status, reviewed_at
+                    """
+                ),
+                {
+                    "lead_uuid": self._uuid(lead_uuid),
+                    "status": status,
+                    "review_note": review_note,
+                    "reviewer_uuid": self._uuid(reviewer_uuid),
+                },
+            )
+        ).mappings().first()
+        if not row:
+            await self.session.rollback()
+            return None
+        await self.session.commit()
+        return {
+            "id": str(row["uuid"]),
+            "status": str(row["status"]),
+            "reviewed_at": self._iso(row.get("reviewed_at")),
+        }
 
     async def list_admin_onboarding_applications(self, *, status: str | None, limit: int, offset: int) -> dict[str, Any]:
         where = ["1=1"]
