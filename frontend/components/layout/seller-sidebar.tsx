@@ -17,12 +17,12 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils/cn";
 
 const nav = [
-  { href: "/seller", label: "Overview", icon: BarChart3 },
-  { href: "/seller/onboarding", label: "Onboarding", icon: UserRoundCheck },
-  { href: "/seller/feeds", label: "Feeds", icon: Network },
-  { href: "/seller/campaigns", label: "Campaigns", icon: Megaphone },
-  { href: "/seller/billing", label: "Billing", icon: CreditCard },
-  { href: "/seller/support", label: "Support", icon: ShieldCheck },
+  { href: "/dashboard/seller", label: "Overview", icon: BarChart3 },
+  { href: "/dashboard/seller/onboarding", label: "Onboarding", icon: UserRoundCheck },
+  { href: "/dashboard/seller/feeds", label: "Feeds", icon: Network },
+  { href: "/dashboard/seller/campaigns", label: "Campaigns", icon: Megaphone },
+  { href: "/dashboard/seller/billing", label: "Billing", icon: CreditCard },
+  { href: "/dashboard/seller/support", label: "Support", icon: ShieldCheck },
 ];
 
 const secondaryNav = [{ href: "/partners", label: "Partner Form", icon: Handshake }];

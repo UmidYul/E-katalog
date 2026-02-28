@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useState } from "react";
@@ -75,3 +75,4 @@ export default function AdminCategoriesPage() {
     </div>
   );
 }
+

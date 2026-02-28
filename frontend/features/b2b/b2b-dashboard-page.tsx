@@ -122,7 +122,7 @@ export function B2BDashboardPage() {
         <p className="text-sm text-muted-foreground">
           Create your first organization and pass onboarding to unlock feed management, campaigns, billing, and analytics.
         </p>
-        <Link href="/seller/onboarding" className={buttonVariants()}>
+        <Link href="/dashboard/seller/onboarding" className={buttonVariants()}>
           Start onboarding
         </Link>
       </div>
@@ -245,15 +245,15 @@ export function B2BDashboardPage() {
               ))}
             </div>
             <div className="mt-4 grid gap-2">
-              <Link href="/seller/campaigns" className={cn(buttonVariants(), "justify-between")}>
+              <Link href="/dashboard/seller/campaigns" className={cn(buttonVariants(), "justify-between")}>
                 Manage campaigns
                 <ArrowUpRight className="h-4 w-4" />
               </Link>
-              <Link href="/seller/feeds" className={cn(buttonVariants({ variant: "secondary" }), "justify-between")}>
+              <Link href="/dashboard/seller/feeds" className={cn(buttonVariants({ variant: "secondary" }), "justify-between")}>
                 Validate feeds
                 <ArrowUpRight className="h-4 w-4" />
               </Link>
-              <Link href="/seller/billing" className={cn(buttonVariants({ variant: "outline" }), "justify-between")}>
+              <Link href="/dashboard/seller/billing" className={cn(buttonVariants({ variant: "outline" }), "justify-between")}>
                 Review invoices
                 <ArrowUpRight className="h-4 w-4" />
               </Link>
@@ -439,7 +439,7 @@ export function B2BDashboardPage() {
               <Button onClick={createTicket} disabled={createTicketMutation.isPending}>
                 {createTicketMutation.isPending ? "Creating..." : "Create ticket"}
               </Button>
-              <Link href="/seller/support" className={buttonVariants({ variant: "secondary" })}>
+              <Link href="/dashboard/seller/support" className={buttonVariants({ variant: "secondary" })}>
                 Open full support center
               </Link>
             </div>

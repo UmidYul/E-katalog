@@ -910,8 +910,13 @@ async def _set_auth_cookies(
         "samesite": "lax",
         "path": "/",
     }
+    role_value = "user"
+    role_user = await _load_user(redis, user_id, db)
+    if role_user is not None:
+        role_value = str(role_user.get("role") or "user").strip().lower().replace("-", "_") or "user"
     response.set_cookie(ACCESS_COOKIE, access, max_age=ACCESS_TTL_SECONDS, **cookie_base)
     response.set_cookie(REFRESH_COOKIE, refresh, max_age=REFRESH_TTL_SECONDS, **cookie_base)
+    response.set_cookie(LEGACY_ROLE_COOKIE, role_value, max_age=REFRESH_TTL_SECONDS, **cookie_base)
     return session_id
 
 

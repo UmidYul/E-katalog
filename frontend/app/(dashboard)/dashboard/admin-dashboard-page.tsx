@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -175,7 +175,7 @@ export function AdminDashboardPage() {
             ) : (
               <p className="text-sm text-muted-foreground">No open alerts.</p>
             )}
-            <Link href="/dashboard/analytics" className="inline-block text-xs text-primary hover:underline">
+            <Link href="/dashboard/admin/analytics" className="inline-block text-xs text-primary hover:underline">
               Open analytics center
             </Link>
           </CardContent>
@@ -222,10 +222,10 @@ export function AdminDashboardPage() {
           <CardHeader className="flex flex-row items-center justify-between gap-2">
             <CardTitle className="flex items-center gap-2">
               <ShieldAlert className="h-4 w-4 text-primary" />
-              B2B command center
+              Sellers command center
             </CardTitle>
-            <Link href="/dashboard/b2b" className={buttonVariants({ size: "sm", variant: "secondary" })}>
-              Open /dashboard/b2b
+            <Link href="/dashboard/admin/sellers" className={buttonVariants({ size: "sm", variant: "secondary" })}>
+              Open /dashboard/admin/sellers
             </Link>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -263,7 +263,7 @@ export function AdminDashboardPage() {
               </Button>
             </div>
 
-            <p className="text-xs text-muted-foreground">Use `/dashboard/b2b` for approvals, dispute decisions, plan management, and audit-ready actions.</p>
+            <p className="text-xs text-muted-foreground">Use `/dashboard/admin/sellers` for approvals, dispute decisions, plan management, and audit-ready actions.</p>
           </CardContent>
         </Card>
 
@@ -275,7 +275,7 @@ export function AdminDashboardPage() {
             {productsWithoutOffers.data?.items?.length ? (
               productsWithoutOffers.data.items.map((item) => (
                 <div key={item.id} className="rounded-xl border border-border p-3">
-                  <Link href={`/dashboard/products/${item.id}`} className="line-clamp-1 text-sm font-medium hover:text-primary">
+                  <Link href={`/dashboard/admin/products/${item.id}`} className="line-clamp-1 text-sm font-medium hover:text-primary">
                     {item.normalized_title}
                   </Link>
                   <p className="text-xs text-muted-foreground">
@@ -292,3 +292,4 @@ export function AdminDashboardPage() {
     </div>
   );
 }
+

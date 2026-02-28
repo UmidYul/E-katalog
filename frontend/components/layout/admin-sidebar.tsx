@@ -9,15 +9,15 @@ import { cn } from "@/lib/utils/cn";
 import { useUiStore } from "@/store/ui.store";
 
 const nav = [
-  { href: "/dashboard", label: "Hub", icon: LayoutDashboard },
-  { href: "/dashboard/users", label: "Users", icon: Users },
-  { href: "/dashboard/products", label: "Products", icon: Package },
-  { href: "/dashboard/categories", label: "Categories", icon: Boxes },
-  { href: "/dashboard/orders", label: "Orders", icon: ShoppingCart },
-  { href: "/dashboard/feedback", label: "Moderation", icon: MessageSquare },
-  { href: "/dashboard/analytics", label: "Analytics 360", icon: BarChart3 },
-  { href: "/dashboard/b2b", label: "B2B Control", icon: ShieldAlert },
-  { href: "/dashboard/settings", label: "Settings", icon: Settings },
+  { href: "/dashboard/admin", label: "Hub", icon: LayoutDashboard },
+  { href: "/dashboard/admin/users", label: "Users", icon: Users },
+  { href: "/dashboard/admin/products", label: "Products", icon: Package },
+  { href: "/dashboard/admin/categories", label: "Categories", icon: Boxes },
+  { href: "/dashboard/admin/orders", label: "Orders", icon: ShoppingCart },
+  { href: "/dashboard/admin/feedback", label: "Moderation", icon: MessageSquare },
+  { href: "/dashboard/admin/analytics", label: "Analytics 360", icon: BarChart3 },
+  { href: "/dashboard/admin/sellers", label: "Sellers", icon: ShieldAlert },
+  { href: "/dashboard/admin/settings", label: "Settings", icon: Settings },
 ];
 
 export function AdminSidebar() {

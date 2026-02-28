@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useState } from "react";
@@ -40,7 +40,7 @@ export default function AdminUsersPage() {
       title: "Actions",
       render: (u) => (
         <div className="flex gap-2">
-          <Link href={`/dashboard/users/${u.id}`} className="rounded-xl border border-input px-3 py-1.5 text-xs hover:bg-secondary">
+          <Link href={`/dashboard/admin/users/${u.id}`} className="rounded-xl border border-input px-3 py-1.5 text-xs hover:bg-secondary">
             View
           </Link>
           <Button variant="secondary" size="sm" onClick={() => setTargetId(u.id)}>
@@ -91,3 +91,4 @@ export default function AdminUsersPage() {
     </div>
   );
 }
+

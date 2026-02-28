@@ -33,7 +33,7 @@ export function SellerTopbar({
           <span className="hidden rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-700 sm:inline-flex">
             {userName}
           </span>
-          <Link href="/dashboard" className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100">
+          <Link href="/dashboard/admin" className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100">
             Admin
           </Link>
         </div>

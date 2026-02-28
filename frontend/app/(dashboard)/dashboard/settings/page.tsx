@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useEffect, useMemo, useState } from "react";
@@ -389,3 +389,4 @@ export default function AdminSettingsPage() {
     </div>
   );
 }
+

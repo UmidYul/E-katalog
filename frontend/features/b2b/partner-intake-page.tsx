@@ -234,7 +234,7 @@ export function PartnerIntakePage() {
                 <Send className="mr-1 h-4 w-4" />
                 {submitLeadMutation.isPending ? "Submitting..." : "Submit application"}
               </Button>
-              <Link href="/seller" className="inline-flex items-center rounded-md border border-border px-3 py-2 text-sm">
+              <Link href="/dashboard/seller" className="inline-flex items-center rounded-md border border-border px-3 py-2 text-sm">
                 Open Seller Panel
               </Link>
             </div>

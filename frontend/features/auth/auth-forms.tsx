@@ -26,6 +26,13 @@ const extractErrorMessage = (error: unknown) => {
 const buildOAuthStartUrl = (provider: "google" | "facebook", nextPath: string) =>
   `${env.apiOrigin}${env.apiPrefix}/auth/oauth/${provider}?next=${encodeURIComponent(nextPath || "/profile")}`;
 
+const roleLanding = (role: string | undefined) => {
+  const normalized = String(role ?? "").trim().toLowerCase().replace("-", "_");
+  if (normalized === "admin") return "/dashboard/admin";
+  if (normalized === "seller") return "/dashboard/seller";
+  return "/";
+};
+
 function SocialAuthButtons({ nextPath }: { nextPath: string }) {
   const providersQuery = useQuery({
     queryKey: ["auth", "oauth-providers"],
@@ -68,7 +75,8 @@ function SocialAuthButtons({ nextPath }: { nextPath: string }) {
 export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const next = searchParams.get("next") ?? "/profile";
+  const requestedNext = searchParams.get("next");
+  const next = requestedNext && requestedNext.startsWith("/") ? requestedNext : null;
   const oauthError = searchParams.get("oauth_error");
   const login = useLogin();
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -106,7 +114,8 @@ export function LoginForm() {
               setChallengeToken(null);
               setTwoFactorCode("");
               setRecoveryCode("");
-              router.replace(next);
+              const redirectTarget = next ?? roleLanding("role" in data ? data.role : undefined);
+              router.replace(redirectTarget);
               router.refresh();
             } catch (error) {
               setSubmitError(extractErrorMessage(error));
@@ -136,7 +145,7 @@ export function LoginForm() {
 
           <div className="pt-1">
             <p className="mb-2 text-center text-xs text-muted-foreground">или</p>
-            <SocialAuthButtons nextPath={next} />
+            <SocialAuthButtons nextPath={next ?? "/"} />
           </div>
 
           <Link href="/register" className={cn(buttonVariants({ variant: "ghost" }), "w-full")}>

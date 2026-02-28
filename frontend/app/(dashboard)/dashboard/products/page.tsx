@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { Download, Upload } from "lucide-react";
@@ -141,7 +141,7 @@ export default function AdminProductsPage() {
       title: "Actions",
       render: (x) => (
         <div className="flex gap-2">
-          <Link href={`/dashboard/products/${x.id}`} className="rounded-xl border border-input px-3 py-1.5 text-xs hover:bg-secondary">
+          <Link href={`/dashboard/admin/products/${x.id}`} className="rounded-xl border border-input px-3 py-1.5 text-xs hover:bg-secondary">
             View
           </Link>
           <Button size="sm" variant="secondary" onClick={() => setTargetId(x.id)}>
@@ -236,3 +236,4 @@ export default function AdminProductsPage() {
     </div>
   );
 }
+

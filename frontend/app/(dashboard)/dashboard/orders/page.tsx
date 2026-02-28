@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useState } from "react";
@@ -25,7 +25,7 @@ export default function AdminOrdersPage() {
       key: "actions",
       title: "Actions",
       render: (x) => (
-        <Link href={`/dashboard/orders/${x.id}`} className="rounded-xl border border-input px-3 py-1 text-xs hover:bg-secondary">
+        <Link href={`/dashboard/admin/orders/${x.id}`} className="rounded-xl border border-input px-3 py-1 text-xs hover:bg-secondary">
           Details
         </Link>
       ),
@@ -55,3 +55,4 @@ export default function AdminOrdersPage() {
     </div>
   );
 }
+

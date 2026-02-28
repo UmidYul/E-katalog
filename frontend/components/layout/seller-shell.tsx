@@ -10,12 +10,12 @@ import { SellerTopbar } from "@/components/layout/seller-topbar";
 const PLATFORM_STAFF_ROLES = new Set(["admin", "moderator", "seller_support"]);
 
 const titles: Record<string, { title: string; subtitle: string }> = {
-  "/seller": { title: "Seller Overview", subtitle: "Performance, health, billing, and support in one cockpit" },
-  "/seller/onboarding": { title: "Onboarding", subtitle: "Legal profile, KYC docs, and contract acceptance" },
-  "/seller/feeds": { title: "Feed Operations", subtitle: "Source setup, validation runs, and quality control" },
-  "/seller/campaigns": { title: "Campaign Manager", subtitle: "Budget, bids, and placement strategy" },
-  "/seller/billing": { title: "Billing", subtitle: "Plans, invoices, acts, and payment status" },
-  "/seller/support": { title: "Support Center", subtitle: "Tickets, priority escalation, and response tracking" },
+  "/dashboard/seller": { title: "Seller Overview", subtitle: "Performance, health, billing, and support in one cockpit" },
+  "/dashboard/seller/onboarding": { title: "Onboarding", subtitle: "Legal profile, KYC docs, and contract acceptance" },
+  "/dashboard/seller/feeds": { title: "Feed Operations", subtitle: "Source setup, validation runs, and quality control" },
+  "/dashboard/seller/campaigns": { title: "Campaign Manager", subtitle: "Budget, bids, and placement strategy" },
+  "/dashboard/seller/billing": { title: "Billing", subtitle: "Plans, invoices, acts, and payment status" },
+  "/dashboard/seller/support": { title: "Support Center", subtitle: "Tickets, priority escalation, and response tracking" },
 };
 
 export function SellerShell({ children }: { children: ReactNode }) {
@@ -33,11 +33,11 @@ export function SellerShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (me.isLoading) return;
     if (!me.data) {
-      router.replace(`/login?next=${encodeURIComponent(pathname || "/seller")}`);
+      router.replace(`/login?next=${encodeURIComponent(pathname || "/dashboard/seller")}`);
       return;
     }
     if (blockedRole) {
-      router.replace("/dashboard");
+      router.replace("/dashboard/admin");
     }
   }, [blockedRole, me.data, me.isLoading, pathname, router]);
 
