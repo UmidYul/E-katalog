@@ -1,13 +1,11 @@
- "use client";
+"use client";
 
 import { useQueries } from "@tanstack/react-query";
-import { MonitorSmartphone, ShieldCheck, Sparkles, TimerReset, TrendingUp } from "lucide-react";
+import { ShieldCheck, Sparkles, TimerReset, TrendingUp } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 
 import { CatalogGrid } from "@/components/catalog/catalog-grid";
-import { ProductCard } from "@/components/ui/ProductCard";
-import { ProductCardSkeleton } from "@/components/ui/ProductCardSkeleton";
 import { PriceAlertBadge } from "@/components/common/price-alert-badge";
 import { SectionHeading } from "@/components/common/section-heading";
 import { Badge } from "@/components/ui/badge";
@@ -192,99 +190,28 @@ export function HomeClient() {
     return suggestions;
   }, [brands, categories.data]);
 
-  const [heroQuery, setHeroQuery] = useState("");
-  const [popularFilter, setPopularFilter] = useState<"all" | "phones" | "laptops" | "tvs">("all");
-
-  const filteredTrendingItems = useMemo(() => {
-    if (popularFilter === "all") return trending.data?.items ?? [];
-    const items = trending.data?.items ?? [];
-    return items.filter((item) => {
-      const title = item.normalized_title.toLowerCase();
-      const categoryName = (item.category?.name ?? "").toLowerCase();
-      if (popularFilter === "phones") {
-        return title.includes("смартф") || categoryName.includes("смартф");
-      }
-      if (popularFilter === "laptops") {
-        return title.includes("ноутбук") || categoryName.includes("ноутбук");
-      }
-      if (popularFilter === "tvs") {
-        return title.includes("телевизор") || categoryName.includes("телевизор");
-      }
-      return true;
-    });
-  }, [popularFilter, trending.data?.items]);
-
-  const isAuthenticated = Boolean(me.data?.id);
-
   return (
-    <main className="section-padding pb-16 pt-6">
-      <div className="mx-auto max-w-6xl space-y-14 stagger-children">
-        <section className="animate-fade-in-up">
-          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-primary via-primary/90 to-accent px-6 py-10 text-white shadow-[0_40px_120px_rgba(15,23,42,0.65)] md:px-10 md:py-14">
-            <div className="pointer-events-none absolute inset-0 opacity-40 mix-blend-soft-light">
-              <div className="absolute -left-20 top-10 h-64 w-64 rounded-full bg-white/10 blur-3xl" />
-              <div className="absolute right-0 top-0 h-72 w-72 rounded-full bg-amber-400/20 blur-3xl" />
-              <div className="absolute -bottom-24 right-10 h-80 w-80 rounded-full bg-sky-300/20 blur-3xl" />
-            </div>
+    <div className="container space-y-12 py-6">
+      <section className="relative overflow-hidden rounded-2xl border border-border/80 bg-card p-8 shadow-soft">
+        <div className="pointer-events-none absolute right-0 top-0 h-64 w-64 rounded-full bg-primary/20 blur-3xl" />
+        <div className="pointer-events-none absolute bottom-0 left-0 h-40 w-40 rounded-full bg-accent/20 blur-3xl" />
 
-            <Badge className="relative mb-5 w-fit border-white/30 bg-white/10 text-xs font-medium text-white/90 backdrop-blur">
-              e-katalog · Precision Commerce
-            </Badge>
+        <Badge className="mb-4 w-fit border-primary/30 bg-primary/15 text-primary">Doxx</Badge>
+        <h1 className="max-w-3xl text-3xl font-extrabold tracking-tight md:text-5xl">Сравнивайте цены на технику по проверенным магазинам за пару кликов.</h1>
+        <p className="mt-4 max-w-2xl text-muted-foreground">
+          Единый каталог, прозрачные предложения, история стоимости и удобные инструменты для взвешенной покупки.
+        </p>
+        <div className="mt-6 flex flex-wrap gap-3">
+          <Link href="/catalog" className="rounded-2xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-soft">
+            Перейти в каталог
+          </Link>
+          <Link href="/compare" className="rounded-2xl border border-border bg-background/80 px-5 py-3 text-sm font-semibold">
+            Открыть сравнение
+          </Link>
+        </div>
+      </section>
 
-            <div className="relative max-w-2xl space-y-4">
-              <h1 className="font-heading text-4xl font-bold tracking-tight text-white md:text-6xl">
-                Найди лучшую цену
-                <br />
-                на&nbsp;<span className="text-gradient">электронику</span>
-              </h1>
-              <p className="text-base text-white/80 md:text-lg">
-                Сравнивайте цены в десятках магазинов, отслеживайте динамику цен и выбирайте технику
-                без лишних компромиссов.
-              </p>
-            </div>
-
-            <div className="relative mt-8 max-w-2xl space-y-4">
-              <form
-                className="glass flex items-center gap-3 rounded-2xl bg-white/10 px-4 py-3 shadow-xl"
-                action="/catalog"
-                method="GET"
-              >
-                <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-primary/20 text-white">
-                  <MonitorSmartphone className="h-4 w-4" />
-                </span>
-                <input
-                  name="q"
-                  value={heroQuery}
-                  onChange={(event) => setHeroQuery(event.target.value)}
-                  placeholder="Поиск смартфонов, ноутбуков, телевизоров..."
-                  className="flex-1 bg-transparent text-sm text-white outline-none placeholder:text-white/60"
-                />
-                <button
-                  type="submit"
-                  className="gradient-primary inline-flex items-center justify-center rounded-xl px-4 py-2 text-xs font-semibold text-primary-foreground shadow-md"
-                >
-                  Найти цену
-                </button>
-              </form>
-
-              {popularRequests.length ? (
-                <div className="flex flex-wrap gap-2 text-xs text-white/80">
-                  {popularRequests.slice(0, 6).map((item) => (
-                    <Link
-                      key={item.label}
-                      href={item.href}
-                      className="glass rounded-full bg-white/5 px-3 py-1 text-xs font-medium text-white/85 hover:bg-white/10"
-                    >
-                      {item.label}
-                    </Link>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </section>
-
-        <section className="grid gap-4 animate-fade-in-up md:grid-cols-3">
+      <section className="grid gap-4 md:grid-cols-3">
         {trustItems.map((item) => (
           <Card key={item.title}>
             <CardContent className="space-y-3 p-5">
@@ -294,64 +221,15 @@ export function HomeClient() {
             </CardContent>
           </Card>
         ))}
-        </section>
+      </section>
 
-        <section className="animate-fade-in-up space-y-4">
-          <SectionHeading
-            title="Популярные товары"
-            description="Чаще всего просматривают за последние дни"
-            action={<TrendingUp className="h-5 w-5 text-primary" />}
-          />
-          <div className="flex flex-wrap gap-2 text-xs">
-            {([
-              { key: "all", label: "Все" },
-              { key: "phones", label: "Смартфоны" },
-              { key: "laptops", label: "Ноутбуки" },
-              { key: "tvs", label: "Телевизоры" }
-            ] as const).map((chip) => (
-              <button
-                key={chip.key}
-                type="button"
-                onClick={() => setPopularFilter(chip.key)}
-                className={cn(
-                  "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-                  popularFilter === chip.key
-                    ? "border-primary bg-primary/10 text-primary"
-                    : "border-border bg-card text-foreground/80 hover:border-primary/40 hover:bg-primary-subtle/60"
-                )}
-              >
-                {chip.label}
-              </button>
-            ))}
-          </div>
+      <section>
+        <SectionHeading title="Популярные товары" description="Чаще всего просматривают за последние дни" action={<TrendingUp className="h-5 w-5 text-primary" />} />
+        <CatalogGrid loading={trending.isLoading} items={trending.data?.items ?? []} />
+      </section>
 
-          {trending.isLoading ? (
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-              {Array.from({ length: 8 }).map((_, idx) => (
-                <ProductCardSkeleton key={idx} />
-              ))}
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-              {filteredTrendingItems.map((item) => (
-                <ProductCard
-                  key={item.id}
-                  product={item}
-                  favorite={favoriteIds.includes(item.id)}
-                  isTracking={favoriteIds.includes(item.id)}
-                  priceAlertSignal={null}
-                  compared={false}
-                  compareDisabled={false}
-                  onFavorite={undefined}
-                  onCompare={undefined}
-                />
-              ))}
-            </div>
-          )}
-        </section>
-
-        {showWatchlistTeaser ? (
-          <section className="animate-fade-in-up rounded-2xl border border-border/80 bg-card/90 p-5 shadow-soft">
+      {showWatchlistTeaser ? (
+        <section className="rounded-2xl border border-border/80 bg-card/90 p-5 shadow-soft">
           <SectionHeading title="Снижения цен по вашему списку отслеживания" description="Локальные алерты на базе избранного и текущих минимальных цен." />
           <div className="grid gap-3 md:grid-cols-2">
             {priceDropItems.map((item) => (
@@ -367,42 +245,24 @@ export function HomeClient() {
               </Link>
             ))}
           </div>
-          </section>
-        ) : null}
-
-        <section className="animate-fade-in-up space-y-4">
-          <div className="flex items-center justify-between gap-2">
-            <SectionHeading
-              title="Категории"
-              description="Быстрый переход к основным разделам каталога"
-            />
-            <Link
-              href="/catalog"
-              className="hidden text-xs font-medium text-primary hover:underline md:inline"
-            >
-              Все категории
-            </Link>
-          </div>
-          <div className="grid grid-cols-3 gap-4 md:grid-cols-4 lg:grid-cols-6">
-            {(categories.data ?? []).slice(0, 12).map((category) => (
-              <Link key={category.id} href={`/category/${category.slug}`}>
-                <Card className="h-full border-border/80 bg-card/95 transition-colors hover:border-primary hover:bg-primary/90 hover:text-primary-foreground">
-                  <CardContent className="flex h-full flex-col items-start justify-between gap-3 p-4">
-                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                      <MonitorSmartphone className="h-4 w-4" />
-                    </span>
-                    <div className="space-y-1 text-xs">
-                      <p className="text-sm font-semibold">{category.name}</p>
-                    </div>
-                  </CardContent>
-                </Card>
-              </Link>
-            ))}
-          </div>
         </section>
+      ) : null}
 
-        {categoryPulse.length ? (
-        <section className="animate-fade-in-up">
+      <section>
+        <SectionHeading title="Категории" description="Быстрый переход к основным разделам каталога" />
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
+          {(categories.data ?? []).slice(0, 12).map((category) => (
+            <Link key={category.id} href={`/category/${category.slug}`}>
+              <Card className="h-full transition-colors hover:border-primary/50">
+                <CardContent className="p-4 text-sm font-semibold">{category.name}</CardContent>
+              </Card>
+            </Link>
+          ))}
+        </div>
+      </section>
+
+      {categoryPulse.length ? (
+        <section>
           <SectionHeading title="Рейтинг категорий" description="Оценка интереса и насыщенности предложений по популярным товарам." />
           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
             {categoryPulse.map((item) => (
@@ -427,7 +287,7 @@ export function HomeClient() {
       ) : null}
 
       {popularRequests.length ? (
-        <section className="animate-fade-in-up">
+        <section>
           <SectionHeading title="Популярные запросы" description="Быстрые сценарии поиска, которыми часто пользуются покупатели." />
           <div className="flex flex-wrap gap-2">
             {popularRequests.map((item) => (
@@ -439,7 +299,7 @@ export function HomeClient() {
         </section>
       ) : null}
 
-      <section className="animate-fade-in-up">
+      <section>
         <SectionHeading title="Энциклопедия выбора" description="Короткие тематические гиды для более осознанной покупки." />
         <div className="grid gap-3 md:grid-cols-3">
           {encyclopediaSections.map((section) => (
@@ -455,7 +315,7 @@ export function HomeClient() {
         </div>
       </section>
 
-      <section className="animate-fade-in-up">
+      <section>
         <SectionHeading title="Редакционные подборки" description="Кураторские сценарии выбора: что смотреть в первую очередь в популярных сегментах." />
         <div className="grid gap-3 md:grid-cols-3">
           {editorialSelections.map((item) => (
@@ -472,7 +332,7 @@ export function HomeClient() {
         </div>
       </section>
 
-      <section className="animate-fade-in-up">
+      <section>
         <SectionHeading title="Популярные бренды" />
         <div className="flex flex-wrap gap-2">
           {brands.map((brand) => (
@@ -483,24 +343,21 @@ export function HomeClient() {
         </div>
       </section>
 
-      {isAuthenticated && recent.length ? (
-        <section className="animate-fade-in-up">
-          <SectionHeading title="Недавно просмотренные" />
-          <div className="flex gap-3 overflow-x-auto pb-2 pt-1 [scrollbar-width:thin]">
+      <section>
+        <SectionHeading title="Недавно просмотренные" />
+        {recent.length ? (
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
             {recent.map((item) => (
-              <Link
-                key={item.id}
-                href={`/product/${item.slug}`}
-                className="min-w-[220px] max-w-xs snap-center rounded-2xl border border-border bg-card p-4 text-sm shadow-soft"
-              >
+              <Link key={item.id} href={`/product/${item.slug}`} className="rounded-2xl border border-border bg-card p-4 text-sm shadow-soft">
                 {item.title}
               </Link>
             ))}
           </div>
-        </section>
-      ) : null}
-      </div>
-    </main>
+        ) : (
+          <p className="text-sm text-muted-foreground">Здесь появятся товары, которые вы недавно открывали.</p>
+        )}
+      </section>
+    </div>
   );
 }
 
