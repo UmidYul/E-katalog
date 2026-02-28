@@ -1,4 +1,4 @@
-# Doxx Business + Technical Scale Roadmap (Q2 2026)
+﻿# E-katalog Business + Technical Scale Roadmap (Q2 2026)
 
 ## 1) Why this roadmap
 The current product already has core catalog, PDP, compare, normalization, dedupe, and AI enrichment.
@@ -238,4 +238,5 @@ By end of Q2:
 - trust-aware offer ranking live
 - first monetization pilot running with reporting
 - onboarding new brands requires minimal code changes
+
 

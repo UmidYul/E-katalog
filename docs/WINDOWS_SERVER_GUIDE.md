@@ -1,4 +1,4 @@
-# Windows Server Guide (Doxx)
+﻿# Windows Server Guide (E-katalog)
 
 ## 1) Run project as a server on your PC
 
@@ -58,7 +58,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\setup_named_tunnel.ps1 -Hostn
 
 The script will:
 - run `cloudflared tunnel login` if `cert.pem` is missing,
-- create (or reuse) tunnel `doxx`,
+- create (or reuse) tunnel `e-katalog`,
 - map DNS hostname to that tunnel,
 - write `%USERPROFILE%\.cloudflared\config.yml`,
 - install and start `cloudflared` Windows service.
@@ -86,4 +86,5 @@ docker compose -f infra/docker/docker-compose.prod.yml logs -f nginx
 docker compose -f infra/docker/docker-compose.prod.yml logs -f api
 docker compose -f infra/docker/docker-compose.prod.yml down
 ```
+
 

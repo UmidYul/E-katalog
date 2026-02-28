@@ -1,7 +1,7 @@
-param(
+﻿param(
     [Parameter(Mandatory = $true)]
     [string]$Hostname,
-    [string]$TunnelName = "doxx",
+    [string]$TunnelName = "e-katalog",
     [string]$CloudflaredPath = "C:\Program Files (x86)\cloudflared\cloudflared.exe",
     [string]$OriginUrl = "http://localhost:80",
     [switch]$InstallService = $true,
@@ -95,4 +95,5 @@ Write-Host ""
 Write-Host "Named tunnel is ready."
 Write-Host "Public URL: https://$Hostname"
 Write-Host "API health: https://$Hostname/api/v1/health"
+
 
