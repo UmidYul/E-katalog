@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from app.api.v1.routers import (
     admin,
     admin_b2b,
+    admin_sellers,
     auth,
     b2b_analytics,
     b2b_billing,
@@ -21,6 +22,9 @@ from app.api.v1.routers import (
     go_redirect,
     health,
     product_feedback,
+    seller_dashboard,
+    seller_products,
+    seller_public,
     products,
     search,
     stores,
@@ -40,6 +44,10 @@ api_router.include_router(filters.router)
 api_router.include_router(stores.router)
 api_router.include_router(compare.router)
 api_router.include_router(admin.router)
+api_router.include_router(admin_sellers.router)
+api_router.include_router(seller_public.router)
+api_router.include_router(seller_dashboard.router)
+api_router.include_router(seller_products.router)
 api_router.include_router(b2b_orgs.router)
 api_router.include_router(b2b_partners.router)
 api_router.include_router(b2b_onboarding.router)

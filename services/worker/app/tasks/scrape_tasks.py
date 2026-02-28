@@ -16,7 +16,8 @@ def scrape_priority_category(self, store_id: int, category_id: int) -> dict:
 
 @celery_app.task(bind=True)
 def enqueue_full_crawl(self) -> str:
-    return "scheduled"
+    # Scrapers ingest outside this worker; launch the full post-ingestion pipeline.
+    return run_product_pipeline()
 
 
 @celery_app.task(bind=True)

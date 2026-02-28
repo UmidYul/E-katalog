@@ -3,7 +3,7 @@ import { PartnerIntakePage } from "@/features/b2b/partner-intake-page";
 import { env } from "@/config/env";
 
 export const metadata: Metadata = {
-  title: "Become Seller",
+  title: "Стать продавцом",
   alternates: { canonical: `${env.appUrl}/become-seller` },
 };
 

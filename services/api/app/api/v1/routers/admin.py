@@ -47,7 +47,7 @@ router = APIRouter(
 )
 
 
-VALID_USER_ROLES = {"user", "moderator", "seller_support", "admin"}
+VALID_USER_ROLES = {"user", "seller", "moderator", "seller_support", "admin"}
 UUID_REF_PATTERN = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
 ANALYTICS_PERIOD_DAYS = {"7d": 7, "30d": 30, "90d": 90, "365d": 365}
 ANALYTICS_GRANULARITIES = {"day", "week"}

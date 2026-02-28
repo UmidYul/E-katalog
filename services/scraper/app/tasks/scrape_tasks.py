@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import asyncio
 
-from celery import chain
-
 from app.core.config import settings
 from app.core.logging import configure_logging, logger
 from app.db.init_db import init_db
@@ -29,30 +27,11 @@ def enqueue_example_store_scrape(self) -> str:
 
 
 def _enqueue_post_scrape_pipeline() -> str:
-    workflow = chain(
-        celery_app.signature(
-            "app.tasks.normalize_tasks.normalize_full_catalog",
-            kwargs={"chunk_size": 1000},
-            immutable=True,
-            queue="normalize",
-            routing_key="normalize",
-        ),
-        celery_app.signature(
-            "app.tasks.dedupe_tasks.find_duplicate_candidates_task",
-            kwargs={"limit": 5000},
-            immutable=True,
-            queue="dedupe",
-            routing_key="dedupe",
-        ),
-        celery_app.signature(
-            "app.tasks.reindex_tasks.reindex_product_search_batch",
-            kwargs={"limit": 20000},
-            immutable=True,
-            queue="reindex",
-            routing_key="reindex",
-        ),
+    result = celery_app.send_task(
+        "app.tasks.scrape_tasks.enqueue_ingested_products_pipeline",
+        queue="normalize",
+        routing_key="normalize",
     )
-    result = workflow.apply_async()
     return str(result.id)
 
 

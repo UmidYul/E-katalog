@@ -16,6 +16,15 @@ def _collect_mutating_route_lines(lines: list[str]) -> list[int]:
     return result
 
 
+def _collect_put_route_lines(lines: list[str]) -> list[int]:
+    result: list[int] = []
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith('@router.put("'):
+            result.append(i)
+    return result
+
+
 def _has_idempotency_call_near(lines: list[str], start_index: int, window: int = 120) -> bool:
     end_index = min(len(lines), start_index + window)
     snippet = "\n".join(lines[start_index:end_index])
@@ -31,6 +40,17 @@ def _assert_mutating_routes_idempotent(relative_path: str) -> None:
         if not _has_idempotency_call_near(lines, index):
             missing.append(f"{path}:{index + 1}")
     assert not missing, "mutating routes missing execute_idempotent_json:\n" + "\n".join(missing)
+
+
+def _assert_put_routes_idempotent(relative_path: str) -> None:
+    path = API_ROUTERS / relative_path
+    lines = path.read_text(encoding="utf-8").splitlines()
+    put_routes = _collect_put_route_lines(lines)
+    missing: list[str] = []
+    for index in put_routes:
+        if not _has_idempotency_call_near(lines, index):
+            missing.append(f"{path}:{index + 1}")
+    assert not missing, "PUT routes missing execute_idempotent_json:\n" + "\n".join(missing)
 
 
 def test_users_mutating_routes_have_idempotency_wrapper() -> None:
@@ -106,3 +126,22 @@ def test_b2b_support_mutating_routes_have_idempotency_wrapper() -> None:
 
 def test_admin_b2b_mutating_routes_have_idempotency_wrapper() -> None:
     _assert_mutating_routes_idempotent("admin_b2b.py")
+
+
+def test_admin_sellers_mutating_routes_have_idempotency_wrapper() -> None:
+    _assert_mutating_routes_idempotent("admin_sellers.py")
+    _assert_put_routes_idempotent("admin_sellers.py")
+
+
+def test_seller_public_mutating_routes_have_idempotency_wrapper() -> None:
+    _assert_mutating_routes_idempotent("seller_public.py")
+
+
+def test_seller_dashboard_mutating_routes_have_idempotency_wrapper() -> None:
+    _assert_mutating_routes_idempotent("seller_dashboard.py")
+    _assert_put_routes_idempotent("seller_dashboard.py")
+
+
+def test_seller_products_mutating_routes_have_idempotency_wrapper() -> None:
+    _assert_mutating_routes_idempotent("seller_products.py")
+    _assert_put_routes_idempotent("seller_products.py")

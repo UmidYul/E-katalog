@@ -676,3 +676,260 @@ export const adminB2bApi = {
   runFeedHealthJob: () => apiClient.post<{ task_id: string; queued: string }>("/admin/b2b/tasks/feed-health"),
 };
 
+export type AdminSellerApplication = {
+  id: string;
+  status: "pending" | "review" | "approved" | "rejected" | string;
+  company_name: string;
+  contact_name?: string | null;
+  email: string;
+  phone: string;
+  review_note?: string | null;
+  provisioning_status?: string | null;
+  submitted_at?: string;
+  age_hours?: number;
+  priority?: "normal" | "high" | "critical" | "resolved" | string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type BulkSellerApplicationActionIn = {
+  application_ids: string[];
+  status: "pending" | "review" | "approved" | "rejected";
+  review_note?: string | null;
+};
+
+export type AdminSellerShop = {
+  uuid: string;
+  org_uuid: string;
+  owner_user_uuid: string;
+  slug: string;
+  shop_name: string;
+  status: string;
+  website_url?: string | null;
+  contact_email: string;
+  contact_phone: string;
+  is_auto_paused?: boolean;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export const adminSellersApi = {
+  applications: (query: { status?: string; q?: string; sort_by?: "recent" | "oldest"; limit?: number; offset?: number } = {}) =>
+    apiClient.get<{ items: AdminSellerApplication[]; total: number; limit: number; offset: number }>("/admin/sellers/applications", { params: query }),
+  applicationById: (applicationId: string) => apiClient.get<AdminSellerApplication>(`/admin/sellers/applications/${applicationId}`),
+  patchApplicationStatus: (applicationId: string, payload: { status: string; review_note?: string | null }) =>
+    apiClient.patch(`/admin/sellers/applications/${applicationId}/status`, payload),
+  bulkPatchApplicationStatus: (payload: BulkSellerApplicationActionIn) =>
+    apiClient.post<{
+      ok: boolean;
+      status: string;
+      processed: number;
+      updated_count: number;
+      not_found_count: number;
+      failed_count: number;
+      items: AdminSellerApplication[];
+      not_found_ids: string[];
+      failed: Array<{ application_id: string; detail: string; status_code: number }>;
+    }>("/admin/sellers/applications/bulk-status", payload),
+  shops: (query: { limit?: number; offset?: number } = {}) =>
+    apiClient.get<{ items: AdminSellerShop[]; total: number; limit: number; offset: number }>("/admin/sellers/shops", { params: query }),
+  productModeration: (query: { status?: string; q?: string; limit?: number; offset?: number } = {}) =>
+    apiClient.get<{ items: Array<{ uuid: string; title: string; status: string; price: number; stock_quantity: number; sku?: string | null; moderation_comment?: string | null; updated_at: string; shop_uuid: string; shop_name: string }>; total: number; limit: number; offset: number }>(
+      "/admin/sellers/product-moderation",
+      { params: query },
+    ),
+  productModerationStatusHistory: (productId: string, query: { limit?: number; offset?: number } = {}) =>
+    apiClient.get<{ items: SellerProductStatusEvent[]; total: number; limit: number; offset: number }>(`/admin/sellers/product-moderation/${productId}/status-history`, {
+      params: query,
+    }),
+  patchProductModerationStatus: (productId: string, payload: { status: string; moderation_comment?: string | null }) =>
+    apiClient.patch(`/admin/sellers/product-moderation/${productId}/status`, payload),
+  finance: (query: { limit?: number; offset?: number } = {}) =>
+    apiClient.get<{ items: Array<{ shop_uuid: string; shop_name: string; shop_status: string; balance: number; credit_limit: number; total_topup: number; total_spend: number }>; total: number; limit: number; offset: number }>(
+      "/admin/sellers/finance",
+      { params: query },
+    ),
+  tariffs: () =>
+    apiClient.get<{ items: Array<{ uuid: string; code: string; name: string; monthly_fee: number; included_clicks: number; click_price: number; currency: string; is_active: boolean; updated_at: string }>; total: number }>(
+      "/admin/sellers/tariffs",
+    ),
+  tariffAssignments: (query: { limit?: number } = {}) =>
+    apiClient.get<{ items: Array<{ shop_uuid: string; shop_name: string; subscription_status?: string | null; assigned_at?: string | null; plan_code?: string | null; plan_name?: string | null }>; total: number }>(
+      "/admin/sellers/tariffs/assignments",
+      { params: query },
+    ),
+  assignTariff: (shopId: string, payload: { plan_code: string }) =>
+    apiClient.put(`/admin/sellers/tariffs/assignments/${shopId}`, payload),
+};
+
+export type SellerShop = {
+  id: string;
+  org_id: string;
+  owner_user_id: string;
+  slug: string;
+  shop_name: string;
+  status: string;
+  website_url?: string | null;
+  contact_email: string;
+  contact_phone: string;
+  is_auto_paused: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SellerShopPatch = {
+  shop_name?: string;
+  website_url?: string | null;
+  contact_email?: string;
+  contact_phone?: string;
+};
+
+export type SellerProductStatus = "draft" | "pending_moderation" | "active" | "rejected" | "archived";
+export type SellerApplicationStatus = "pending" | "review" | "approved" | "rejected";
+
+export type SellerApplicationCreateIn = {
+  shop_name: string;
+  legal_type: "individual" | "llc" | "other";
+  inn: string;
+  legal_address: string;
+  actual_address?: string | null;
+  contact_phone: string;
+  contact_email: string;
+  has_website?: boolean;
+  website_url?: string | null;
+  work_type?: "online" | "offline" | "both";
+  delivery_available?: boolean;
+  pickup_available?: boolean;
+  product_categories?: string[];
+  documents?: Array<Record<string, unknown>>;
+};
+
+export type SellerApplication = {
+  id: string;
+  status: SellerApplicationStatus;
+  shop_name: string;
+  contact_email: string;
+  contact_phone: string;
+  review_note?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SellerApplicationStatusLookup = {
+  id: string;
+  status: SellerApplicationStatus;
+  review_note?: string | null;
+  provisioning_status: string;
+  seller_login_url?: string | null;
+  seller_panel_url?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SellerProduct = {
+  id: string;
+  shop_id: string;
+  source: string;
+  title: string;
+  description?: string | null;
+  category_id?: string | null;
+  images: Array<Record<string, unknown>>;
+  price: number;
+  old_price?: number | null;
+  sku?: string | null;
+  barcode?: string | null;
+  status: SellerProductStatus;
+  moderation_comment?: string | null;
+  track_inventory: boolean;
+  stock_quantity: number;
+  stock_reserved: number;
+  stock_alert_threshold?: number | null;
+  attributes: Record<string, unknown>;
+  views_count: number;
+  clicks_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SellerProductCreateIn = {
+  title: string;
+  description?: string | null;
+  category_id?: string | null;
+  images?: Array<Record<string, unknown>>;
+  price: number;
+  old_price?: number | null;
+  sku?: string | null;
+  barcode?: string | null;
+  track_inventory?: boolean;
+  stock_quantity?: number;
+  stock_alert_threshold?: number | null;
+  attributes?: Record<string, unknown>;
+  publish?: boolean;
+};
+
+export type SellerProductPatchIn = {
+  title?: string;
+  description?: string | null;
+  category_id?: string | null;
+  images?: Array<Record<string, unknown>>;
+  price?: number;
+  old_price?: number | null;
+  sku?: string | null;
+  barcode?: string | null;
+  status?: "draft" | "pending_moderation" | "archived";
+  track_inventory?: boolean;
+  stock_alert_threshold?: number | null;
+  attributes?: Record<string, unknown>;
+};
+
+export type SellerInventoryLog = {
+  id: number;
+  product_id: string;
+  action: string;
+  quantity_before: number;
+  quantity_after: number;
+  delta: number;
+  reference_id?: string | null;
+  comment?: string | null;
+  created_by_user_id?: string | null;
+  created_at: string;
+};
+
+export type SellerProductStatusEvent = {
+  id: string;
+  product_id: string;
+  from_status?: SellerProductStatus | null;
+  to_status: SellerProductStatus;
+  event_type: string;
+  reason_code?: string | null;
+  reason_label: string;
+  comment?: string | null;
+  actor_role: "seller" | "admin" | "system";
+  actor_user_id?: string | null;
+  actor_label: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
+export const sellerApi = {
+  createApplication: (payload: SellerApplicationCreateIn) => apiClient.post<SellerApplication>("/applications/seller", payload),
+  applicationStatus: (query: { email: string; phone: string }) =>
+    apiClient.get<SellerApplicationStatusLookup>("/applications/seller/status", { params: query }),
+  shop: () => apiClient.get<SellerShop>("/seller/shop"),
+  updateShop: (payload: SellerShopPatch) => apiClient.put<SellerShop>("/seller/shop", payload),
+  products: (query: { status?: string; q?: string; limit?: number; offset?: number } = {}) =>
+    apiClient.get<SellerProduct[]>("/seller/products/", { params: query }),
+  productById: (productId: string) => apiClient.get<SellerProduct>(`/seller/products/${productId}`),
+  createProduct: (payload: SellerProductCreateIn) => apiClient.post<SellerProduct>("/seller/products/", payload),
+  updateProduct: (productId: string, payload: SellerProductPatchIn) => apiClient.put<SellerProduct>(`/seller/products/${productId}`, payload),
+  archiveProduct: (productId: string) => apiClient.delete<{ ok: boolean; id: string }>(`/seller/products/${productId}`),
+  patchProductStock: (productId: string, payload: { quantity: number; comment?: string | null }) =>
+    apiClient.patch<{ ok: boolean; quantity: number; delta: number }>(`/seller/products/${productId}/stock`, payload),
+  productInventoryLog: (productId: string, query: { limit?: number; offset?: number } = {}) =>
+    apiClient.get<{ items: SellerInventoryLog[]; total: number; limit: number; offset: number }>(`/seller/products/${productId}/inventory-log`, { params: query }),
+  productStatusHistory: (productId: string, query: { limit?: number; offset?: number } = {}) =>
+    apiClient.get<{ items: SellerProductStatusEvent[]; total: number; limit: number; offset: number }>(`/seller/products/${productId}/status-history`, { params: query }),
+};
+

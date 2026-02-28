@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-import secrets
-
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db_session, get_redis
 from app.api.idempotency import execute_idempotent_json
 from app.api.rbac import ADMIN_ROLE, require_roles
-from app.api.v1.routers.auth import _create_user, _get_user_by_email, _hash_password, _now_iso, _send_auth_email
 from app.api.v1.routers.b2b_common import ensure_b2b_enabled
+from app.api.v1.routers.seller_provisioning import apply_partner_lead_status_actions
 from app.core.config import settings
 from app.core.rate_limit import enforce_rate_limit
 from app.repositories.b2b import B2BRepository
@@ -31,29 +29,6 @@ from app.services.worker_client import (
 UUID_REF_PATTERN = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
 
 router = APIRouter(prefix="/admin/b2b", tags=["admin-b2b"])
-
-
-def _public_url(path: str) -> str:
-    base = str(settings.next_public_app_url or "http://localhost").strip().rstrip("/")
-    normalized = str(path or "/").strip()
-    if not normalized.startswith("/"):
-        normalized = f"/{normalized}"
-    return f"{base}{normalized}"
-
-
-def _issue_partner_temp_password() -> str:
-    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%*+-_"
-    return "".join(secrets.choice(alphabet) for _ in range(16))
-
-
-def _display_name(contact_name: str, company_name: str) -> str:
-    normalized_contact = str(contact_name or "").strip()
-    if normalized_contact:
-        return normalized_contact[:120]
-    normalized_company = str(company_name or "").strip()
-    if normalized_company:
-        return normalized_company[:120]
-    return "Seller Partner"
 
 
 @router.get("/onboarding/applications")
@@ -115,92 +90,16 @@ async def admin_patch_b2b_partner_lead(
             raise HTTPException(status_code=404, detail="partner lead not found")
 
         status_value = str(payload.status or "").strip().lower()
-        if status_value == "approved":
-            user = await _get_user_by_email(redis, str(updated.get("email") or ""), db)
-            temp_password: str | None = None
-            if user is None:
-                temp_password = _issue_partner_temp_password()
-                user = await _create_user(
-                    redis,
-                    db=db,
-                    email=str(updated.get("email") or "").strip().lower(),
-                    full_name=_display_name(str(updated.get("contact_name") or ""), str(updated.get("company_name") or "")),
-                    password_hash=_hash_password(temp_password),
-                    role="user",
-                    extra_fields={"email_confirmed": "1", "email_confirmed_at": _now_iso()},
-                )
-            user_uuid = str(user.get("uuid") or "").strip()
-            if not user_uuid:
-                failed = await repo.mark_partner_lead_provisioning_failed(
-                    lead_uuid=lead_id,
-                    error_message="failed to resolve user uuid for approved partner lead",
-                )
-                if failed:
-                    return failed
-                raise HTTPException(status_code=500, detail="failed to resolve user uuid")
-
-            try:
-                provisioned = await repo.provision_partner_lead_approval(
-                    lead_uuid=lead_id,
-                    owner_user_uuid=user_uuid,
-                    reviewer_uuid=str(current_user.get("id")),
-                )
-                if provisioned:
-                    updated = provisioned
-            except Exception as exc:  # noqa: BLE001
-                failed = await repo.mark_partner_lead_provisioning_failed(lead_uuid=lead_id, error_message=str(exc))
-                if failed:
-                    return failed
-                raise
-
-            subject = "Seller partner application approved"
-            lines = [
-                f"Hello, {str(updated.get('contact_name') or '').strip() or 'partner'}!",
-                "",
-                f"Your application for {str(updated.get('company_name') or 'your company')} is approved.",
-                f"Login: {_public_url('/login?next=/seller')}",
-            ]
-            if temp_password:
-                lines.extend(
-                    [
-                        f"Temporary password: {temp_password}",
-                        "Please sign in and change password immediately in profile settings.",
-                    ]
-                )
-            else:
-                lines.append("Your existing account now has seller workspace access.")
-            lines.extend(
-                [
-                    f"Seller panel: {_public_url('/seller')}",
-                    f"Lead status page: {_public_url(f'/partners/status?lead={lead_id}')}",
-                ]
-            )
-            sent, error_message = await _send_auth_email(
-                recipient=str(updated.get("email") or "").strip().lower(),
-                subject=subject,
-                text_value="\n".join(lines),
-            )
-            if sent:
-                await repo.mark_partner_lead_welcome_email_sent(lead_uuid=lead_id)
-                updated["welcome_email_sent_at"] = _now_iso()
-            elif error_message:
-                updated["notification_error"] = error_message
-
-        if status_value == "rejected":
-            message_body = [
-                f"Hello, {str(updated.get('contact_name') or '').strip() or 'partner'}!",
-                "",
-                f"Your application for {str(updated.get('company_name') or 'your company')} was rejected.",
-                str(payload.review_note or "Please contact support for additional details."),
-            ]
-            sent, error_message = await _send_auth_email(
-                recipient=str(updated.get("email") or "").strip().lower(),
-                subject="Seller partner application update",
-                text_value="\n".join(message_body),
-            )
-            if not sent and error_message:
-                updated["notification_error"] = error_message
-        return updated
+        return await apply_partner_lead_status_actions(
+            lead_id=lead_id,
+            status_value=status_value,
+            review_note=payload.review_note,
+            updated=updated,
+            current_user_id=str(current_user.get("id")),
+            repo=repo,
+            redis=redis,
+            db=db,
+        )
 
     return await execute_idempotent_json(
         request,

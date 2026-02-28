@@ -167,14 +167,28 @@ _LOW_QUALITY_IMAGE_HINTS: tuple[str, ...] = (
     "promo",
     "advert",
     "logo",
+    "icon",
+    "icons",
+    "sprite",
+    "glyph",
+    "pictogram",
     "watermark",
     "placeholder",
     "preview",
     "thumbnail",
     "thumb",
+    "shopping card",
 )
 _WEAK_QUALITY_IMAGE_HINTS: tuple[str, ...] = (
     "moderation",
+)
+_UI_ICON_IMAGE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"(?<!\w)(icon|icons|sprite|glyph|pictogram)(?!\w)", re.IGNORECASE),
+    re.compile(
+        r"(?<!\w)(cart|basket|shopping\s*cart|shopping\s*card|phone|call|location|map\s*marker|marker|pin)(?!\w)",
+        re.IGNORECASE,
+    ),
+    re.compile(r"(?<!\w)(whatsapp|telegram)(?!\w)", re.IGNORECASE),
 )
 _POSTER_IMAGE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"(?<!\w)frame(?!\w)", re.IGNORECASE),
@@ -1014,6 +1028,14 @@ def _has_known_image_extension(url: str) -> bool:
     return any(base.endswith(extension) for extension in _IMAGE_URL_EXTENSIONS)
 
 
+def _is_svg_image(url: str) -> bool:
+    normalized = unquote(str(url or "")).strip().lower()
+    if not normalized:
+        return False
+    base = normalized.split("?", 1)[0].split("#", 1)[0]
+    return base.endswith(".svg")
+
+
 def _looks_like_poster_image(url: str) -> bool:
     normalized = _normalize_color_text(unquote(str(url or "")))
     if not normalized:
@@ -1027,8 +1049,12 @@ def _image_quality_penalty(url: str) -> int:
         return 200
 
     penalty = 0
+    if any(pattern.search(normalized) is not None for pattern in _UI_ICON_IMAGE_PATTERNS):
+        penalty += 90
     if any(_contains_image_hint(normalized, token) for token in _LOW_QUALITY_IMAGE_HINTS):
         penalty += 55
+    if _is_svg_image(url):
+        penalty += 80
     if any(_contains_image_hint(normalized, token) for token in _WEAK_QUALITY_IMAGE_HINTS):
         penalty += 15
     if _looks_like_poster_image(url):
@@ -1221,7 +1247,10 @@ def _select_catalog_card_image(
     resolved = _build_gallery_images(prepared, target_color=target_color, limit=1)
     if resolved:
         return resolved[0]
-    return str(primary_image or "").strip() or None
+    fallback = str(primary_image or "").strip() or None
+    if fallback and not _needs_catalog_image_fallback(fallback):
+        return fallback
+    return None
 
 
 def _clamp_01(value: float) -> float:
@@ -1843,7 +1872,13 @@ class CatalogRepository:
             if alternative_gallery:
                 gallery_images = alternative_gallery
 
-        resolved_main_image = gallery_images[0] if gallery_images else row.main_image
+        if gallery_images and all(_looks_like_low_quality_image(url) for url in gallery_images[: min(8, len(gallery_images))]):
+            gallery_images = []
+
+        fallback_main_image = str(row.main_image or "").strip() or None
+        if fallback_main_image and _needs_catalog_image_fallback(fallback_main_image):
+            fallback_main_image = None
+        resolved_main_image = gallery_images[0] if gallery_images else fallback_main_image
         whats_new = row.ai_whats_new if isinstance(row.ai_whats_new, list) else []
         whats_new = [str(item).strip() for item in whats_new if str(item).strip()]
 

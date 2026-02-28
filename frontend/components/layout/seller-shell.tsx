@@ -10,12 +10,14 @@ import { SellerTopbar } from "@/components/layout/seller-topbar";
 const PLATFORM_STAFF_ROLES = new Set(["admin", "moderator", "seller_support"]);
 
 const titles: Record<string, { title: string; subtitle: string }> = {
-  "/dashboard/seller": { title: "Seller Overview", subtitle: "Performance, health, billing, and support in one cockpit" },
-  "/dashboard/seller/onboarding": { title: "Onboarding", subtitle: "Legal profile, KYC docs, and contract acceptance" },
-  "/dashboard/seller/feeds": { title: "Feed Operations", subtitle: "Source setup, validation runs, and quality control" },
-  "/dashboard/seller/campaigns": { title: "Campaign Manager", subtitle: "Budget, bids, and placement strategy" },
-  "/dashboard/seller/billing": { title: "Billing", subtitle: "Plans, invoices, acts, and payment status" },
-  "/dashboard/seller/support": { title: "Support Center", subtitle: "Tickets, priority escalation, and response tracking" },
+  "/dashboard/seller/onboarding": { title: "Онбординг", subtitle: "Юридические данные, документы и договор" },
+  "/dashboard/seller/products": { title: "Товары", subtitle: "Карточки, модерация и управление публикацией" },
+  "/dashboard/seller/inventory": { title: "Остатки", subtitle: "Обновление склада, delta и журнал изменений" },
+  "/dashboard/seller/feeds": { title: "Фиды", subtitle: "Источники данных, валидация и контроль качества" },
+  "/dashboard/seller/campaigns": { title: "Кампании", subtitle: "Бюджеты, ставки и стратегия продвижения" },
+  "/dashboard/seller/billing": { title: "Биллинг", subtitle: "Тарифы, счета, акты и оплаты" },
+  "/dashboard/seller/support": { title: "Поддержка", subtitle: "Обращения, приоритеты и SLA ответов" },
+  "/dashboard/seller": { title: "Обзор продавца", subtitle: "Ключевые метрики, биллинг и состояние кабинета" },
 };
 
 export function SellerShell({ children }: { children: ReactNode }) {
@@ -43,7 +45,7 @@ export function SellerShell({ children }: { children: ReactNode }) {
 
   const header = useMemo(() => {
     const matched = Object.keys(titles).find((route) => pathname === route || pathname.startsWith(`${route}/`));
-    const fallback = { title: "Seller Panel", subtitle: "B2B workspace" };
+    const fallback = { title: "Seller Panel", subtitle: "Рабочее пространство продавца" };
     if (!matched) return fallback;
     return titles[matched] ?? fallback;
   }, [pathname]);

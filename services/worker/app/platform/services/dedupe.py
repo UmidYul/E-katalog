@@ -169,7 +169,7 @@ async def find_duplicate_candidates(session: AsyncSession, limit: int = 500) -> 
         await session.execute(
             select(CatalogCanonicalProduct)
             .where(CatalogCanonicalProduct.is_active.is_(True))
-            .order_by(CatalogCanonicalProduct.updated_at.asc(), CatalogCanonicalProduct.id.asc())
+            .order_by(CatalogCanonicalProduct.updated_at.desc(), CatalogCanonicalProduct.id.desc())
             .limit(limit)
         )
     ).scalars().all()

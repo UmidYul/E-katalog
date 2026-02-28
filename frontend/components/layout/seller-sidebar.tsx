@@ -4,11 +4,13 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import {
   BarChart3,
+  Boxes,
   Building2,
   CreditCard,
   Handshake,
   Megaphone,
   Network,
+  Package,
   ShieldCheck,
   UserRoundCheck,
 } from "lucide-react";
@@ -17,15 +19,17 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils/cn";
 
 const nav = [
-  { href: "/dashboard/seller", label: "Overview", icon: BarChart3 },
-  { href: "/dashboard/seller/onboarding", label: "Onboarding", icon: UserRoundCheck },
-  { href: "/dashboard/seller/feeds", label: "Feeds", icon: Network },
-  { href: "/dashboard/seller/campaigns", label: "Campaigns", icon: Megaphone },
-  { href: "/dashboard/seller/billing", label: "Billing", icon: CreditCard },
-  { href: "/dashboard/seller/support", label: "Support", icon: ShieldCheck },
+  { href: "/dashboard/seller", label: "Обзор", icon: BarChart3 },
+  { href: "/dashboard/seller/onboarding", label: "Онбординг", icon: UserRoundCheck },
+  { href: "/dashboard/seller/products", label: "Товары", icon: Package },
+  { href: "/dashboard/seller/inventory", label: "Остатки", icon: Boxes },
+  { href: "/dashboard/seller/feeds", label: "Фиды", icon: Network },
+  { href: "/dashboard/seller/campaigns", label: "Кампании", icon: Megaphone },
+  { href: "/dashboard/seller/billing", label: "Биллинг", icon: CreditCard },
+  { href: "/dashboard/seller/support", label: "Поддержка", icon: ShieldCheck },
 ];
 
-const secondaryNav = [{ href: "/partners", label: "Partner Form", icon: Handshake }];
+const secondaryNav = [{ href: "/partners", label: "Партнерская форма", icon: Handshake }];
 
 export function SellerSidebar({ open }: { open: boolean }) {
   const pathname = usePathname();
@@ -41,7 +45,7 @@ export function SellerSidebar({ open }: { open: boolean }) {
         {open ? (
           <p className="mt-1 inline-flex items-center gap-1 text-sm font-semibold text-slate-900">
             <Building2 className="h-4 w-4 text-cyan-700" />
-            Doxx B2B
+            Кабинет продавца
           </p>
         ) : null}
       </div>

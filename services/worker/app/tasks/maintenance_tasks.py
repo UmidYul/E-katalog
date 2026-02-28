@@ -2462,7 +2462,7 @@ async def _prepare_full_catalog_rebuild() -> dict:
 def enqueue_full_catalog_rebuild(self) -> dict:
     prepared = asyncio.run(_prepare_full_catalog_rebuild())
     workflow = chain(
-        celery_app.signature("app.tasks.normalize_tasks.normalize_product_batch"),
+        celery_app.signature("app.tasks.normalize_tasks.normalize_full_catalog", kwargs={"chunk_size": 1000}),
         celery_app.signature("app.tasks.dedupe_tasks.find_duplicate_candidates_task"),
         celery_app.signature("app.tasks.maintenance_tasks.cleanup_empty_canonicals"),
         celery_app.signature("app.tasks.reindex_tasks.reindex_product_search_batch"),

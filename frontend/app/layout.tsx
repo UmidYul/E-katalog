@@ -1,22 +1,9 @@
 import type { Metadata } from "next";
-import { Manrope, Source_Sans_3 } from "next/font/google";
 
 import "./globals.css";
 
 import { Providers } from "@/components/common/providers";
 import { env } from "@/config/env";
-
-const manrope = Manrope({
-  subsets: ["latin", "cyrillic"],
-  variable: "--font-heading",
-  display: "swap"
-});
-
-const sourceSans3 = Source_Sans_3({
-  subsets: ["latin", "cyrillic"],
-  variable: "--font-body",
-  display: "swap"
-});
 
 export const metadata: Metadata = {
   metadataBase: new URL(env.appUrl),
@@ -41,7 +28,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ru" suppressHydrationWarning>
-      <body className={`${sourceSans3.variable} ${manrope.variable} ${sourceSans3.className}`}>
+      <body>
         <Providers>
           {children}
         </Providers>

@@ -3,6 +3,24 @@
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+const UI_ICON_URL_PATTERNS: RegExp[] = [
+  /(^|[\/_.-])(icon|icons|sprite|glyph|pictogram|logo)([\/_.-]|$)/i,
+  /(^|[\/_.-])(cart|basket|shopping-cart|shopping-card|phone|call|location|map-marker|marker|pin)([\/_.-]|$)/i,
+  /(^|[\/_.-])(telegram|whatsapp)([\/_.-]|$)/i,
+];
+
+const isLikelyUiIconAsset = (url: string) => {
+  let normalized = String(url || "").trim();
+  if (!normalized) return true;
+  try {
+    normalized = decodeURIComponent(normalized);
+  } catch {
+    // Keep raw URL if it cannot be decoded.
+  }
+  const lowered = normalized.toLowerCase();
+  return UI_ICON_URL_PATTERNS.some((pattern) => pattern.test(lowered));
+};
+
 export function ProductGallery({ images }: { images: string[] }) {
   const sourceList = useMemo(() => {
     const unique = new Set<string>();
@@ -10,6 +28,8 @@ export function ProductGallery({ images }: { images: string[] }) {
       const value = String(raw ?? "").trim();
       if (!value) continue;
       if (!/^https?:\/\//i.test(value)) continue;
+      if (/\.svg(?:[?#].*)?$/i.test(value)) continue;
+      if (isLikelyUiIconAsset(value)) continue;
       unique.add(value);
     }
     return Array.from(unique);
@@ -57,7 +77,10 @@ export function ProductGallery({ images }: { images: string[] }) {
             onError={() => markFailed(active)}
           />
         ) : (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">No image available</div>
+          <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
+            <p className="text-sm font-medium text-muted-foreground">Фото товара недоступно</p>
+            <p className="text-xs text-muted-foreground/80">Пробуем обновить карточку из проверенных источников.</p>
+          </div>
         )}
       </div>
       <div className="grid grid-cols-5 gap-2">

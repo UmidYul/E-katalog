@@ -5,6 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 STORE_SLUG_EXPR = "regexp_replace(regexp_replace(lower(s.name), '[^a-z0-9]+', '-', 'g'), '-uz$', '')"
+VARIANT_KEY_EXPR = (
+    "case "
+    "when nullif(btrim(o.variant_key), '') is null then 'default' "
+    "when char_length(btrim(o.variant_key)) <= 64 then btrim(o.variant_key) "
+    "else 'vk_' || substr(md5(btrim(o.variant_key)), 1, 61) "
+    "end"
+)
 
 
 SYNC_SQL_STATEMENTS = [
@@ -39,9 +46,13 @@ SYNC_SQL_STATEMENTS = [
     select
       lower(p.title),
       (
-        select nullif(o2.images->>0, '')
+        select nullif(img.value, '')
         from offers o2
+        join lateral jsonb_array_elements_text(coalesce(o2.images, '[]'::jsonb)) as img(value) on true
         where o2.product_id = p.id
+          and nullif(img.value, '') is not null
+          and img.value !~* '(logo|icon|shopping-card|cart|basket|sprite|telegram|whatsapp)'
+          and img.value ~* '[.](jpg|jpeg|png|webp|avif)([?]|$)'
         order by o2.id desc
         limit 1
       ),
@@ -60,6 +71,35 @@ SYNC_SQL_STATEMENTS = [
       )
     from products p
     on conflict do nothing
+    """,
+    """
+    update catalog_canonical_products cp
+    set main_image = src.main_image
+    from (
+      select distinct on (lower(p.title))
+        lower(p.title) as normalized_title,
+        (
+          select nullif(img.value, '')
+          from offers o2
+          join lateral jsonb_array_elements_text(coalesce(o2.images, '[]'::jsonb)) as img(value) on true
+          where o2.product_id = p.id
+            and nullif(img.value, '') is not null
+            and img.value !~* '(logo|icon|shopping-card|cart|basket|sprite|telegram|whatsapp)'
+            and img.value ~* '[.](jpg|jpeg|png|webp|avif)([?]|$)'
+          order by o2.id desc
+          limit 1
+        ) as main_image
+      from products p
+      order by lower(p.title), p.id desc
+    ) src
+    where cp.category_id = 1
+      and lower(cp.normalized_title) = src.normalized_title
+      and src.main_image is not null
+      and (
+        cp.main_image is null
+        or cp.main_image !~* '[.](jpg|jpeg|png|webp|avif)([?]|$)'
+        or cp.main_image ~* '(logo|icon|shopping-card|cart|basket|sprite|telegram|whatsapp)'
+      )
     """,
     """
     update catalog_canonical_products cp
@@ -114,10 +154,10 @@ SYNC_SQL_STATEMENTS = [
     insert into catalog_product_variants (product_id, variant_key, color, storage, ram, other_attrs)
     select distinct
       p.id,
-      coalesce(nullif(o.variant_key, ''), 'default'),
-      nullif(coalesce(o.variant_attrs->>'color', o.specifications->>'color'), ''),
-      nullif(coalesce(o.variant_attrs->>'storage', o.specifications->>'storage_gb', o.specifications->>'storage'), ''),
-      nullif(coalesce(o.variant_attrs->>'ram', o.specifications->>'ram_gb', o.specifications->>'ram'), ''),
+      __VARIANT_KEY_EXPR__,
+      nullif(left(regexp_replace(coalesce(o.variant_attrs->>'color', o.specifications->>'color', ''), '\\s+', ' ', 'g'), 64), ''),
+      nullif(left(regexp_replace(coalesce(o.variant_attrs->>'storage', o.specifications->>'storage_gb', o.specifications->>'storage', ''), '\\s+', ' ', 'g'), 64), ''),
+      nullif(left(regexp_replace(coalesce(o.variant_attrs->>'ram', o.specifications->>'ram_gb', o.specifications->>'ram', ''), '\\s+', ' ', 'g'), 64), ''),
       coalesce(o.variant_attrs, '{}'::jsonb)
     from offers o
     join products p on p.id = o.product_id
@@ -144,12 +184,19 @@ SYNC_SQL_STATEMENTS = [
       o.link,
       p.title,
       lower(p.title),
-      nullif(o.images->>0, ''),
+      (
+        select nullif(img.value, '')
+        from jsonb_array_elements_text(coalesce(o.images, '[]'::jsonb)) as img(value)
+        where nullif(img.value, '') is not null
+          and img.value !~* '(logo|icon|shopping-card|cart|basket|sprite|telegram|whatsapp)'
+          and img.value ~* '[.](jpg|jpeg|png|webp|avif)([?]|$)'
+        limit 1
+      ),
       coalesce(o.availability, 'unknown'),
       jsonb_build_object(
         'images', coalesce(o.images, '[]'::jsonb),
         'specifications', coalesce(o.specifications, '{}'::jsonb),
-        'variant_key', coalesce(nullif(o.variant_key, ''), 'default'),
+        'variant_key', __VARIANT_KEY_EXPR__,
         'variant_attrs', coalesce(o.variant_attrs, '{}'::jsonb)
       ),
       now()
@@ -225,7 +272,7 @@ SYNC_SQL_STATEMENTS = [
     join catalog_stores cs_store on cs_store.slug = __STORE_SLUG_EXPR__
     left join catalog_product_variants pv
       on pv.product_id = o.product_id
-     and pv.variant_key = coalesce(nullif(o.variant_key, ''), 'default')
+     and pv.variant_key = __VARIANT_KEY_EXPR__
     left join catalog_sellers cs
       on cs.store_id = cs_store.id
      and cs.normalized_name = lower(regexp_replace(s.name, '[^a-zA-Z0-9]+', ' ', 'g'))
@@ -397,5 +444,6 @@ SYNC_SQL_STATEMENTS = [
 
 async def sync_legacy_to_catalog(session: AsyncSession) -> None:
     for statement in SYNC_SQL_STATEMENTS:
-        await session.execute(text(statement.replace("__STORE_SLUG_EXPR__", STORE_SLUG_EXPR)))
+        sql = statement.replace("__STORE_SLUG_EXPR__", STORE_SLUG_EXPR).replace("__VARIANT_KEY_EXPR__", VARIANT_KEY_EXPR)
+        await session.execute(text(sql))
     await session.commit()

@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { Building2, CheckCircle2, Send } from "lucide-react";
+import { useState } from "react";
+import { Building2, CheckCircle2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,238 +10,242 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { useCreateB2BPartnerLead } from "@/features/b2b/use-b2b";
+import { useCreateSellerApplication, useSellerApplicationStatus } from "@/features/seller/use-seller";
 
-const parseList = (value: string) =>
-  value
+type FieldErrors = Partial<Record<"shop_name" | "inn" | "legal_address" | "contact_phone" | "contact_email" | "website_url" | "product_categories", string>>;
+
+const statusLabel: Record<string, string> = {
+  pending: "На рассмотрении",
+  review: "В работе у менеджера",
+  approved: "Одобрено",
+  rejected: "Отклонено",
+};
+
+export function PartnerIntakePage() {
+  const createApplication = useCreateSellerApplication();
+  const [shopName, setShopName] = useState("");
+  const [legalType, setLegalType] = useState<"individual" | "llc" | "other">("individual");
+  const [inn, setInn] = useState("");
+  const [legalAddress, setLegalAddress] = useState("");
+  const [actualAddress, setActualAddress] = useState("");
+  const [contactPhone, setContactPhone] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
+  const [hasWebsite, setHasWebsite] = useState(false);
+  const [websiteUrl, setWebsiteUrl] = useState("");
+  const [workType, setWorkType] = useState<"online" | "offline" | "both">("online");
+  const [deliveryAvailable, setDeliveryAvailable] = useState(false);
+  const [pickupAvailable, setPickupAvailable] = useState(false);
+  const [categoriesRaw, setCategoriesRaw] = useState("");
+  const [notes, setNotes] = useState("");
+
+  const [errors, setErrors] = useState<FieldErrors>({});
+  const [submitMessage, setSubmitMessage] = useState<string>("");
+  const [submittedApplicationId, setSubmittedApplicationId] = useState<string>("");
+  const [lookup, setLookup] = useState<{ email: string; phone: string } | null>(null);
+  const statusQuery = useSellerApplicationStatus(lookup ?? undefined);
+
+  const categories = categoriesRaw
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean)
-    .slice(0, 40);
+    .slice(0, 20);
 
-export function PartnerIntakePage() {
-  const submitLeadMutation = useCreateB2BPartnerLead();
-
-  const [companyName, setCompanyName] = useState("");
-  const [legalName, setLegalName] = useState("");
-  const [brandName, setBrandName] = useState("");
-  const [taxId, setTaxId] = useState("");
-  const [websiteUrl, setWebsiteUrl] = useState("");
-
-  const [contactName, setContactName] = useState("");
-  const [contactRole, setContactRole] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [telegram, setTelegram] = useState("");
-  const [countryCode, setCountryCode] = useState("UZ");
-  const [city, setCity] = useState("");
-
-  const [categoriesRaw, setCategoriesRaw] = useState("");
-  const [monthlyOrders, setMonthlyOrders] = useState("");
-  const [avgOrderValue, setAvgOrderValue] = useState("");
-  const [feedUrl, setFeedUrl] = useState("");
-  const [logisticsModel, setLogisticsModel] = useState<"own_warehouse" | "dropshipping" | "marketplace_fulfillment" | "hybrid">(
-    "own_warehouse",
-  );
-  const [warehousesCount, setWarehousesCount] = useState("");
-  const [marketplacesRaw, setMarketplacesRaw] = useState("");
-  const [returnsPolicy, setReturnsPolicy] = useState("");
-  const [goals, setGoals] = useState("");
-  const [notes, setNotes] = useState("");
-  const [acceptsTerms, setAcceptsTerms] = useState(false);
-  const [formMessage, setFormMessage] = useState<string | null>(null);
-  const [submittedLeadId, setSubmittedLeadId] = useState<string | null>(null);
-  const [submittedTrackingToken, setSubmittedTrackingToken] = useState<string | null>(null);
-  const [submittedStatusUrl, setSubmittedStatusUrl] = useState<string | null>(null);
-
-  const categoriesPreview = useMemo(() => parseList(categoriesRaw), [categoriesRaw]);
-  const marketplacesPreview = useMemo(() => parseList(marketplacesRaw), [marketplacesRaw]);
-
-  const submitLead = () => {
-    setFormMessage(null);
-    setSubmittedLeadId(null);
-    setSubmittedTrackingToken(null);
-    setSubmittedStatusUrl(null);
-    if (!companyName.trim() || !contactName.trim() || !email.trim() || !phone.trim()) {
-      setFormMessage("Company, contact person, email, and phone are required.");
-      return;
+  const validate = () => {
+    const nextErrors: FieldErrors = {};
+    if (!shopName.trim() || shopName.trim().length < 2) nextErrors.shop_name = "Введите название магазина (минимум 2 символа).";
+    if (!inn.trim() || inn.trim().length < 9) nextErrors.inn = "Введите корректный ИНН (минимум 9 символов).";
+    if (!legalAddress.trim() || legalAddress.trim().length < 3) nextErrors.legal_address = "Введите юридический адрес.";
+    if (!contactPhone.trim() || contactPhone.trim().length < 7) nextErrors.contact_phone = "Введите корректный телефон.";
+    if (!contactEmail.trim() || !contactEmail.includes("@")) nextErrors.contact_email = "Введите корректный email.";
+    if (hasWebsite && websiteUrl.trim() && !/^https?:\/\//i.test(websiteUrl.trim())) {
+      nextErrors.website_url = "URL сайта должен начинаться с http:// или https://";
     }
-    if (!acceptsTerms) {
-      setFormMessage("You must accept terms to submit the partner application.");
-      return;
-    }
+    if (!categories.length) nextErrors.product_categories = "Укажите хотя бы одну категорию товаров.";
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  };
 
-    submitLeadMutation.mutate(
-      {
-        company_name: companyName.trim(),
-        legal_name: legalName.trim() || undefined,
-        brand_name: brandName.trim() || undefined,
-        tax_id: taxId.trim() || undefined,
-        website_url: websiteUrl.trim() || undefined,
-        contact_name: contactName.trim(),
-        contact_role: contactRole.trim() || undefined,
-        email: email.trim().toLowerCase(),
-        phone: phone.trim(),
-        telegram: telegram.trim() || undefined,
-        country_code: countryCode.trim().toUpperCase(),
-        city: city.trim() || undefined,
-        categories: categoriesPreview,
-        monthly_orders: monthlyOrders.trim() ? Math.max(0, Number(monthlyOrders)) : undefined,
-        avg_order_value: avgOrderValue.trim() ? Math.max(0, Number(avgOrderValue)) : undefined,
-        feed_url: feedUrl.trim() || undefined,
-        logistics_model: logisticsModel,
-        warehouses_count: warehousesCount.trim() ? Math.max(0, Number(warehousesCount)) : undefined,
-        marketplaces: marketplacesPreview,
-        returns_policy: returnsPolicy.trim() || undefined,
-        goals: goals.trim() || undefined,
-        notes: notes.trim() || undefined,
-        accepts_terms: true,
-      },
-      {
-        onSuccess: (lead) => {
-          setSubmittedLeadId(lead.id);
-          setSubmittedTrackingToken(lead.tracking_token ?? null);
-          setSubmittedStatusUrl(lead.status_url ?? null);
-          setFormMessage("Application submitted. Our B2B team will review and contact you.");
-        },
-        onError: () => {
-          setFormMessage("Failed to submit application. Please verify fields and try again.");
-        },
-      },
-    );
+  const submit = async () => {
+    setSubmitMessage("");
+    setSubmittedApplicationId("");
+    if (!validate()) return;
+    try {
+      const created = await createApplication.mutateAsync({
+        shop_name: shopName.trim(),
+        legal_type: legalType,
+        inn: inn.trim(),
+        legal_address: legalAddress.trim(),
+        actual_address: actualAddress.trim() || undefined,
+        contact_phone: contactPhone.trim(),
+        contact_email: contactEmail.trim().toLowerCase(),
+        has_website: hasWebsite,
+        website_url: hasWebsite ? websiteUrl.trim() || undefined : undefined,
+        work_type: workType,
+        delivery_available: deliveryAvailable,
+        pickup_available: pickupAvailable,
+        product_categories: categories,
+        documents: notes.trim() ? [{ note: notes.trim() }] : [],
+      });
+      setSubmittedApplicationId(created.id);
+      setLookup({ email: contactEmail.trim().toLowerCase(), phone: contactPhone.trim() });
+      setSubmitMessage("Заявка отправлена. Проверка обычно занимает 1-3 рабочих дня.");
+    } catch {
+      setSubmitMessage("Не удалось отправить заявку. Проверьте поля и попробуйте снова.");
+    }
   };
 
   return (
     <div className="container py-8">
-      <div className="mx-auto max-w-5xl space-y-6">
+      <div className="mx-auto max-w-4xl space-y-6">
         <section className="rounded-3xl border border-sky-200/70 bg-gradient-to-br from-sky-100 via-cyan-50 to-emerald-100 p-6">
           <p className="inline-flex items-center gap-2 rounded-full border border-sky-300/70 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-sky-900">
             <Building2 className="h-3.5 w-3.5" />
-            Partner onboarding
+            Seller onboarding
           </p>
-          <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">Become a marketplace partner</h1>
-          <p className="mt-2 text-sm text-slate-700">
-            Fill in the full business profile. The admin team reviews applications in B2B control center and approves/rejects them with audit notes.
-          </p>
-          <Link href="/partners/status" className="mt-3 inline-flex text-sm font-medium text-sky-900 underline underline-offset-4">
-            Track existing application
+          <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">Стать продавцом</h1>
+          <p className="mt-2 text-sm text-slate-700">Заполните анкету. После одобрения и завершения provisioning доступ к seller panel откроется автоматически.</p>
+          <Link href="/become-seller/pending" className="mt-3 inline-flex text-sm font-medium text-sky-900 underline underline-offset-4">
+            Как проходит проверка заявки
           </Link>
         </section>
 
         <Card>
           <CardHeader>
-            <CardTitle>Company and legal profile</CardTitle>
+            <CardTitle>Данные компании</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-3 sm:grid-cols-2">
-            <Input placeholder="Company name *" value={companyName} onChange={(event) => setCompanyName(event.target.value)} />
-            <Input placeholder="Legal company name" value={legalName} onChange={(event) => setLegalName(event.target.value)} />
-            <Input placeholder="Brand name" value={brandName} onChange={(event) => setBrandName(event.target.value)} />
-            <Input placeholder="Tax ID / INN" value={taxId} onChange={(event) => setTaxId(event.target.value)} />
-            <Input placeholder="Website URL" value={websiteUrl} onChange={(event) => setWebsiteUrl(event.target.value)} className="sm:col-span-2" />
+            <div>
+              <Input value={shopName} onChange={(event) => setShopName(event.target.value)} placeholder="Название магазина" />
+              {errors.shop_name ? <p className="mt-1 text-xs text-rose-700">{errors.shop_name}</p> : null}
+            </div>
+            <Select value={legalType} onValueChange={(value) => setLegalType(value as "individual" | "llc" | "other")}>
+              <SelectTrigger>
+                <SelectValue placeholder="Тип юрлица" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="individual">ИП / физлицо</SelectItem>
+                <SelectItem value="llc">ООО</SelectItem>
+                <SelectItem value="other">Другое</SelectItem>
+              </SelectContent>
+            </Select>
+            <div>
+              <Input value={inn} onChange={(event) => setInn(event.target.value)} placeholder="ИНН" />
+              {errors.inn ? <p className="mt-1 text-xs text-rose-700">{errors.inn}</p> : null}
+            </div>
+            <div>
+              <Input value={contactPhone} onChange={(event) => setContactPhone(event.target.value)} placeholder="Контактный телефон" />
+              {errors.contact_phone ? <p className="mt-1 text-xs text-rose-700">{errors.contact_phone}</p> : null}
+            </div>
+            <div className="sm:col-span-2">
+              <Input value={legalAddress} onChange={(event) => setLegalAddress(event.target.value)} placeholder="Юридический адрес" />
+              {errors.legal_address ? <p className="mt-1 text-xs text-rose-700">{errors.legal_address}</p> : null}
+            </div>
+            <Input value={actualAddress} onChange={(event) => setActualAddress(event.target.value)} placeholder="Фактический адрес (опционально)" />
+            <div>
+              <Input value={contactEmail} onChange={(event) => setContactEmail(event.target.value)} placeholder="Контактный email" />
+              {errors.contact_email ? <p className="mt-1 text-xs text-rose-700">{errors.contact_email}</p> : null}
+            </div>
+            <div className="sm:col-span-2 flex items-center gap-2 text-sm">
+              <Checkbox checked={hasWebsite} onCheckedChange={(value) => setHasWebsite(Boolean(value))} />
+              Есть сайт компании
+            </div>
+            {hasWebsite ? (
+              <div className="sm:col-span-2">
+                <Input value={websiteUrl} onChange={(event) => setWebsiteUrl(event.target.value)} placeholder="https://example.uz" />
+                {errors.website_url ? <p className="mt-1 text-xs text-rose-700">{errors.website_url}</p> : null}
+              </div>
+            ) : null}
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>Contact and operations</CardTitle>
+            <CardTitle>Формат работы</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Input placeholder="Contact person *" value={contactName} onChange={(event) => setContactName(event.target.value)} />
-              <Input placeholder="Role (CEO, Head of Sales...)" value={contactRole} onChange={(event) => setContactRole(event.target.value)} />
-              <Input placeholder="Work email *" value={email} onChange={(event) => setEmail(event.target.value)} />
-              <Input placeholder="Phone *" value={phone} onChange={(event) => setPhone(event.target.value)} />
-              <Input placeholder="Telegram" value={telegram} onChange={(event) => setTelegram(event.target.value)} />
-              <Input placeholder="Country code (UZ)" value={countryCode} onChange={(event) => setCountryCode(event.target.value)} />
-              <Input placeholder="City" value={city} onChange={(event) => setCity(event.target.value)} />
-              <Input placeholder="Feed URL (XML/CSV/API)" value={feedUrl} onChange={(event) => setFeedUrl(event.target.value)} />
-              <Input
-                placeholder="Categories (comma separated)"
-                value={categoriesRaw}
-                onChange={(event) => setCategoriesRaw(event.target.value)}
-                className="sm:col-span-2"
-              />
-              <Input placeholder="Marketplaces (comma separated)" value={marketplacesRaw} onChange={(event) => setMarketplacesRaw(event.target.value)} />
-              <Input
-                type="number"
-                min={0}
-                placeholder="Monthly orders"
-                value={monthlyOrders}
-                onChange={(event) => setMonthlyOrders(event.target.value)}
-              />
-              <Input
-                type="number"
-                min={0}
-                placeholder="Avg order value (UZS)"
-                value={avgOrderValue}
-                onChange={(event) => setAvgOrderValue(event.target.value)}
-              />
-              <Input
-                type="number"
-                min={0}
-                placeholder="Warehouses count"
-                value={warehousesCount}
-                onChange={(event) => setWarehousesCount(event.target.value)}
-              />
-            </div>
-
-            <Select value={logisticsModel} onValueChange={(value) => setLogisticsModel(value as typeof logisticsModel)}>
+            <Select value={workType} onValueChange={(value) => setWorkType(value as "online" | "offline" | "both")}>
               <SelectTrigger>
-                <SelectValue placeholder="Logistics model" />
+                <SelectValue placeholder="Канал продаж" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="own_warehouse">Own warehouse</SelectItem>
-                <SelectItem value="dropshipping">Dropshipping</SelectItem>
-                <SelectItem value="marketplace_fulfillment">Marketplace fulfillment</SelectItem>
-                <SelectItem value="hybrid">Hybrid</SelectItem>
+                <SelectItem value="online">Только онлайн</SelectItem>
+                <SelectItem value="offline">Только офлайн</SelectItem>
+                <SelectItem value="both">Онлайн + офлайн</SelectItem>
               </SelectContent>
             </Select>
 
-            <Textarea
-              rows={3}
-              placeholder="Returns policy and SLA"
-              value={returnsPolicy}
-              onChange={(event) => setReturnsPolicy(event.target.value)}
-            />
-            <Textarea rows={3} placeholder="Goals on Doxx (traffic, sales, categories)" value={goals} onChange={(event) => setGoals(event.target.value)} />
-            <Textarea rows={4} placeholder="Additional notes" value={notes} onChange={(event) => setNotes(event.target.value)} />
+            <div className="flex flex-wrap items-center gap-6 text-sm">
+              <label className="inline-flex items-center gap-2">
+                <Checkbox checked={deliveryAvailable} onCheckedChange={(value) => setDeliveryAvailable(Boolean(value))} />
+                Доставка
+              </label>
+              <label className="inline-flex items-center gap-2">
+                <Checkbox checked={pickupAvailable} onCheckedChange={(value) => setPickupAvailable(Boolean(value))} />
+                Самовывоз
+              </label>
+            </div>
 
-            <label className="flex items-center gap-2 text-sm">
-              <Checkbox checked={acceptsTerms} onCheckedChange={(value) => setAcceptsTerms(Boolean(value))} />
-              I confirm data accuracy and agree to partner onboarding terms.
-            </label>
+            <div>
+              <Input
+                value={categoriesRaw}
+                onChange={(event) => setCategoriesRaw(event.target.value)}
+                placeholder="Категории через запятую: смартфоны, бытовая техника, мебель"
+              />
+              {errors.product_categories ? <p className="mt-1 text-xs text-rose-700">{errors.product_categories}</p> : null}
+            </div>
+            <Textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Дополнительная информация для модератора (опционально)" />
 
-            {categoriesPreview.length ? <p className="text-xs text-muted-foreground">categories: {categoriesPreview.join(", ")}</p> : null}
-            {marketplacesPreview.length ? <p className="text-xs text-muted-foreground">marketplaces: {marketplacesPreview.join(", ")}</p> : null}
-            {formMessage ? <p className="text-xs text-muted-foreground">{formMessage}</p> : null}
-            {submittedLeadId ? (
-              <div className="space-y-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+            {submitMessage ? <p className="text-sm text-muted-foreground">{submitMessage}</p> : null}
+            {submittedApplicationId ? (
+              <div className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
                 <p className="inline-flex items-center gap-2">
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                  Lead ID: {submittedLeadId}
+                  <CheckCircle2 className="h-4 w-4" />
+                  Заявка зарегистрирована: {submittedApplicationId}
                 </p>
-                {submittedTrackingToken ? <p>Tracking token: {submittedTrackingToken}</p> : null}
-                {submittedStatusUrl ? (
-                  <Link href={submittedStatusUrl} className="inline-flex rounded-md border border-emerald-400 px-2 py-1 text-emerald-900">
-                    Open application status
-                  </Link>
-                ) : null}
               </div>
             ) : null}
 
+            <Button onClick={() => void submit()} disabled={createApplication.isPending}>
+              {createApplication.isPending ? "Отправка..." : "Отправить заявку"}
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Статус заявки</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
             <div className="flex flex-wrap gap-2">
-              <Button onClick={submitLead} disabled={submitLeadMutation.isPending}>
-                <Send className="mr-1 h-4 w-4" />
-                {submitLeadMutation.isPending ? "Submitting..." : "Submit application"}
+              <Button
+                variant="secondary"
+                onClick={() => setLookup({ email: contactEmail.trim().toLowerCase(), phone: contactPhone.trim() })}
+                disabled={!contactEmail.trim() || !contactPhone.trim()}
+              >
+                Обновить статус
               </Button>
-              <Link href="/dashboard/seller" className="inline-flex items-center rounded-md border border-border px-3 py-2 text-sm">
-                Open Seller Panel
-              </Link>
             </div>
+
+            {statusQuery.data ? (
+              <div className="space-y-1 rounded-lg border border-border p-3">
+                <p>Статус: {statusLabel[statusQuery.data.status] ?? statusQuery.data.status}</p>
+                <p>Provisioning: {statusQuery.data.provisioning_status}</p>
+                {statusQuery.data.review_note ? <p>Комментарий: {statusQuery.data.review_note}</p> : null}
+                {statusQuery.data.seller_login_url && statusQuery.data.seller_panel_url ? (
+                  <a
+                    href={statusQuery.data.seller_login_url}
+                    className="inline-flex rounded-md border border-emerald-300 px-3 py-1 text-emerald-800"
+                  >
+                    Открыть Seller Panel
+                  </a>
+                ) : (
+                  <p className="text-muted-foreground">Доступ в seller panel появится после одобрения и готовности provisioning.</p>
+                )}
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       </div>
     </div>
   );
 }
-
