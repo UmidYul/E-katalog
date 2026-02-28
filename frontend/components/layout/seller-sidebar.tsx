@@ -29,7 +29,7 @@ const nav = [
   { href: "/dashboard/seller/support", label: "Поддержка", icon: ShieldCheck },
 ];
 
-const secondaryNav = [{ href: "/partners", label: "Партнерская форма", icon: Handshake }];
+const secondaryNav = [{ href: "/become-seller", label: "Партнерская форма", icon: Handshake }];
 
 export function SellerSidebar({ open }: { open: boolean }) {
   const pathname = usePathname();

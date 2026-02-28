@@ -31,8 +31,6 @@ E-katalog - платформа-агрегатор цен на электрони
 - `/become-seller`
 - `/become-seller/pending`
 - `/become-seller/rejected`
-- `/partners`
-- `/partners/status`
 - `/status`
 - `/privacy`
 - `/terms`
@@ -47,20 +45,6 @@ E-katalog - платформа-агрегатор цен на электрони
 - `/profile`
 - `/favorites`
 - `/recently-viewed`
-
-### Main dashboard
-- `/dashboard`
-- `/dashboard/users`
-- `/dashboard/users/[id]`
-- `/dashboard/products`
-- `/dashboard/products/[id]`
-- `/dashboard/categories`
-- `/dashboard/orders`
-- `/dashboard/orders/[id]`
-- `/dashboard/analytics`
-- `/dashboard/feedback`
-- `/dashboard/settings`
-- `/dashboard/b2b`
 
 ### Admin dashboard
 - `/dashboard/admin`
@@ -87,18 +71,3 @@ E-katalog - платформа-агрегатор цен на электрони
 - `/dashboard/seller/billing`
 - `/dashboard/seller/support`
 - `/dashboard/seller/onboarding`
-
-### B2B area
-- `/b2b`
-- `/b2b/onboarding`
-- `/b2b/feeds`
-- `/b2b/campaigns`
-- `/b2b/billing`
-
-### Seller public/B2B area
-- `/seller`
-- `/seller/onboarding`
-- `/seller/feeds`
-- `/seller/campaigns`
-- `/seller/billing`
-- `/seller/support`

@@ -75,14 +75,8 @@ npm run start
 - `app/(public)` home/catalog/category/product
 - `app/(auth)` login/register
 - `app/(account)` profile/favorites/recently-viewed
-- `app/(dashboard)` admin panel:
-  - `/dashboard`
-  - `/dashboard/users`
-  - `/dashboard/products`
-  - `/dashboard/categories`
-  - `/dashboard/orders`
-  - `/dashboard/analytics`
-  - `/dashboard/settings`
+- `app/(dashboard)/dashboard/admin` admin panel (`/dashboard/admin/*`)
+- `app/(seller-dashboard)/dashboard/seller` seller panel (`/dashboard/seller/*`)
 
 ## Admin UI Kit
 
