@@ -1,14 +1,15 @@
 "use client";
 
-import { GitCompareArrows, Heart, Search, ShieldCheck, ShoppingBag } from "lucide-react";
+import { GitCompareArrows, Heart, Menu, Search, ShieldCheck, ShoppingBag, X } from "lucide-react";
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 import { ThemeToggle } from "@/components/common/theme-toggle";
 import { Input } from "@/components/ui/input";
 import { useAuthMe } from "@/features/auth/use-auth";
 import { useBrands, useCategories } from "@/features/catalog/use-catalog-queries";
+import { useFavorites } from "@/features/user/use-favorites";
 import { cn } from "@/lib/utils/cn";
 import { useCompareStore } from "@/store/compare.store";
 
@@ -29,14 +30,42 @@ export function SiteHeader() {
   const pathname = usePathname();
   const shouldLoadMe = pathname !== "/login" && pathname !== "/register";
   const me = useAuthMe(shouldLoadMe);
+  const favorites = useFavorites();
   const categories = useCategories();
   const brands = useBrands();
   const compareCountFromStore = useCompareStore((s) => s.items.length);
   const [query, setQuery] = useState("");
   const [hydrated, setHydrated] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
+  const [isHidden, setIsHidden] = useState(false);
+  const lastScrollYRef = useRef(0);
 
   useEffect(() => {
     setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const handleScroll = () => {
+      const current = window.scrollY;
+      const last = lastScrollYRef.current;
+
+      if (current > last && current > 80) {
+        setIsHidden(true);
+      } else {
+        setIsHidden(false);
+      }
+
+      lastScrollYRef.current = current;
+    };
+
+    window.addEventListener("scroll", handleScroll, { passive: true });
+
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+    };
   }, []);
 
   useEffect(() => {
@@ -72,6 +101,7 @@ export function SiteHeader() {
       }));
   }, [brands.data, hydrated]);
   const compareCount = hydrated ? compareCountFromStore : 0;
+  const favoritesCount = hydrated ? favorites.data?.length ?? 0 : 0;
   const isLoginPage = pathname === "/login";
   const isAuthenticated = hydrated && Boolean(me.data?.id);
   const authLink = isAuthenticated
@@ -84,22 +114,48 @@ export function SiteHeader() {
     event.preventDefault();
     const next = query.trim();
     router.push(next ? `/catalog?q=${encodeURIComponent(next)}` : "/catalog");
+    setIsMobileSearchOpen(false);
+    setIsMobileMenuOpen(false);
   };
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border bg-background shadow-[0_12px_34px_-26px_rgba(15,23,42,0.8)] supports-[backdrop-filter]:bg-background/95 supports-[backdrop-filter]:backdrop-blur-md dark:bg-card dark:supports-[backdrop-filter]:bg-card/92">
-      <div className="container flex h-16 items-center gap-3">
-        <Link href="/" className="flex items-center gap-2 font-heading text-lg font-extrabold tracking-tight">
-          <ShoppingBag className="h-5 w-5 text-primary" />
-          <span>Doxx</span>
+    <header
+      className={cn(
+        "sticky top-0 z-40 border-b border-border bg-background/80 shadow-[0_18px_60px_-40px_hsl(var(--primary)/0.7)]",
+        "supports-[backdrop-filter]:bg-background/75 supports-[backdrop-filter]:backdrop-blur-md",
+        "transition-transform duration-300",
+        isHidden && "-translate-y-full"
+      )}
+    >
+      <div className="container flex h-14 items-center gap-3 md:h-16">
+        <Link
+          href="/"
+          className="flex items-center gap-2 rounded-full px-2 py-1 font-heading text-lg font-bold tracking-tight"
+          aria-label="На главную e-katalog"
+        >
+          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <ShoppingBag className="h-4 w-4" />
+          </span>
+          <span className="text-gradient">e-katalog</span>
         </Link>
 
-        <form className="relative hidden flex-1 lg:block" onSubmit={onSearchSubmit}>
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input className="pl-9 pr-24" placeholder="Поиск по товарам, брендам, категориям..." value={query} onChange={(event) => setQuery(event.target.value)} />
-          <button type="submit" className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-secondary">
-            Найти
-          </button>
+        <form className="relative hidden flex-1 lg:flex lg:justify-center" onSubmit={onSearchSubmit}>
+          <div className="relative w-full max-w-xl">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              className="h-11 rounded-full border-border/70 bg-surface-raised/70 pl-9 pr-28 text-sm shadow-sm ring-0 transition focus-visible:border-primary/60 focus-visible:ring-2 focus-visible:ring-primary/40"
+              placeholder="Поиск по товарам, брендам, категориям..."
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            <button
+              type="submit"
+              className="gradient-primary absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-1 rounded-full px-3 py-1 text-xs font-medium text-primary-foreground shadow-sm"
+            >
+              <Search className="h-3.5 w-3.5" />
+              Найти
+            </button>
+          </div>
         </form>
 
         <nav className="hidden items-center gap-1 md:flex">
@@ -159,17 +215,57 @@ export function SiteHeader() {
           ) : null}
         </nav>
 
-        <div className="ml-auto flex items-center gap-1 md:ml-0">
-          <Link href="/catalog" className="rounded-xl p-2 hover:bg-secondary lg:hidden" aria-label="Открыть поиск по каталогу">
+        <div className="ml-auto flex items-center gap-1 md:ml-0 md:gap-2">
+          <button
+            type="button"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full hover:bg-secondary lg:hidden"
+            aria-label="Открыть поиск по каталогу"
+            onClick={() => setIsMobileSearchOpen(true)}
+          >
             <Search className="h-4 w-4" />
-          </Link>
-          <Link href="/compare" className="rounded-xl p-2 hover:bg-secondary md:hidden" aria-label="Открыть сравнение">
-            <GitCompareArrows className="h-4 w-4" />
-          </Link>
-          <Link href="/favorites" className="rounded-xl p-2 hover:bg-secondary md:hidden" aria-label="Открыть избранное">
+          </button>
+          <Link
+            href="/favorites"
+            className="relative inline-flex h-9 w-9 items-center justify-center rounded-full hover:bg-secondary"
+            aria-label="Открыть избранное"
+          >
             <Heart className="h-4 w-4" />
+            {favoritesCount ? (
+              <span className="absolute -right-1 -top-1 inline-flex min-h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-accent-foreground">
+                {favoritesCount > 9 ? "9+" : favoritesCount}
+              </span>
+            ) : null}
+          </Link>
+          <Link
+            href="/compare"
+            className="relative hidden h-9 items-center gap-1 rounded-full border border-border/60 px-3 text-xs font-medium text-foreground/80 transition-colors hover:border-primary/40 hover:bg-primary-subtle/60 hover:text-foreground md:inline-flex"
+          >
+            <GitCompareArrows className="h-3.5 w-3.5" />
+            <span>Сравнение</span>
+            {compareCount ? (
+              <span className="rounded-full bg-primary/10 px-1.5 text-[10px] font-semibold text-primary">
+                {compareCount}
+              </span>
+            ) : null}
           </Link>
           <ThemeToggle />
+          <button
+            type="button"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border/70 bg-surface/60 text-foreground transition-colors hover:border-primary/40 hover:bg-primary-subtle md:hidden"
+            aria-label="Открыть меню"
+            onClick={() => setIsMobileMenuOpen(true)}
+          >
+            <Menu className="h-4 w-4" />
+          </button>
+          <Link
+            href={authLink.href}
+            className={cn(
+              "hidden items-center gap-2 rounded-full border border-border/70 bg-surface/60 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-primary-subtle md:inline-flex",
+              pathname.startsWith(authLink.href) && "border-primary/60 bg-primary-subtle/80"
+            )}
+          >
+            <span>{authLink.label}</span>
+          </Link>
         </div>
       </div>
 
@@ -181,6 +277,101 @@ export function SiteHeader() {
           <span className="truncate">Цены обновляются регулярно. Сравнивайте офферы перед покупкой.</span>
         </div>
       </div>
+
+      {isMobileSearchOpen ? (
+        <div className="fixed inset-x-0 top-0 z-50 flex h-16 items-center border-b border-border bg-background/95 px-4 shadow-lg lg:hidden">
+          <form className="relative flex w-full items-center gap-2" onSubmit={onSearchSubmit}>
+            <button
+              type="button"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full hover:bg-secondary"
+              aria-label="Закрыть поиск"
+              onClick={() => setIsMobileSearchOpen(false)}
+            >
+              <X className="h-4 w-4" />
+            </button>
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                className="h-10 w-full rounded-full border-border/70 bg-surface-raised/80 pl-9 pr-24 text-sm shadow-sm ring-0 focus-visible:border-primary/60 focus-visible:ring-2 focus-visible:ring-primary/40"
+                autoFocus
+                placeholder="Поиск по каталогу..."
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+              <button
+                type="submit"
+                className="gradient-primary absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-1 rounded-full px-3 py-1 text-[11px] font-medium text-primary-foreground shadow-sm"
+              >
+                Найти
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
+      {isMobileMenuOpen ? (
+        <div className="fixed inset-0 z-40 lg:hidden">
+          <div
+            className="absolute inset-0 bg-black/40"
+            aria-hidden="true"
+            onClick={() => setIsMobileMenuOpen(false)}
+          />
+          <div className="glass absolute inset-y-0 right-0 flex w-80 max-w-full flex-col border-l border-border bg-background/95 p-4">
+            <div className="mb-4 flex items-center justify-between">
+              <span className="font-heading text-base font-semibold">Меню</span>
+              <button
+                type="button"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-secondary"
+                aria-label="Закрыть меню"
+                onClick={() => setIsMobileMenuOpen(false)}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <nav className="space-y-1 text-sm">
+              {links.map((link) => (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className={cn(
+                    "flex items-center justify-between rounded-lg px-3 py-2 text-foreground/80 transition-colors hover:bg-secondary hover:text-foreground",
+                    pathname.startsWith(link.href) && "bg-secondary text-foreground"
+                  )}
+                  onClick={() => setIsMobileMenuOpen(false)}
+                >
+                  <span>{link.label}</span>
+                </Link>
+              ))}
+              <Link
+                href="/compare"
+                className={cn(
+                  "flex items-center justify-between rounded-lg px-3 py-2 text-foreground/80 transition-colors hover:bg-secondary hover:text-foreground",
+                  pathname.startsWith("/compare") && "bg-secondary text-foreground"
+                )}
+                onClick={() => setIsMobileMenuOpen(false)}
+              >
+                <span>Сравнение</span>
+                {compareCount ? (
+                  <span className="rounded-full bg-primary/10 px-2 text-[11px] font-semibold text-primary">
+                    {compareCount}
+                  </span>
+                ) : null}
+              </Link>
+              <Link
+                href={authLink.href}
+                className={cn(
+                  "flex items-center justify-between rounded-lg px-3 py-2 text-foreground/80 transition-colors hover:bg-secondary hover:text-foreground",
+                  pathname.startsWith(authLink.href) && "bg-secondary text-foreground"
+                )}
+                onClick={() => setIsMobileMenuOpen(false)}
+              >
+                <span>{authLink.label}</span>
+              </Link>
+            </nav>
+          </div>
+        </div>
+      ) : null}
     </header>
   );
 }
