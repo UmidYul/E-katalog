@@ -38,6 +38,6 @@ export const env = {
   apiInternalOrigin,
   apiServerOrigins,
   apiPrefix: process.env.NEXT_PUBLIC_API_PREFIX ?? "/api/v1",
-  siteName: process.env.NEXT_PUBLIC_SITE_NAME ?? "Doxx"
+  siteName: "Doxx"
 };
 
