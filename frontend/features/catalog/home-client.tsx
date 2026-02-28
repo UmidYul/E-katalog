@@ -16,7 +16,6 @@ import { useAuthMe } from "@/features/auth/use-auth";
 import { useCatalogProducts, useCategories } from "@/features/catalog/use-catalog-queries";
 import { useFavorites } from "@/features/user/use-favorites";
 import { catalogApi } from "@/lib/api/openapi-client";
-import { cn } from "@/lib/utils/cn";
 import { buildPriceAlertSignal, toPositivePriceOrNull } from "@/lib/utils/price-alerts";
 import { formatPrice } from "@/lib/utils/format";
 import { usePriceAlertsStore } from "@/store/priceAlerts.store";
