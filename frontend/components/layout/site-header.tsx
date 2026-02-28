@@ -91,7 +91,7 @@ export function SiteHeader() {
       <div className="container flex h-16 items-center gap-3">
         <Link href="/" className="flex items-center gap-2 font-heading text-lg font-extrabold tracking-tight">
           <ShoppingBag className="h-5 w-5 text-primary" />
-          <span>E-katalog</span>
+          <span>Doxx</span>
         </Link>
 
         <form className="relative hidden flex-1 lg:block" onSubmit={onSearchSubmit}>
@@ -184,3 +184,4 @@ export function SiteHeader() {
     </header>
   );
 }
+

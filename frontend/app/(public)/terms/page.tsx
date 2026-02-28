@@ -14,7 +14,7 @@ export default function TermsPage() {
         <h1 className="font-heading text-3xl font-bold tracking-tight">Terms of Service</h1>
         <p className="text-sm text-muted-foreground">Updated: February 26, 2026</p>
         <p>
-          E-katalog provides informational aggregation of product offers and links to third-party stores. Pricing, availability, and
+          Doxx provides informational aggregation of product offers and links to third-party stores. Pricing, availability, and
           final order execution are controlled by the destination store.
         </p>
         <p>
@@ -28,3 +28,4 @@ export default function TermsPage() {
     </main>
   );
 }
+

@@ -28,6 +28,8 @@
   --scrollbar-track: hsl(var(--muted) / 0.65);
   --scrollbar-thumb: hsl(var(--primary) / 0.42);
   --scrollbar-thumb-hover: hsl(var(--primary) / 0.62);
+  --font-body: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-heading: "Trebuchet MS", "Segoe UI", Arial, sans-serif;
 }
 
 .dark {

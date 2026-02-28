@@ -17,7 +17,7 @@ from app.db.session import AsyncSessionLocal
 configure_logging(settings.log_level)
 init_sentry()
 
-app = FastAPI(title="E-katalog API", version="1.0.0")
+app = FastAPI(title="Doxx API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -69,3 +69,4 @@ async def startup_seed_admin() -> None:
         user = await ensure_seed_admin(redis, db=db)
     if user:
         logger.info("seed_admin_ready", email=user["email"], role=user["role"])
+

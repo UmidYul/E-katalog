@@ -34,8 +34,34 @@ import {
 import { useAdminAccess } from "@/features/auth/use-admin-access";
 
 const moneyFormatter = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 });
-
 const formatMoney = (value: number, currency: string) => `${moneyFormatter.format(value)} ${currency}`;
+
+const STATUS_LABELS: Record<string, string> = {
+  all: "Все",
+  draft: "Черновик",
+  submitted: "Новая",
+  review: "На проверке",
+  approved: "Одобрено",
+  rejected: "Отклонено",
+  open: "Открыт",
+  accepted: "Принят",
+  low: "Низкий",
+  medium: "Средний",
+  high: "Высокий",
+  critical: "Критический",
+  pending: "Ожидание",
+  ready: "Готово",
+  failed: "Ошибка",
+};
+
+const JOB_LABELS: Record<string, string> = {
+  invoices: "Счета",
+  acts: "Акты",
+  "fraud-scan": "Антифрод",
+  "feed-health": "Проверка фидов",
+};
+
+const localize = (value: string) => STATUS_LABELS[value] ?? value;
 
 export default function AdminB2BPage() {
   const { role } = useAdminAccess();
@@ -56,7 +82,8 @@ export default function AdminB2BPage() {
   const [monthlyFee, setMonthlyFee] = useState("0");
   const [includedClicks, setIncludedClicks] = useState("0");
   const [clickPrice, setClickPrice] = useState("0");
-  const [limitsJson, setLimitsJson] = useState('{"max_feeds":10,"max_campaigns":5}');
+  const [maxFeeds, setMaxFeeds] = useState("10");
+  const [maxCampaigns, setMaxCampaigns] = useState("5");
 
   const [jobLogs, setJobLogs] = useState<Array<{ id: string; job: string; queued: string; ts: string }>>([]);
 
@@ -105,7 +132,7 @@ export default function AdminB2BPage() {
     return (
       <Card>
         <CardContent className="p-6">
-          <p className="text-sm text-muted-foreground">Only admins can access B2B control center. Current role: {role}.</p>
+          <p className="text-sm text-muted-foreground">Доступ только для администраторов. Текущая роль: {role}.</p>
         </CardContent>
       </Card>
     );
@@ -117,11 +144,11 @@ export default function AdminB2BPage() {
       {
         applicationId,
         status,
-        rejection_reason: status === "rejected" ? rejectionReason.trim() || "Rejected by admin review" : undefined,
+        rejection_reason: status === "rejected" ? rejectionReason.trim() || "Отклонено по результатам проверки" : undefined,
       },
       {
-        onSuccess: () => setMessage(`Application ${applicationId.slice(0, 8)} moved to ${status}.`),
-        onError: () => setMessage(`Failed to update application ${applicationId.slice(0, 8)}.`),
+        onSuccess: () => setMessage(`Заявка ${applicationId.slice(0, 8)} переведена в статус «${localize(status)}».`),
+        onError: () => setMessage(`Не удалось обновить заявку ${applicationId.slice(0, 8)}.`),
       },
     );
   };
@@ -135,8 +162,12 @@ export default function AdminB2BPage() {
         review_note: leadReviewNote.trim() || undefined,
       },
       {
-        onSuccess: () => setMessage(`Lead ${leadId.slice(0, 8)} moved to ${status}.`),
-        onError: () => setMessage(`Failed to update lead ${leadId.slice(0, 8)}.`),
+        onSuccess: (result) =>
+          setMessage(
+            `Лид ${leadId.slice(0, 8)} переведен в статус «${localize(status)}».` +
+              (result?.provisioning_status ? ` Подготовка аккаунта: ${localize(result.provisioning_status)}.` : ""),
+          ),
+        onError: () => setMessage(`Не удалось обновить лид ${leadId.slice(0, 8)}.`),
       },
     );
   };
@@ -150,8 +181,8 @@ export default function AdminB2BPage() {
         resolution_note: resolutionNote.trim() || undefined,
       },
       {
-        onSuccess: () => setMessage(`Dispute ${disputeId.slice(0, 8)} moved to ${status}.`),
-        onError: () => setMessage(`Failed to update dispute ${disputeId.slice(0, 8)}.`),
+        onSuccess: () => setMessage(`Спор ${disputeId.slice(0, 8)} переведен в статус «${localize(status)}».`),
+        onError: () => setMessage(`Не удалось обновить спор ${disputeId.slice(0, 8)}.`),
       },
     );
   };
@@ -159,17 +190,14 @@ export default function AdminB2BPage() {
   const upsertPlan = () => {
     setMessage(null);
     if (!planCode.trim() || !planName.trim()) {
-      setMessage("Plan code and name are required.");
+      setMessage("Укажите код и название тарифа.");
       return;
     }
 
-    let parsedLimits: Record<string, unknown>;
-    try {
-      parsedLimits = limitsJson.trim() ? (JSON.parse(limitsJson) as Record<string, unknown>) : {};
-    } catch {
-      setMessage("Limits JSON is invalid.");
-      return;
-    }
+    const parsedLimits: Record<string, unknown> = {
+      max_feeds: Math.max(0, Number(maxFeeds) || 0),
+      max_campaigns: Math.max(0, Number(maxCampaigns) || 0),
+    };
 
     upsertPlanMutation.mutate(
       {
@@ -182,11 +210,11 @@ export default function AdminB2BPage() {
       },
       {
         onSuccess: () => {
-          setMessage(`Plan ${planCode} saved.`);
+          setMessage(`Тариф ${planCode} сохранен.`);
           setPlanCode("");
           setPlanName("");
         },
-        onError: () => setMessage("Failed to save plan."),
+        onError: () => setMessage("Не удалось сохранить тариф."),
       },
     );
   };
@@ -200,13 +228,24 @@ export default function AdminB2BPage() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      <Card className="border-primary/25 bg-gradient-to-r from-primary/10 via-background to-accent/10">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-xl">B2B Control</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            Центр управления партнерскими заявками, онбордингом продавцов, спорами, рисками и тарифами.
+          </p>
+        </CardContent>
+      </Card>
+
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <Card className="border-sky-300/70">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
               <FileBadge2 className="h-4 w-4 text-primary" />
-              Onboarding queue
+              Очередь онбординга
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -217,7 +256,7 @@ export default function AdminB2BPage() {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
               <Building2 className="h-4 w-4 text-indigo-600" />
-              Partner leads
+              Партнерские лиды
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -228,7 +267,7 @@ export default function AdminB2BPage() {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
               <Scale className="h-4 w-4 text-amber-600" />
-              Active disputes
+              Активные споры
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -239,7 +278,7 @@ export default function AdminB2BPage() {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
               <ShieldAlert className="h-4 w-4 text-rose-600" />
-              Critical risk flags
+              Критические риски
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -250,7 +289,7 @@ export default function AdminB2BPage() {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
               <WalletCards className="h-4 w-4 text-primary" />
-              Avg plan fee
+              Средний тариф
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -261,179 +300,176 @@ export default function AdminB2BPage() {
 
       {message ? <p className="text-xs text-muted-foreground">{message}</p> : null}
 
-      <div className="grid gap-4 xl:grid-cols-3">
-        <Card>
+      <div className="grid grid-cols-1 gap-6">
+        <Card className="w-full">
           <CardHeader className="flex flex-row items-center justify-between gap-3">
-            <CardTitle>Onboarding applications</CardTitle>
+            <CardTitle>Заявки онбординга</CardTitle>
             <div className="w-44">
               <Select value={onboardingStatus} onValueChange={setOnboardingStatus}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">all</SelectItem>
-                  <SelectItem value="draft">draft</SelectItem>
-                  <SelectItem value="submitted">submitted</SelectItem>
-                  <SelectItem value="review">review</SelectItem>
-                  <SelectItem value="approved">approved</SelectItem>
-                  <SelectItem value="rejected">rejected</SelectItem>
+                  <SelectItem value="all">Все</SelectItem>
+                  <SelectItem value="draft">Черновик</SelectItem>
+                  <SelectItem value="submitted">Новая</SelectItem>
+                  <SelectItem value="review">На проверке</SelectItem>
+                  <SelectItem value="approved">Одобрено</SelectItem>
+                  <SelectItem value="rejected">Отклонено</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </CardHeader>
           <CardContent className="space-y-2">
-            <Input placeholder="Rejection reason (used for rejected status)" value={rejectionReason} onChange={(event) => setRejectionReason(event.target.value)} />
+            <Input
+              placeholder="Причина отклонения (для статуса «Отклонено»)"
+              value={rejectionReason}
+              onChange={(event) => setRejectionReason(event.target.value)}
+            />
             {onboardingQuery.isLoading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
             {onboardingItems.length ? (
               onboardingItems.map((item) => (
                 <article key={item.id} className="rounded-xl border border-border/70 bg-background/60 p-3">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-sm font-semibold">{item.company_name}</p>
-                    <span className="rounded-full border border-border/80 px-2 py-0.5 text-[11px]">{item.status}</span>
+                    <span className="rounded-full border border-border/80 px-2 py-0.5 text-[11px]">{localize(item.status)}</span>
                   </div>
-                  <p className="mt-1 text-xs text-muted-foreground">org: {item.org_id}</p>
-                  <p className="text-xs text-muted-foreground">billing: {item.billing_email}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Орг.: {item.org_id}</p>
+                  <p className="text-xs text-muted-foreground">Платежный email: {item.billing_email}</p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     <Button size="sm" variant="outline" onClick={() => patchOnboarding(item.id, "review")} disabled={patchOnboardingMutation.isPending}>
-                      Review
+                      На проверку
                     </Button>
                     <Button size="sm" variant="secondary" onClick={() => patchOnboarding(item.id, "approved")} disabled={patchOnboardingMutation.isPending}>
-                      Approve
+                      Одобрить
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => patchOnboarding(item.id, "rejected")} disabled={patchOnboardingMutation.isPending}>
-                      Reject
+                      Отклонить
                     </Button>
                   </div>
                 </article>
               ))
             ) : (
-              <p className="text-sm text-muted-foreground">No applications found.</p>
+              <p className="text-sm text-muted-foreground">Заявок нет.</p>
             )}
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="w-full">
           <CardHeader className="flex flex-row items-center justify-between gap-3">
-            <CardTitle>Partner leads</CardTitle>
+            <CardTitle>Партнерские лиды</CardTitle>
             <div className="w-44">
               <Select value={leadStatus} onValueChange={setLeadStatus}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">all</SelectItem>
-                  <SelectItem value="submitted">submitted</SelectItem>
-                  <SelectItem value="review">review</SelectItem>
-                  <SelectItem value="approved">approved</SelectItem>
-                  <SelectItem value="rejected">rejected</SelectItem>
+                  <SelectItem value="all">Все</SelectItem>
+                  <SelectItem value="submitted">Новые</SelectItem>
+                  <SelectItem value="review">На проверке</SelectItem>
+                  <SelectItem value="approved">Одобрено</SelectItem>
+                  <SelectItem value="rejected">Отклонено</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </CardHeader>
           <CardContent className="space-y-2">
-            <Input placeholder="Search company/email/contact" value={leadSearch} onChange={(event) => setLeadSearch(event.target.value)} />
-            <Textarea
-              rows={2}
-              placeholder="Review note for approve/reject"
-              value={leadReviewNote}
-              onChange={(event) => setLeadReviewNote(event.target.value)}
-            />
+            <Input placeholder="Поиск по компании / email / контакту" value={leadSearch} onChange={(event) => setLeadSearch(event.target.value)} />
+            <Textarea rows={2} placeholder="Комментарий для одобрения/отклонения" value={leadReviewNote} onChange={(event) => setLeadReviewNote(event.target.value)} />
             {leadsQuery.isLoading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
             {leads.length ? (
               leads.map((lead) => (
                 <article key={lead.id} className="rounded-xl border border-border/70 bg-background/60 p-3">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-sm font-semibold">{lead.company_name}</p>
-                    <span className="rounded-full border border-border/80 px-2 py-0.5 text-[11px]">{lead.status}</span>
+                    <span className="rounded-full border border-border/80 px-2 py-0.5 text-[11px]">{localize(lead.status)}</span>
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">{lead.contact_name}</p>
                   <p className="text-xs text-muted-foreground">{lead.email}</p>
                   <p className="text-xs text-muted-foreground">
                     {lead.country_code} {lead.city ? `/ ${lead.city}` : ""}
                   </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    categories: {lead.categories?.length ? lead.categories.join(", ") : "n/a"}
-                  </p>
+                  <p className="text-xs text-muted-foreground">Провижининг: {localize(lead.provisioning_status ?? "pending")}</p>
+                  {lead.provisioned_org_id ? <p className="text-xs text-muted-foreground">Орг.: {lead.provisioned_org_id}</p> : null}
+                  {lead.provisioned_user_id ? <p className="text-xs text-muted-foreground">Пользователь: {lead.provisioned_user_id}</p> : null}
+                  {lead.welcome_email_sent_at ? <p className="text-xs text-muted-foreground">Приветственное письмо отправлено</p> : null}
+                  {lead.provisioning_error ? <p className="text-xs text-rose-700">Ошибка провижининга: {lead.provisioning_error}</p> : null}
+                  <p className="mt-1 text-xs text-muted-foreground">Категории: {lead.categories?.length ? lead.categories.join(", ") : "не указаны"}</p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     <Button size="sm" variant="outline" onClick={() => patchLead(lead.id, "review")} disabled={patchLeadMutation.isPending}>
-                      Review
+                      На проверку
                     </Button>
                     <Button size="sm" variant="secondary" onClick={() => patchLead(lead.id, "approved")} disabled={patchLeadMutation.isPending}>
-                      Approve
+                      Одобрить
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => patchLead(lead.id, "rejected")} disabled={patchLeadMutation.isPending}>
-                      Reject
+                      Отклонить
                     </Button>
                   </div>
                 </article>
               ))
             ) : (
-              <p className="text-sm text-muted-foreground">No partner leads found.</p>
+              <p className="text-sm text-muted-foreground">Лиды не найдены.</p>
             )}
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="w-full">
           <CardHeader className="flex flex-row items-center justify-between gap-3">
-            <CardTitle>Dispute resolution</CardTitle>
+            <CardTitle>Споры по списаниям</CardTitle>
             <div className="w-44">
               <Select value={disputeStatus} onValueChange={setDisputeStatus}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">all</SelectItem>
-                  <SelectItem value="open">open</SelectItem>
-                  <SelectItem value="review">review</SelectItem>
-                  <SelectItem value="accepted">accepted</SelectItem>
-                  <SelectItem value="rejected">rejected</SelectItem>
+                  <SelectItem value="all">Все</SelectItem>
+                  <SelectItem value="open">Открытые</SelectItem>
+                  <SelectItem value="review">На проверке</SelectItem>
+                  <SelectItem value="accepted">Принятые</SelectItem>
+                  <SelectItem value="rejected">Отклоненные</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </CardHeader>
           <CardContent className="space-y-2">
-            <Textarea
-              rows={3}
-              placeholder="Resolution note for accepted/rejected actions"
-              value={resolutionNote}
-              onChange={(event) => setResolutionNote(event.target.value)}
-            />
+            <Textarea rows={3} placeholder="Комментарий к решению по спору" value={resolutionNote} onChange={(event) => setResolutionNote(event.target.value)} />
             {disputesQuery.isLoading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
             {disputes.length ? (
               disputes.map((dispute) => (
                 <article key={dispute.id} className="rounded-xl border border-border/70 bg-background/60 p-3">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-semibold">{dispute.reason || "Dispute"}</p>
-                    <span className="rounded-full border border-border/80 px-2 py-0.5 text-[11px]">{dispute.status}</span>
+                    <p className="text-sm font-semibold">{dispute.reason || "Спор"}</p>
+                    <span className="rounded-full border border-border/80 px-2 py-0.5 text-[11px]">{localize(dispute.status)}</span>
                   </div>
-                  <p className="mt-1 text-xs text-muted-foreground">charge: {dispute.click_charge_id}</p>
-                  <p className="text-xs text-muted-foreground">{dispute.message || "No merchant message"}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Списание: {dispute.click_charge_id}</p>
+                  <p className="text-xs text-muted-foreground">{dispute.message || "Комментарий продавца отсутствует"}</p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     <Button size="sm" variant="outline" onClick={() => patchDispute(dispute.id, "review")} disabled={patchDisputeMutation.isPending}>
-                      Review
+                      На проверку
                     </Button>
                     <Button size="sm" variant="secondary" onClick={() => patchDispute(dispute.id, "accepted")} disabled={patchDisputeMutation.isPending}>
-                      Accept
+                      Принять
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => patchDispute(dispute.id, "rejected")} disabled={patchDisputeMutation.isPending}>
-                      Reject
+                      Отклонить
                     </Button>
                   </div>
                 </article>
               ))
             ) : (
-              <p className="text-sm text-muted-foreground">No disputes found.</p>
+              <p className="text-sm text-muted-foreground">Споры не найдены.</p>
             )}
           </CardContent>
         </Card>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1.2fr_1fr]">
+      <div className="grid gap-6 xl:grid-cols-[1.2fr_1fr]">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-3">
             <CardTitle className="flex items-center gap-2">
               <Flag className="h-4 w-4 text-primary" />
-              Risk flags
+              Риск-флаги
             </CardTitle>
             <div className="w-40">
               <Select value={riskLevel} onValueChange={setRiskLevel}>
@@ -441,11 +477,11 @@ export default function AdminB2BPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">all</SelectItem>
-                  <SelectItem value="low">low</SelectItem>
-                  <SelectItem value="medium">medium</SelectItem>
-                  <SelectItem value="high">high</SelectItem>
-                  <SelectItem value="critical">critical</SelectItem>
+                  <SelectItem value="all">Все</SelectItem>
+                  <SelectItem value="low">Низкий</SelectItem>
+                  <SelectItem value="medium">Средний</SelectItem>
+                  <SelectItem value="high">Высокий</SelectItem>
+                  <SelectItem value="critical">Критический</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -457,15 +493,15 @@ export default function AdminB2BPage() {
                 <article key={flag.id} className="rounded-xl border border-border/70 bg-background/60 p-3">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-sm font-semibold">{flag.code}</p>
-                    <span className="rounded-full border border-border/80 px-2 py-0.5 text-[11px]">{flag.level}</span>
+                    <span className="rounded-full border border-border/80 px-2 py-0.5 text-[11px]">{localize(flag.level)}</span>
                   </div>
-                  <p className="mt-1 text-xs text-muted-foreground">org: {flag.org_id ?? "unknown"}</p>
-                  <p className="text-xs text-muted-foreground">event: {flag.click_event_id}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">details: {JSON.stringify(flag.details)}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Орг.: {flag.org_id ?? "неизвестно"}</p>
+                  <p className="text-xs text-muted-foreground">Событие: {flag.click_event_id}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Детали: {JSON.stringify(flag.details)}</p>
                 </article>
               ))
             ) : (
-              <p className="text-sm text-muted-foreground">No risk flags found.</p>
+              <p className="text-sm text-muted-foreground">Риск-флаги не найдены.</p>
             )}
           </CardContent>
         </Card>
@@ -475,7 +511,7 @@ export default function AdminB2BPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <PackageCheck className="h-4 w-4 text-primary" />
-                Billing plans
+                Тарифы B2B
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
@@ -485,22 +521,30 @@ export default function AdminB2BPage() {
                     {plan.code} - {plan.name}
                   </p>
                   <p className="text-muted-foreground">
-                    {formatMoney(plan.monthly_fee, plan.currency)} / {plan.included_clicks.toLocaleString("ru-RU")} clicks / {formatMoney(plan.click_price, plan.currency)} click
+                    {formatMoney(plan.monthly_fee, plan.currency)} / {plan.included_clicks.toLocaleString("ru-RU")} кликов / {formatMoney(plan.click_price, plan.currency)} за клик
                   </p>
                 </div>
               ))}
 
-              <div className="space-y-2 rounded-xl border border-border/70 bg-background/60 p-3">
-                <Input placeholder="Code" value={planCode} onChange={(event) => setPlanCode(event.target.value)} />
-                <Input placeholder="Name" value={planName} onChange={(event) => setPlanName(event.target.value)} />
-                <div className="grid gap-2 sm:grid-cols-3">
-                  <Input type="number" placeholder="Monthly fee" value={monthlyFee} onChange={(event) => setMonthlyFee(event.target.value)} />
-                  <Input type="number" placeholder="Included clicks" value={includedClicks} onChange={(event) => setIncludedClicks(event.target.value)} />
-                  <Input type="number" placeholder="Click price" value={clickPrice} onChange={(event) => setClickPrice(event.target.value)} />
+              <div className="space-y-3 rounded-xl border border-border/70 bg-background/60 p-3">
+                <p className="text-xs font-semibold text-foreground">Создание или обновление тарифа</p>
+                <p className="text-xs text-muted-foreground">Заполните поля ниже. Ограничения указываются обычными числами, без JSON.</p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Input placeholder="Код тарифа (например: pro_plus)" value={planCode} onChange={(event) => setPlanCode(event.target.value)} />
+                  <Input placeholder="Название тарифа" value={planName} onChange={(event) => setPlanName(event.target.value)} />
                 </div>
-                <Textarea rows={3} placeholder='{"max_feeds":10}' value={limitsJson} onChange={(event) => setLimitsJson(event.target.value)} />
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <Input type="number" placeholder="Абонплата в месяц" value={monthlyFee} onChange={(event) => setMonthlyFee(event.target.value)} />
+                  <Input type="number" placeholder="Клики включены в тариф" value={includedClicks} onChange={(event) => setIncludedClicks(event.target.value)} />
+                  <Input type="number" placeholder="Цена клика сверх лимита" value={clickPrice} onChange={(event) => setClickPrice(event.target.value)} />
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Input type="number" placeholder="Лимит фидов" value={maxFeeds} onChange={(event) => setMaxFeeds(event.target.value)} />
+                  <Input type="number" placeholder="Лимит кампаний" value={maxCampaigns} onChange={(event) => setMaxCampaigns(event.target.value)} />
+                </div>
+                <p className="text-xs text-muted-foreground">Если указать 0, ограничение считается отключенным.</p>
                 <Button onClick={upsertPlan} disabled={upsertPlanMutation.isPending}>
-                  {upsertPlanMutation.isPending ? "Saving..." : "Upsert plan"}
+                  {upsertPlanMutation.isPending ? "Сохранение..." : "Сохранить тариф"}
                 </Button>
               </div>
             </CardContent>
@@ -510,29 +554,29 @@ export default function AdminB2BPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Play className="h-4 w-4 text-primary" />
-                B2B automation jobs
+                Фоновые задачи B2B
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
               <div className="grid gap-2 sm:grid-cols-2">
                 <Button variant="secondary" onClick={() => runJob("invoices")} disabled={runJobMutation.isPending}>
-                  Run invoices
+                  Запустить счета
                 </Button>
                 <Button variant="secondary" onClick={() => runJob("acts")} disabled={runJobMutation.isPending}>
-                  Run acts
+                  Запустить акты
                 </Button>
                 <Button variant="outline" onClick={() => runJob("fraud-scan")} disabled={runJobMutation.isPending}>
-                  Run fraud scan
+                  Запустить антифрод
                 </Button>
                 <Button variant="outline" onClick={() => runJob("feed-health")} disabled={runJobMutation.isPending}>
-                  Run feed health
+                  Проверить фиды
                 </Button>
               </div>
 
               {runJobMutation.isPending ? (
                 <p className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  Queueing task...
+                  Ставим задачу в очередь...
                 </p>
               ) : null}
 
@@ -540,14 +584,14 @@ export default function AdminB2BPage() {
                 <div className="space-y-2">
                   {jobLogs.map((log) => (
                     <div key={log.id} className="rounded-xl border border-border/70 bg-background/60 p-2 text-xs">
-                      <p className="font-semibold">{log.job}</p>
+                      <p className="font-semibold">{JOB_LABELS[log.job] ?? log.job}</p>
                       <p className="text-muted-foreground">{log.id}</p>
                       <p className="text-muted-foreground">{new Date(log.ts).toLocaleString("ru-RU")}</p>
                     </div>
                   ))}
                 </div>
               ) : (
-                <p className="text-xs text-muted-foreground">No jobs triggered in this session.</p>
+                <p className="text-xs text-muted-foreground">В этой сессии задачи еще не запускались.</p>
               )}
             </CardContent>
           </Card>
@@ -557,7 +601,7 @@ export default function AdminB2BPage() {
       <Card>
         <CardContent className="flex items-center gap-2 p-4 text-xs text-muted-foreground">
           <AlertTriangle className="h-3.5 w-3.5" />
-          All actions are auditable and hit admin B2B endpoints directly. Keep rejection/resolution notes explicit for compliance.
+          Все действия логируются в аудит. Указывайте причины отклонения и комментарии к решениям.
         </CardContent>
       </Card>
     </div>

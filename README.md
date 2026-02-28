@@ -1,4 +1,4 @@
-# E-katalog Platform
+# Doxx Platform
 
 - Backend services: `services/`
 - Shared modules: `shared/`
@@ -122,3 +122,4 @@ See `frontend/README.md` for frontend details.
 
 - GitHub Actions workflow: `.github/workflows/ci.yml`
 - Setup guide: `docs/CI_SETUP.md`
+

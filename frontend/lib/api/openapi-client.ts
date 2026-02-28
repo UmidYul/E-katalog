@@ -56,6 +56,7 @@ import type {
   B2BBillingPlan,
   B2BMe,
   B2BPartnerLead,
+  B2BPartnerLeadStatus,
   B2BSupportTicket,
 } from "@/types/b2b";
 
@@ -635,10 +636,12 @@ export const b2bApi = {
     warehouses_count?: number | null;
     marketplaces?: string[];
     returns_policy?: string | null;
-    goals?: string | null;
-    notes?: string | null;
-    accepts_terms: boolean;
+      goals?: string | null;
+      notes?: string | null;
+      accepts_terms: boolean;
   }) => apiClient.post<B2BPartnerLead>("/b2b/partners/leads", payload),
+  partnerLeadStatus: (leadId: string, token: string) =>
+    apiClient.get<B2BPartnerLeadStatus>(`/b2b/partners/leads/${leadId}/status`, { params: { token } }),
 };
 
 export const adminB2bApi = {

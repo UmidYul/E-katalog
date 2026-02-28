@@ -4,10 +4,12 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import secrets
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
+from urllib.parse import urlparse
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -81,6 +83,48 @@ class B2BRepository:
             if len(rows) >= max(1, int(max_items)):
                 break
         return rows
+
+    @staticmethod
+    def _issue_tracking_token() -> str:
+        return secrets.token_urlsafe(24)
+
+    @staticmethod
+    def _hash_tracking_token(token: str) -> str:
+        return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _slugify(value: str, *, max_len: int = 80) -> str:
+        normalized = re.sub(r"[^a-z0-9]+", "-", str(value or "").strip().lower())
+        normalized = normalized.strip("-")
+        if not normalized:
+            normalized = f"seller-{secrets.token_hex(3)}"
+        return normalized[:max(8, int(max_len))].strip("-")
+
+    @staticmethod
+    def _country_currency(country_code: str) -> str:
+        normalized = str(country_code or "").strip().upper()
+        if normalized == "KZ":
+            return "KZT"
+        if normalized == "RU":
+            return "RUB"
+        if normalized == "US":
+            return "USD"
+        return "UZS"
+
+    @staticmethod
+    def _domain_from_url(value: str | None) -> str | None:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        target = raw if "://" in raw else f"https://{raw}"
+        try:
+            parsed = urlparse(target)
+        except Exception:
+            return None
+        host = str(parsed.netloc or "").strip().lower()
+        if not host:
+            return None
+        return host[:255]
 
     async def resolve_org_id(self, org_ref: str) -> int | None:
         value = (
@@ -533,6 +577,8 @@ class B2BRepository:
         monthly_orders = self._to_int(payload.get("monthly_orders"), default=0)
         warehouses_count = self._to_int(payload.get("warehouses_count"), default=0)
         avg_order_value = self._to_float(payload.get("avg_order_value"), default=0.0)
+        tracking_token = self._issue_tracking_token()
+        tracking_token_hash = self._hash_tracking_token(tracking_token)
 
         row = (
             await self.session.execute(
@@ -562,6 +608,8 @@ class B2BRepository:
                         returns_policy,
                         goals,
                         notes,
+                        tracking_token_hash,
+                        provisioning_status,
                         submitted_ip,
                         submitted_user_agent
                     ) values (
@@ -588,6 +636,8 @@ class B2BRepository:
                         :returns_policy,
                         :goals,
                         :notes,
+                        :tracking_token_hash,
+                        'pending',
                         :submitted_ip,
                         :submitted_user_agent
                     )
@@ -618,6 +668,13 @@ class B2BRepository:
                         notes,
                         review_note,
                         reviewed_at,
+                        provisioning_status,
+                        provisioned_user_uuid,
+                        provisioned_org_uuid,
+                        onboarding_application_uuid,
+                        provisioned_at,
+                        provisioning_error,
+                        welcome_email_sent_at,
                         created_at,
                         updated_at
                     """
@@ -645,6 +702,7 @@ class B2BRepository:
                     "returns_policy": str(payload.get("returns_policy") or "").strip() or None,
                     "goals": str(payload.get("goals") or "").strip() or None,
                     "notes": str(payload.get("notes") or "").strip() or None,
+                    "tracking_token_hash": tracking_token_hash,
                     "submitted_ip": str(submitted_ip or "").strip()[:128] or None,
                     "submitted_user_agent": str(submitted_user_agent or "").strip()[:512] or None,
                 },
@@ -679,6 +737,14 @@ class B2BRepository:
             "notes": row.get("notes"),
             "review_note": row.get("review_note"),
             "reviewed_at": self._iso(row.get("reviewed_at")),
+            "tracking_token": tracking_token,
+            "provisioning_status": str(row.get("provisioning_status") or "pending"),
+            "provisioned_user_id": str(row["provisioned_user_uuid"]) if row.get("provisioned_user_uuid") else None,
+            "provisioned_org_id": str(row["provisioned_org_uuid"]) if row.get("provisioned_org_uuid") else None,
+            "onboarding_application_id": str(row["onboarding_application_uuid"]) if row.get("onboarding_application_uuid") else None,
+            "provisioned_at": self._iso(row.get("provisioned_at")),
+            "provisioning_error": row.get("provisioning_error"),
+            "welcome_email_sent_at": self._iso(row.get("welcome_email_sent_at")),
             "created_at": self._iso(row.get("created_at")),
             "updated_at": self._iso(row.get("updated_at")),
         }
@@ -2362,6 +2428,13 @@ class B2BRepository:
                         pl.notes,
                         pl.review_note,
                         pl.reviewed_at,
+                        pl.provisioning_status,
+                        pl.provisioned_user_uuid,
+                        pl.provisioned_org_uuid,
+                        pl.onboarding_application_uuid,
+                        pl.provisioned_at,
+                        pl.provisioning_error,
+                        pl.welcome_email_sent_at,
                         pl.created_at,
                         pl.updated_at
                     from b2b_partner_leads pl
@@ -2403,6 +2476,13 @@ class B2BRepository:
                     "notes": row.get("notes"),
                     "review_note": row.get("review_note"),
                     "reviewed_at": self._iso(row.get("reviewed_at")),
+                    "provisioning_status": str(row.get("provisioning_status") or "pending"),
+                    "provisioned_user_id": str(row["provisioned_user_uuid"]) if row.get("provisioned_user_uuid") else None,
+                    "provisioned_org_id": str(row["provisioned_org_uuid"]) if row.get("provisioned_org_uuid") else None,
+                    "onboarding_application_id": str(row["onboarding_application_uuid"]) if row.get("onboarding_application_uuid") else None,
+                    "provisioned_at": self._iso(row.get("provisioned_at")),
+                    "provisioning_error": row.get("provisioning_error"),
+                    "welcome_email_sent_at": self._iso(row.get("welcome_email_sent_at")),
                     "created_at": self._iso(row.get("created_at")),
                     "updated_at": self._iso(row.get("updated_at")),
                 }
@@ -2429,17 +2509,54 @@ class B2BRepository:
                     set
                         status = :status,
                         review_note = :review_note,
+                        provisioning_error = case when :keep_provisioning_error then provisioning_error else null end,
                         reviewed_by_user_uuid = cast(:reviewer_uuid as uuid),
                         reviewed_at = now(),
                         updated_at = now()
                     where uuid = cast(:lead_uuid as uuid)
-                    returning uuid, status, reviewed_at
+                    returning
+                        uuid,
+                        status,
+                        company_name,
+                        legal_name,
+                        brand_name,
+                        tax_id,
+                        website_url,
+                        contact_name,
+                        contact_role,
+                        email,
+                        phone,
+                        telegram,
+                        country_code,
+                        city,
+                        categories,
+                        monthly_orders,
+                        avg_order_value,
+                        feed_url,
+                        logistics_model,
+                        warehouses_count,
+                        marketplaces,
+                        returns_policy,
+                        goals,
+                        notes,
+                        review_note,
+                        reviewed_at,
+                        provisioning_status,
+                        provisioned_user_uuid,
+                        provisioned_org_uuid,
+                        onboarding_application_uuid,
+                        provisioned_at,
+                        provisioning_error,
+                        welcome_email_sent_at,
+                        created_at,
+                        updated_at
                     """
                 ),
                 {
                     "lead_uuid": self._uuid(lead_uuid),
                     "status": status,
                     "review_note": review_note,
+                    "keep_provisioning_error": str(status or "").strip().lower() == "approved",
                     "reviewer_uuid": self._uuid(reviewer_uuid),
                 },
             )
@@ -2451,7 +2568,570 @@ class B2BRepository:
         return {
             "id": str(row["uuid"]),
             "status": str(row["status"]),
+            "company_name": str(row["company_name"]),
+            "legal_name": row.get("legal_name"),
+            "brand_name": row.get("brand_name"),
+            "tax_id": row.get("tax_id"),
+            "website_url": row.get("website_url"),
+            "contact_name": str(row["contact_name"]),
+            "contact_role": row.get("contact_role"),
+            "email": str(row["email"]),
+            "phone": str(row["phone"]),
+            "telegram": row.get("telegram"),
+            "country_code": str(row.get("country_code") or "UZ"),
+            "city": row.get("city"),
+            "categories": self._to_str_list(row.get("categories"), max_items=40, max_len=80),
+            "monthly_orders": self._to_int(row.get("monthly_orders"), default=0) or None,
+            "avg_order_value": self._to_float(row.get("avg_order_value"), default=0.0) or None,
+            "feed_url": row.get("feed_url"),
+            "logistics_model": str(row.get("logistics_model") or "own_warehouse"),
+            "warehouses_count": self._to_int(row.get("warehouses_count"), default=0) or None,
+            "marketplaces": self._to_str_list(row.get("marketplaces"), max_items=40, max_len=80),
+            "returns_policy": row.get("returns_policy"),
+            "goals": row.get("goals"),
+            "notes": row.get("notes"),
+            "review_note": row.get("review_note"),
             "reviewed_at": self._iso(row.get("reviewed_at")),
+            "provisioning_status": str(row.get("provisioning_status") or "pending"),
+            "provisioned_user_id": str(row["provisioned_user_uuid"]) if row.get("provisioned_user_uuid") else None,
+            "provisioned_org_id": str(row["provisioned_org_uuid"]) if row.get("provisioned_org_uuid") else None,
+            "onboarding_application_id": str(row["onboarding_application_uuid"]) if row.get("onboarding_application_uuid") else None,
+            "provisioned_at": self._iso(row.get("provisioned_at")),
+            "provisioning_error": row.get("provisioning_error"),
+            "welcome_email_sent_at": self._iso(row.get("welcome_email_sent_at")),
+            "created_at": self._iso(row.get("created_at")),
+            "updated_at": self._iso(row.get("updated_at")),
+        }
+
+    async def get_partner_lead_status(self, *, lead_uuid: str, tracking_token: str) -> dict[str, Any] | None:
+        row = (
+            await self.session.execute(
+                text(
+                    """
+                    select
+                        uuid,
+                        status,
+                        company_name,
+                        email,
+                        review_note,
+                        reviewed_at,
+                        provisioning_status,
+                        provisioned_user_uuid,
+                        provisioned_org_uuid,
+                        onboarding_application_uuid,
+                        provisioned_at,
+                        provisioning_error,
+                        welcome_email_sent_at,
+                        tracking_token_hash,
+                        created_at,
+                        updated_at
+                    from b2b_partner_leads
+                    where uuid = cast(:lead_uuid as uuid)
+                    limit 1
+                    """
+                ),
+                {"lead_uuid": self._uuid(lead_uuid)},
+            )
+        ).mappings().first()
+        if not row:
+            return None
+        token_hash = str(row.get("tracking_token_hash") or "")
+        if not token_hash:
+            return None
+        if not hmac.compare_digest(token_hash, self._hash_tracking_token(tracking_token)):
+            return None
+        return {
+            "id": str(row["uuid"]),
+            "status": str(row["status"]),
+            "company_name": str(row["company_name"]),
+            "email": str(row["email"]),
+            "review_note": row.get("review_note"),
+            "reviewed_at": self._iso(row.get("reviewed_at")),
+            "provisioning_status": str(row.get("provisioning_status") or "pending"),
+            "provisioned_user_id": str(row["provisioned_user_uuid"]) if row.get("provisioned_user_uuid") else None,
+            "provisioned_org_id": str(row["provisioned_org_uuid"]) if row.get("provisioned_org_uuid") else None,
+            "onboarding_application_id": str(row["onboarding_application_uuid"]) if row.get("onboarding_application_uuid") else None,
+            "provisioned_at": self._iso(row.get("provisioned_at")),
+            "provisioning_error": row.get("provisioning_error"),
+            "welcome_email_sent_at": self._iso(row.get("welcome_email_sent_at")),
+            "created_at": self._iso(row.get("created_at")),
+            "updated_at": self._iso(row.get("updated_at")),
+        }
+
+    async def mark_partner_lead_welcome_email_sent(self, *, lead_uuid: str) -> None:
+        await self.session.execute(
+            text(
+                """
+                update b2b_partner_leads
+                set welcome_email_sent_at = now(),
+                    updated_at = now()
+                where uuid = cast(:lead_uuid as uuid)
+                """
+            ),
+            {"lead_uuid": self._uuid(lead_uuid)},
+        )
+        await self.session.commit()
+
+    async def mark_partner_lead_provisioning_failed(self, *, lead_uuid: str, error_message: str) -> dict[str, Any] | None:
+        row = (
+            await self.session.execute(
+                text(
+                    """
+                    update b2b_partner_leads
+                    set provisioning_status = 'failed',
+                        provisioning_error = :provisioning_error,
+                        updated_at = now()
+                    where uuid = cast(:lead_uuid as uuid)
+                    returning
+                        uuid,
+                        status,
+                        company_name,
+                        legal_name,
+                        brand_name,
+                        tax_id,
+                        website_url,
+                        contact_name,
+                        contact_role,
+                        email,
+                        phone,
+                        telegram,
+                        country_code,
+                        city,
+                        categories,
+                        monthly_orders,
+                        avg_order_value,
+                        feed_url,
+                        logistics_model,
+                        warehouses_count,
+                        marketplaces,
+                        returns_policy,
+                        goals,
+                        notes,
+                        review_note,
+                        reviewed_at,
+                        provisioning_status,
+                        provisioned_user_uuid,
+                        provisioned_org_uuid,
+                        onboarding_application_uuid,
+                        provisioned_at,
+                        provisioning_error,
+                        welcome_email_sent_at,
+                        created_at,
+                        updated_at
+                    """
+                ),
+                {
+                    "lead_uuid": self._uuid(lead_uuid),
+                    "provisioning_error": str(error_message or "").strip()[:2000] or "provisioning failed",
+                },
+            )
+        ).mappings().first()
+        if not row:
+            await self.session.rollback()
+            return None
+        await self.session.commit()
+        return {
+            "id": str(row["uuid"]),
+            "status": str(row["status"]),
+            "company_name": str(row["company_name"]),
+            "legal_name": row.get("legal_name"),
+            "brand_name": row.get("brand_name"),
+            "tax_id": row.get("tax_id"),
+            "website_url": row.get("website_url"),
+            "contact_name": str(row["contact_name"]),
+            "contact_role": row.get("contact_role"),
+            "email": str(row["email"]),
+            "phone": str(row["phone"]),
+            "telegram": row.get("telegram"),
+            "country_code": str(row.get("country_code") or "UZ"),
+            "city": row.get("city"),
+            "categories": self._to_str_list(row.get("categories"), max_items=40, max_len=80),
+            "monthly_orders": self._to_int(row.get("monthly_orders"), default=0) or None,
+            "avg_order_value": self._to_float(row.get("avg_order_value"), default=0.0) or None,
+            "feed_url": row.get("feed_url"),
+            "logistics_model": str(row.get("logistics_model") or "own_warehouse"),
+            "warehouses_count": self._to_int(row.get("warehouses_count"), default=0) or None,
+            "marketplaces": self._to_str_list(row.get("marketplaces"), max_items=40, max_len=80),
+            "returns_policy": row.get("returns_policy"),
+            "goals": row.get("goals"),
+            "notes": row.get("notes"),
+            "review_note": row.get("review_note"),
+            "reviewed_at": self._iso(row.get("reviewed_at")),
+            "provisioning_status": str(row.get("provisioning_status") or "failed"),
+            "provisioned_user_id": str(row["provisioned_user_uuid"]) if row.get("provisioned_user_uuid") else None,
+            "provisioned_org_id": str(row["provisioned_org_uuid"]) if row.get("provisioned_org_uuid") else None,
+            "onboarding_application_id": str(row["onboarding_application_uuid"]) if row.get("onboarding_application_uuid") else None,
+            "provisioned_at": self._iso(row.get("provisioned_at")),
+            "provisioning_error": row.get("provisioning_error"),
+            "welcome_email_sent_at": self._iso(row.get("welcome_email_sent_at")),
+            "created_at": self._iso(row.get("created_at")),
+            "updated_at": self._iso(row.get("updated_at")),
+        }
+
+    async def provision_partner_lead_approval(
+        self,
+        *,
+        lead_uuid: str,
+        owner_user_uuid: str,
+        reviewer_uuid: str,
+    ) -> dict[str, Any] | None:
+        lead = (
+            await self.session.execute(
+                text(
+                    """
+                    select
+                        id,
+                        uuid,
+                        status,
+                        company_name,
+                        legal_name,
+                        tax_id,
+                        website_url,
+                        contact_name,
+                        email,
+                        phone,
+                        country_code,
+                        city,
+                        logistics_model,
+                        monthly_orders,
+                        avg_order_value,
+                        provisioned_org_uuid,
+                        onboarding_application_uuid
+                    from b2b_partner_leads
+                    where uuid = cast(:lead_uuid as uuid)
+                    for update
+                    """
+                ),
+                {"lead_uuid": self._uuid(lead_uuid)},
+            )
+        ).mappings().first()
+        if not lead:
+            await self.session.rollback()
+            return None
+        if str(lead.get("status") or "").lower() != "approved":
+            await self.session.rollback()
+            return None
+
+        owner_uuid = self._uuid(owner_user_uuid)
+        reviewer = self._uuid(reviewer_uuid)
+        org_id: int | None = None
+        org_uuid: str | None = None
+
+        existing_org_uuid = lead.get("provisioned_org_uuid")
+        if existing_org_uuid:
+            org = (
+                await self.session.execute(
+                    text("select id, uuid from b2b_organizations where uuid = cast(:org_uuid as uuid)"),
+                    {"org_uuid": str(existing_org_uuid)},
+                )
+            ).mappings().first()
+            if org:
+                org_id = int(org["id"])
+                org_uuid = str(org["uuid"])
+
+        if org_id is None:
+            slug_suffix = str(lead["uuid"])[:8]
+            base_slug = self._slugify(f"{lead.get('company_name')}-{slug_suffix}", max_len=110)
+            final_slug = f"{base_slug}-{slug_suffix}".strip("-")[:120]
+            org = (
+                await self.session.execute(
+                    text(
+                        """
+                        insert into b2b_organizations (
+                            slug,
+                            name,
+                            legal_name,
+                            tax_id,
+                            website_url,
+                            status,
+                            country_code,
+                            default_currency,
+                            created_by_user_uuid
+                        ) values (
+                            :slug,
+                            :name,
+                            :legal_name,
+                            :tax_id,
+                            :website_url,
+                            'active',
+                            :country_code,
+                            :default_currency,
+                            cast(:created_by_user_uuid as uuid)
+                        )
+                        returning id, uuid, slug
+                        """
+                    ),
+                    {
+                        "slug": final_slug,
+                        "name": str(lead.get("company_name") or "Seller Organization").strip()[:160],
+                        "legal_name": str(lead.get("legal_name") or "").strip() or None,
+                        "tax_id": str(lead.get("tax_id") or "").strip() or None,
+                        "website_url": str(lead.get("website_url") or "").strip() or None,
+                        "country_code": (str(lead.get("country_code") or "UZ").strip().upper() or "UZ")[:2],
+                        "default_currency": self._country_currency(str(lead.get("country_code") or "UZ")),
+                        "created_by_user_uuid": owner_uuid,
+                    },
+                )
+            ).mappings().one()
+            org_id = int(org["id"])
+            org_uuid = str(org["uuid"])
+
+        existing_member_id = (
+            await self.session.execute(
+                text(
+                    """
+                    select id
+                    from b2b_org_memberships
+                    where org_id = :org_id
+                      and user_uuid = cast(:user_uuid as uuid)
+                    limit 1
+                    """
+                ),
+                {"org_id": org_id, "user_uuid": owner_uuid},
+            )
+        ).scalar_one_or_none()
+        if existing_member_id is None:
+            await self.session.execute(
+                text(
+                    """
+                    insert into b2b_org_memberships (org_id, user_uuid, role, status, invited_by_user_uuid)
+                    values (:org_id, cast(:user_uuid as uuid), 'owner', 'active', cast(:invited_by_user_uuid as uuid))
+                    """
+                ),
+                {"org_id": org_id, "user_uuid": owner_uuid, "invited_by_user_uuid": reviewer},
+            )
+        else:
+            await self.session.execute(
+                text(
+                    """
+                    update b2b_org_memberships
+                    set role = 'owner',
+                        status = 'active',
+                        updated_at = now()
+                    where id = :id
+                    """
+                ),
+                {"id": int(existing_member_id)},
+            )
+
+        onboarding_uuid = lead.get("onboarding_application_uuid")
+        if onboarding_uuid:
+            onboarding_exists = (
+                await self.session.execute(
+                    text(
+                        """
+                        select uuid
+                        from b2b_onboarding_applications
+                        where uuid = cast(:uuid as uuid)
+                        limit 1
+                        """
+                    ),
+                    {"uuid": str(onboarding_uuid)},
+                )
+            ).scalar_one_or_none()
+            if onboarding_exists is None:
+                onboarding_uuid = None
+
+        if onboarding_uuid is None:
+            existing_onboarding = (
+                await self.session.execute(
+                    text(
+                        """
+                        select uuid
+                        from b2b_onboarding_applications
+                        where org_id = :org_id
+                        order by updated_at desc, id desc
+                        limit 1
+                        """
+                    ),
+                    {"org_id": org_id},
+                )
+            ).scalar_one_or_none()
+            if existing_onboarding is None:
+                onboarding = (
+                    await self.session.execute(
+                        text(
+                            """
+                            insert into b2b_onboarding_applications (
+                                org_id,
+                                status,
+                                company_name,
+                                legal_address,
+                                billing_email,
+                                contact_name,
+                                contact_phone,
+                                website_domain,
+                                tax_id,
+                                payout_details,
+                                created_by_user_uuid,
+                                updated_by_user_uuid
+                            ) values (
+                                :org_id,
+                                'draft',
+                                :company_name,
+                                :legal_address,
+                                :billing_email,
+                                :contact_name,
+                                :contact_phone,
+                                :website_domain,
+                                :tax_id,
+                                cast(:payout_details as jsonb),
+                                cast(:created_by_user_uuid as uuid),
+                                cast(:updated_by_user_uuid as uuid)
+                            )
+                            returning uuid
+                            """
+                        ),
+                        {
+                            "org_id": org_id,
+                            "company_name": str(lead.get("company_name") or "Seller Organization").strip()[:255],
+                            "legal_address": str(lead.get("city") or "").strip() or None,
+                            "billing_email": str(lead.get("email") or "").strip().lower(),
+                            "contact_name": str(lead.get("contact_name") or "").strip()[:160],
+                            "contact_phone": str(lead.get("phone") or "").strip()[:64] or None,
+                            "website_domain": self._domain_from_url(str(lead.get("website_url") or "")),
+                            "tax_id": str(lead.get("tax_id") or "").strip() or None,
+                            "payout_details": json.dumps(
+                                {
+                                    "seeded_from_partner_lead": str(lead["uuid"]),
+                                    "logistics_model": str(lead.get("logistics_model") or "own_warehouse"),
+                                    "monthly_orders": self._to_int(lead.get("monthly_orders"), default=0) or None,
+                                    "avg_order_value": self._to_float(lead.get("avg_order_value"), default=0.0) or None,
+                                }
+                            ),
+                            "created_by_user_uuid": owner_uuid,
+                            "updated_by_user_uuid": owner_uuid,
+                        },
+                    )
+                ).mappings().one()
+                onboarding_uuid = str(onboarding["uuid"])
+            else:
+                onboarding_uuid = str(existing_onboarding)
+
+        await self.session.execute(
+            text(
+                """
+                insert into b2b_org_audit_events (org_id, actor_user_uuid, action, entity_type, entity_id, payload)
+                values (
+                    :org_id,
+                    cast(:actor_user_uuid as uuid),
+                    'partner_lead.provisioned',
+                    'partner_lead',
+                    cast(:entity_id as text),
+                    cast(:payload as jsonb)
+                )
+                """
+            ),
+            {
+                "org_id": org_id,
+                "actor_user_uuid": reviewer,
+                "entity_id": str(lead["uuid"]),
+                "payload": json.dumps(
+                    {
+                        "owner_user_uuid": owner_uuid,
+                        "onboarding_application_uuid": onboarding_uuid,
+                    }
+                ),
+            },
+        )
+
+        updated = (
+            await self.session.execute(
+                text(
+                    """
+                    update b2b_partner_leads
+                    set
+                        provisioning_status = 'ready',
+                        provisioned_user_uuid = cast(:owner_user_uuid as uuid),
+                        provisioned_org_uuid = cast(:org_uuid as uuid),
+                        onboarding_application_uuid = cast(:onboarding_application_uuid as uuid),
+                        provisioned_at = now(),
+                        provisioning_error = null,
+                        updated_at = now()
+                    where id = :id
+                    returning
+                        uuid,
+                        status,
+                        company_name,
+                        legal_name,
+                        brand_name,
+                        tax_id,
+                        website_url,
+                        contact_name,
+                        contact_role,
+                        email,
+                        phone,
+                        telegram,
+                        country_code,
+                        city,
+                        categories,
+                        monthly_orders,
+                        avg_order_value,
+                        feed_url,
+                        logistics_model,
+                        warehouses_count,
+                        marketplaces,
+                        returns_policy,
+                        goals,
+                        notes,
+                        review_note,
+                        reviewed_at,
+                        provisioning_status,
+                        provisioned_user_uuid,
+                        provisioned_org_uuid,
+                        onboarding_application_uuid,
+                        provisioned_at,
+                        provisioning_error,
+                        welcome_email_sent_at,
+                        created_at,
+                        updated_at
+                    """
+                ),
+                {
+                    "id": int(lead["id"]),
+                    "owner_user_uuid": owner_uuid,
+                    "org_uuid": org_uuid,
+                    "onboarding_application_uuid": onboarding_uuid,
+                },
+            )
+        ).mappings().one()
+        await self.session.commit()
+        return {
+            "id": str(updated["uuid"]),
+            "status": str(updated["status"]),
+            "company_name": str(updated["company_name"]),
+            "legal_name": updated.get("legal_name"),
+            "brand_name": updated.get("brand_name"),
+            "tax_id": updated.get("tax_id"),
+            "website_url": updated.get("website_url"),
+            "contact_name": str(updated["contact_name"]),
+            "contact_role": updated.get("contact_role"),
+            "email": str(updated["email"]),
+            "phone": str(updated["phone"]),
+            "telegram": updated.get("telegram"),
+            "country_code": str(updated.get("country_code") or "UZ"),
+            "city": updated.get("city"),
+            "categories": self._to_str_list(updated.get("categories"), max_items=40, max_len=80),
+            "monthly_orders": self._to_int(updated.get("monthly_orders"), default=0) or None,
+            "avg_order_value": self._to_float(updated.get("avg_order_value"), default=0.0) or None,
+            "feed_url": updated.get("feed_url"),
+            "logistics_model": str(updated.get("logistics_model") or "own_warehouse"),
+            "warehouses_count": self._to_int(updated.get("warehouses_count"), default=0) or None,
+            "marketplaces": self._to_str_list(updated.get("marketplaces"), max_items=40, max_len=80),
+            "returns_policy": updated.get("returns_policy"),
+            "goals": updated.get("goals"),
+            "notes": updated.get("notes"),
+            "review_note": updated.get("review_note"),
+            "reviewed_at": self._iso(updated.get("reviewed_at")),
+            "provisioning_status": str(updated.get("provisioning_status") or "ready"),
+            "provisioned_user_id": str(updated["provisioned_user_uuid"]) if updated.get("provisioned_user_uuid") else None,
+            "provisioned_org_id": str(updated["provisioned_org_uuid"]) if updated.get("provisioned_org_uuid") else None,
+            "onboarding_application_id": str(updated["onboarding_application_uuid"]) if updated.get("onboarding_application_uuid") else None,
+            "provisioned_at": self._iso(updated.get("provisioned_at")),
+            "provisioning_error": updated.get("provisioning_error"),
+            "welcome_email_sent_at": self._iso(updated.get("welcome_email_sent_at")),
+            "created_at": self._iso(updated.get("created_at")),
+            "updated_at": self._iso(updated.get("updated_at")),
         }
 
     async def list_admin_onboarding_applications(self, *, status: str | None, limit: int, offset: int) -> dict[str, Any]:

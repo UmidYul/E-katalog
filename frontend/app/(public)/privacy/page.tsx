@@ -14,7 +14,7 @@ export default function PrivacyPage() {
         <h1 className="font-heading text-3xl font-bold tracking-tight">Privacy Policy</h1>
         <p className="text-sm text-muted-foreground">Updated: February 26, 2026</p>
         <p>
-          E-katalog processes account, catalog interaction, and alert-delivery data to provide product search, price comparison, and
+          Doxx processes account, catalog interaction, and alert-delivery data to provide product search, price comparison, and
           notifications. We process only the data required for these services.
         </p>
         <p>
@@ -29,3 +29,4 @@ export default function PrivacyPage() {
     </main>
   );
 }
+

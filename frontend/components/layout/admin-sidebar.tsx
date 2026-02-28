@@ -31,7 +31,7 @@ export function AdminSidebar() {
       className="sticky top-0 hidden h-screen shrink-0 border-r border-border bg-card/90 p-4 backdrop-blur lg:block"
     >
       <div className={cn("mb-6 rounded-2xl border border-border bg-background p-4", !open && "p-3")}>
-        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{open ? "E-katalog Admin" : "EA"}</p>
+        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{open ? "Doxx Admin" : "EA"}</p>
       </div>
       <nav className="space-y-2">
         {nav.map((item) => {
@@ -55,3 +55,4 @@ export function AdminSidebar() {
     </motion.aside>
   );
 }
+

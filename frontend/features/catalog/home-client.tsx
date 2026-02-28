@@ -196,7 +196,7 @@ export function HomeClient() {
         <div className="pointer-events-none absolute right-0 top-0 h-64 w-64 rounded-full bg-primary/20 blur-3xl" />
         <div className="pointer-events-none absolute bottom-0 left-0 h-40 w-40 rounded-full bg-accent/20 blur-3xl" />
 
-        <Badge className="mb-4 w-fit border-primary/30 bg-primary/15 text-primary">E-katalog</Badge>
+        <Badge className="mb-4 w-fit border-primary/30 bg-primary/15 text-primary">Doxx</Badge>
         <h1 className="max-w-3xl text-3xl font-extrabold tracking-tight md:text-5xl">Сравнивайте цены на технику по проверенным магазинам за пару кликов.</h1>
         <p className="mt-4 max-w-2xl text-muted-foreground">
           Единый каталог, прозрачные предложения, история стоимости и удобные инструменты для взвешенной покупки.
@@ -360,3 +360,4 @@ export function HomeClient() {
     </div>
   );
 }
+

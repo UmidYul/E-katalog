@@ -17,6 +17,7 @@ export const b2bKeys = {
   analyticsOffers: (orgId?: string, limit: number = 10) => ["b2b", "analytics-offers", orgId ?? "default", limit] as const,
   analyticsAttribution: (orgId?: string, periodDays: number = 30) =>
     ["b2b", "analytics-attribution", orgId ?? "default", periodDays] as const,
+  partnerLeadStatus: (leadId?: string, token?: string) => ["b2b", "partner-lead-status", leadId ?? "none", token ?? "none"] as const,
 };
 
 export const useB2BMe = () =>
@@ -373,4 +374,17 @@ export const useCreateB2BPartnerLead = () =>
       notes?: string | null;
       accepts_terms: boolean;
     }) => (await b2bApi.createPartnerLead(payload)).data,
+  });
+
+export const useB2BPartnerLeadStatus = (leadId?: string, token?: string) =>
+  useQuery({
+    queryKey: b2bKeys.partnerLeadStatus(leadId, token),
+    queryFn: async () => {
+      if (!leadId || !token) {
+        throw new Error("Lead id and token are required");
+      }
+      return (await b2bApi.partnerLeadStatus(leadId, token)).data;
+    },
+    enabled: Boolean(leadId && token),
+    retry: false,
   });

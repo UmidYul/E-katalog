@@ -41,7 +41,7 @@ export function SellerSidebar({ open }: { open: boolean }) {
         {open ? (
           <p className="mt-1 inline-flex items-center gap-1 text-sm font-semibold text-slate-900">
             <Building2 className="h-4 w-4 text-cyan-700" />
-            E-katalog B2B
+            Doxx B2B
           </p>
         ) : null}
       </div>
@@ -92,3 +92,4 @@ export function SellerSidebar({ open }: { open: boolean }) {
     </motion.aside>
   );
 }
+

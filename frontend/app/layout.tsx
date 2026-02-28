@@ -24,7 +24,7 @@ export const metadata: Metadata = {
     default: `${env.siteName} - Сравнение цен на технику`,
     template: `%s | ${env.siteName}`
   },
-  description: "Сравнивайте цены, магазины и характеристики техники в одном каталоге E-katalog.",
+  description: "Сравнивайте цены, магазины и характеристики техники в одном каталоге Doxx.",
   openGraph: {
     type: "website",
     siteName: env.siteName,
@@ -32,7 +32,7 @@ export const metadata: Metadata = {
     description: "Проверенные магазины, актуальные цены, удобное сравнение и история стоимости.",
     url: env.appUrl
   },
-  keywords: ["сравнение цен", "магазины", "каталог техники", "цены Узбекистан", "E-katalog"],
+  keywords: ["сравнение цен", "магазины", "каталог техники", "цены Узбекистан", "Doxx"],
   alternates: {
     canonical: env.appUrl
   }
@@ -49,4 +49,3 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
-

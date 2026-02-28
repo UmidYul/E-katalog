@@ -44,7 +44,7 @@ export function SiteFooter() {
       <div className="container space-y-8">
         <div className="grid gap-6 md:grid-cols-[1.4fr_repeat(4,minmax(0,1fr))]">
           <div className="space-y-2">
-            <p className="font-heading text-xl font-extrabold tracking-tight">E-katalog</p>
+            <p className="font-heading text-xl font-extrabold tracking-tight">Doxx</p>
             <p className="text-sm text-muted-foreground">Строгое и прозрачное сравнение цен по проверенным магазинам.</p>
             <p className="text-xs text-muted-foreground">Актуальные офферы, история стоимости и удобный выбор техники в одном месте.</p>
           </div>
@@ -66,10 +66,11 @@ export function SiteFooter() {
         </div>
 
         <div className="flex flex-col gap-2 border-t border-border/80 pt-4 text-xs text-muted-foreground md:flex-row md:items-center md:justify-between">
-          <p>{currentYear} E-katalog. Все права защищены.</p>
+          <p>{currentYear} Doxx. Все права защищены.</p>
           <p>Данные по ценам агрегируются автоматически и обновляются регулярно.</p>
         </div>
       </div>
     </footer>
   );
 }
+

@@ -162,6 +162,35 @@ export type B2BPartnerLead = {
   notes?: string | null;
   review_note?: string | null;
   reviewed_at?: string | null;
+  tracking_token?: string | null;
+  status_url?: string | null;
+  provisioning_status?: "pending" | "ready" | "failed";
+  provisioned_user_id?: string | null;
+  provisioned_org_id?: string | null;
+  onboarding_application_id?: string | null;
+  provisioned_at?: string | null;
+  provisioning_error?: string | null;
+  welcome_email_sent_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type B2BPartnerLeadStatus = {
+  id: string;
+  status: "submitted" | "review" | "approved" | "rejected";
+  company_name: string;
+  email: string;
+  review_note?: string | null;
+  reviewed_at?: string | null;
+  provisioning_status: "pending" | "ready" | "failed";
+  provisioned_user_id?: string | null;
+  provisioned_org_id?: string | null;
+  onboarding_application_id?: string | null;
+  provisioned_at?: string | null;
+  provisioning_error?: string | null;
+  welcome_email_sent_at?: string | null;
+  seller_login_url?: string | null;
+  seller_panel_url?: string | null;
   created_at: string;
   updated_at: string;
 };

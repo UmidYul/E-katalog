@@ -51,6 +51,8 @@ export function PartnerIntakePage() {
   const [acceptsTerms, setAcceptsTerms] = useState(false);
   const [formMessage, setFormMessage] = useState<string | null>(null);
   const [submittedLeadId, setSubmittedLeadId] = useState<string | null>(null);
+  const [submittedTrackingToken, setSubmittedTrackingToken] = useState<string | null>(null);
+  const [submittedStatusUrl, setSubmittedStatusUrl] = useState<string | null>(null);
 
   const categoriesPreview = useMemo(() => parseList(categoriesRaw), [categoriesRaw]);
   const marketplacesPreview = useMemo(() => parseList(marketplacesRaw), [marketplacesRaw]);
@@ -58,6 +60,8 @@ export function PartnerIntakePage() {
   const submitLead = () => {
     setFormMessage(null);
     setSubmittedLeadId(null);
+    setSubmittedTrackingToken(null);
+    setSubmittedStatusUrl(null);
     if (!companyName.trim() || !contactName.trim() || !email.trim() || !phone.trim()) {
       setFormMessage("Company, contact person, email, and phone are required.");
       return;
@@ -96,6 +100,8 @@ export function PartnerIntakePage() {
       {
         onSuccess: (lead) => {
           setSubmittedLeadId(lead.id);
+          setSubmittedTrackingToken(lead.tracking_token ?? null);
+          setSubmittedStatusUrl(lead.status_url ?? null);
           setFormMessage("Application submitted. Our B2B team will review and contact you.");
         },
         onError: () => {
@@ -117,6 +123,9 @@ export function PartnerIntakePage() {
           <p className="mt-2 text-sm text-slate-700">
             Fill in the full business profile. The admin team reviews applications in B2B control center and approves/rejects them with audit notes.
           </p>
+          <Link href="/partners/status" className="mt-3 inline-flex text-sm font-medium text-sky-900 underline underline-offset-4">
+            Track existing application
+          </Link>
         </section>
 
         <Card>
@@ -194,7 +203,7 @@ export function PartnerIntakePage() {
               value={returnsPolicy}
               onChange={(event) => setReturnsPolicy(event.target.value)}
             />
-            <Textarea rows={3} placeholder="Goals on E-katalog (traffic, sales, categories)" value={goals} onChange={(event) => setGoals(event.target.value)} />
+            <Textarea rows={3} placeholder="Goals on Doxx (traffic, sales, categories)" value={goals} onChange={(event) => setGoals(event.target.value)} />
             <Textarea rows={4} placeholder="Additional notes" value={notes} onChange={(event) => setNotes(event.target.value)} />
 
             <label className="flex items-center gap-2 text-sm">
@@ -206,10 +215,18 @@ export function PartnerIntakePage() {
             {marketplacesPreview.length ? <p className="text-xs text-muted-foreground">marketplaces: {marketplacesPreview.join(", ")}</p> : null}
             {formMessage ? <p className="text-xs text-muted-foreground">{formMessage}</p> : null}
             {submittedLeadId ? (
-              <p className="inline-flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                Lead ID: {submittedLeadId}
-              </p>
+              <div className="space-y-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+                <p className="inline-flex items-center gap-2">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Lead ID: {submittedLeadId}
+                </p>
+                {submittedTrackingToken ? <p>Tracking token: {submittedTrackingToken}</p> : null}
+                {submittedStatusUrl ? (
+                  <Link href={submittedStatusUrl} className="inline-flex rounded-md border border-emerald-400 px-2 py-1 text-emerald-900">
+                    Open application status
+                  </Link>
+                ) : null}
+              </div>
             ) : null}
 
             <div className="flex flex-wrap gap-2">
@@ -227,3 +244,4 @@ export function PartnerIntakePage() {
     </div>
   );
 }
+

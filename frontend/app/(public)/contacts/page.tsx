@@ -14,10 +14,10 @@ export default function ContactsPage() {
         <h1 className="font-heading text-3xl font-bold tracking-tight">Contacts</h1>
         <p className="text-sm text-muted-foreground">Support channel baseline</p>
         <p>
-          Product and account support: <a className="underline" href="mailto:support@e-katalog.local">support@e-katalog.local</a>
+          Product and account support: <a className="underline" href="mailto:support@doxx.local">support@doxx.local</a>
         </p>
         <p>
-          Security disclosures: <a className="underline" href="mailto:security@e-katalog.local">security@e-katalog.local</a>
+          Security disclosures: <a className="underline" href="mailto:security@doxx.local">security@doxx.local</a>
         </p>
         <p>
           For legal requests, include account email and request context in the message subject for faster triage.
@@ -26,3 +26,4 @@ export default function ContactsPage() {
     </main>
   );
 }
+

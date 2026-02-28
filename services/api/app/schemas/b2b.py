@@ -17,6 +17,7 @@ B2BInvoiceStatus = Literal["draft", "issued", "partially_paid", "paid", "overdue
 B2BPaymentStatus = Literal["pending", "succeeded", "failed", "refunded"]
 B2BTicketStatus = Literal["open", "in_progress", "waiting_merchant", "resolved", "closed"]
 B2BPartnerLeadStatus = Literal["submitted", "review", "approved", "rejected"]
+B2BPartnerLeadProvisioningStatus = Literal["pending", "ready", "failed"]
 
 
 class B2BOrganizationOut(BaseModel):
@@ -399,6 +400,15 @@ class B2BPartnerLeadOut(BaseModel):
     notes: str | None = None
     review_note: str | None = None
     reviewed_at: str | None = None
+    tracking_token: str | None = None
+    status_url: str | None = None
+    provisioning_status: B2BPartnerLeadProvisioningStatus = "pending"
+    provisioned_user_id: str | None = None
+    provisioned_org_id: str | None = None
+    onboarding_application_id: str | None = None
+    provisioned_at: str | None = None
+    provisioning_error: str | None = None
+    welcome_email_sent_at: str | None = None
     created_at: str
     updated_at: str
 
@@ -432,3 +442,23 @@ class AdminB2BPlanUpsertIn(BaseModel):
 class AdminB2BPartnerLeadPatchIn(BaseModel):
     status: B2BPartnerLeadStatus
     review_note: str | None = Field(default=None, max_length=2000)
+
+
+class B2BPartnerLeadStatusOut(BaseModel):
+    id: str
+    status: B2BPartnerLeadStatus
+    company_name: str
+    email: str
+    review_note: str | None = None
+    reviewed_at: str | None = None
+    provisioning_status: B2BPartnerLeadProvisioningStatus = "pending"
+    provisioned_user_id: str | None = None
+    provisioned_org_id: str | None = None
+    onboarding_application_id: str | None = None
+    provisioned_at: str | None = None
+    provisioning_error: str | None = None
+    welcome_email_sent_at: str | None = None
+    seller_login_url: str | None = None
+    seller_panel_url: str | None = None
+    created_at: str
+    updated_at: str
