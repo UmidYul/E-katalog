@@ -4,7 +4,7 @@ import { useEffect, useMemo } from "react";
 
 import { ProductCard } from "@/components/catalog/product-card";
 import { EmptyState } from "@/components/common/empty-state";
-import { Skeleton } from "@/components/ui/skeleton";
+import { ProductCardSkeleton } from "@/components/ui/ProductCardSkeleton";
 import { useFavorites, useToggleFavorite } from "@/features/user/use-favorites";
 import { buildPriceAlertSignal, toPositivePriceOrNull } from "@/lib/utils/price-alerts";
 import { COMPARE_LIMIT, useCompareStore } from "@/store/compare.store";
@@ -30,9 +30,9 @@ export function CatalogGrid({ loading, items }: { loading: boolean; items: Produ
 
   if (loading) {
     return (
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {Array.from({ length: 9 }).map((_, idx) => (
-          <Skeleton key={idx} className="h-[360px]" />
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+        {Array.from({ length: 8 }).map((_, idx) => (
+          <ProductCardSkeleton key={idx} />
         ))}
       </div>
     );
@@ -47,7 +47,7 @@ export function CatalogGrid({ loading, items }: { loading: boolean; items: Produ
   const referenceCompareCategory = getReferenceCategory(compareItems.map((item) => item.category));
 
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
       {items.map((item) => {
         const inCompare = compareSet.has(item.id);
         const categoryMismatch = Boolean(referenceCompareCategory && normalizeCategory(item.category?.name) && normalizeCategory(item.category?.name) !== referenceCompareCategory);

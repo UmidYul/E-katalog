@@ -1,9 +1,31 @@
 import type { Metadata } from "next";
+import { DM_Sans, JetBrains_Mono, Syne } from "next/font/google";
 
 import "./globals.css";
 
 import { Providers } from "@/components/common/providers";
 import { env } from "@/config/env";
+
+const syne = Syne({
+  subsets: ["latin"],
+  variable: "--font-heading",
+  weight: ["700", "800"],
+  display: "swap"
+});
+
+const dmSans = DM_Sans({
+  subsets: ["latin"],
+  variable: "--font-body",
+  weight: ["400", "500"],
+  display: "swap"
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-mono",
+  weight: ["400", "600"],
+  display: "swap"
+});
 
 export const metadata: Metadata = {
   metadataBase: new URL(env.appUrl),
@@ -28,7 +50,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ru" suppressHydrationWarning>
-      <body>
+      <body className={`${dmSans.variable} ${syne.variable} ${jetbrainsMono.variable}`}>
         <Providers>
           {children}
         </Providers>
