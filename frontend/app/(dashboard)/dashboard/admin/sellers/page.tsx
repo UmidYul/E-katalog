@@ -13,6 +13,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
   useAdminSellerApplications,
+  useAdminSellerApplicationHistory,
+  useAdminSellerApplicationsSummary,
   useAdminSellerFinance,
   useAdminSellerProductModerationHistory,
   useAdminSellerProductModeration,
@@ -49,12 +51,39 @@ const priorityBadgeClass = (priority: string) => {
   return "border-sky-300 bg-sky-50 text-sky-800";
 };
 
-const queueFilterMatch = (item: { status: string; age_hours?: number }) => {
+const historyActionLabel = (action: string) => {
+  const normalized = String(action).trim().toLowerCase();
+  if (normalized === "seller_application.submitted") return "Заявка создана";
+  if (normalized === "seller_application.status_patch") return "Ручное изменение статуса";
+  if (normalized === "seller_application.bulk_status_patch") return "Массовое изменение статуса";
+  return normalized || "Событие";
+};
+
+const historyStatusLabel: Record<string, string> = {
+  pending: "pending",
+  review: "review",
+  approved: "approved",
+  rejected: "rejected",
+};
+
+const formatHistoryStatus = (status?: string | null) => {
+  if (!status) return "-";
+  return historyStatusLabel[status] ?? status;
+};
+
+const formatHistoryDate = (value: string) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("ru-RU");
+};
+
+const queueFilterMatch = (item: { status: string; age_hours?: number; is_duplicate_email?: boolean; is_duplicate_company?: boolean }) => {
   return {
     all: true,
     new: item.status === "pending" && Number(item.age_hours ?? 0) < 24,
     overdue: ["pending", "review"].includes(item.status) && Number(item.age_hours ?? 0) >= 24,
     needs_data: item.status === "review",
+    duplicates: Boolean(item.is_duplicate_email || item.is_duplicate_company),
     rejected: item.status === "rejected",
   };
 };
@@ -72,8 +101,11 @@ const median = (values: number[]) => {
 export default function AdminSellersPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [queueFilter, setQueueFilter] = useState("all");
-  const [sortBy, setSortBy] = useState<"recent" | "oldest">("oldest");
+  const [sortBy, setSortBy] = useState<"recent" | "oldest" | "age_desc" | "age_asc" | "company_asc" | "company_desc" | "priority_desc">("oldest");
   const [query, setQuery] = useState("");
+  const [countryFilter, setCountryFilter] = useState("all");
+  const [createdFrom, setCreatedFrom] = useState("");
+  const [createdTo, setCreatedTo] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [reviewNote, setReviewNote] = useState("");
 
@@ -89,7 +121,24 @@ export default function AdminSellersPage() {
   const [assignShopId, setAssignShopId] = useState("");
   const [assignPlanCode, setAssignPlanCode] = useState("");
 
-  const applicationsQuery = useAdminSellerApplications({ status: statusFilter, q: query, sort_by: sortBy, limit: 100, offset: 0 });
+  const applicationsQuery = useAdminSellerApplications({
+    status: statusFilter,
+    q: query,
+    country_code: countryFilter === "all" ? undefined : countryFilter,
+    created_from: createdFrom || undefined,
+    created_to: createdTo || undefined,
+    duplicates_only: queueFilter === "duplicates" ? true : undefined,
+    sort_by: sortBy,
+    limit: 100,
+    offset: 0,
+  });
+  const applicationsSummaryQuery = useAdminSellerApplicationsSummary({
+    status: statusFilter,
+    q: query,
+    country_code: countryFilter === "all" ? undefined : countryFilter,
+    created_from: createdFrom || undefined,
+    created_to: createdTo || undefined,
+  });
   const shopsQuery = useAdminSellerShops({ limit: 100, offset: 0 });
   const moderationQueryData = useAdminSellerProductModeration({ status: moderationStatusFilter, q: moderationQuery, limit: 100, offset: 0 });
   const financeQuery = useAdminSellerFinance({ limit: 100, offset: 0 });
@@ -102,6 +151,15 @@ export default function AdminSellersPage() {
   const assignTariff = useAssignAdminSellerTariff();
 
   const allApplications = applicationsQuery.data?.items ?? [];
+  const countryOptions = Array.from(
+    new Set(
+      allApplications
+        .map((item) => String(item.country_code ?? "").trim().toUpperCase())
+        .filter(Boolean),
+    ),
+  ).sort();
+  const visibleCountryOptions =
+    countryFilter !== "all" && !countryOptions.includes(countryFilter) ? [countryFilter, ...countryOptions] : countryOptions;
   const applications = allApplications.filter((item) => {
     const flags = queueFilterMatch(item);
     return flags[queueFilter as keyof typeof flags] ?? true;
@@ -114,6 +172,7 @@ export default function AdminSellersPage() {
   const assignments = assignmentsQuery.data?.items ?? [];
 
   const selected = allApplications.find((item) => item.id === selectedId) ?? null;
+  const applicationHistoryQuery = useAdminSellerApplicationHistory(selectedId ?? undefined, { limit: 30, offset: 0 });
   const selectedModeration = moderationItems.find((item) => item.uuid === selectedModerationId) ?? null;
   const moderationHistoryQuery = useAdminSellerProductModerationHistory(selectedModerationId ?? undefined, { limit: 30, offset: 0 });
   const allSelected = applications.length > 0 && applications.every((item) => selectedIds.has(item.id));
@@ -240,9 +299,42 @@ export default function AdminSellersPage() {
         <TabsContent value="applications" className="space-y-4">
           <Card>
             <CardHeader>
+              <CardTitle className="text-base">Воронка лидов</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              <Badge className="justify-start border-slate-300 bg-slate-50 text-slate-700">Всего: {applicationsSummaryQuery.data?.total ?? 0}</Badge>
+              <Badge className="justify-start border-sky-300 bg-sky-50 text-sky-800">
+                Новые: {applicationsSummaryQuery.data?.status_counts.pending ?? 0}
+              </Badge>
+              <Badge className="justify-start border-amber-300 bg-amber-50 text-amber-800">
+                В review: {applicationsSummaryQuery.data?.status_counts.review ?? 0}
+              </Badge>
+              <Badge className="justify-start border-emerald-300 bg-emerald-50 text-emerald-800">
+                Одобрено: {applicationsSummaryQuery.data?.status_counts.approved ?? 0}
+              </Badge>
+              <Badge className="justify-start border-rose-300 bg-rose-50 text-rose-800">
+                Отклонено: {applicationsSummaryQuery.data?.status_counts.rejected ?? 0}
+              </Badge>
+              <Badge className="justify-start border-slate-300 bg-slate-50 text-slate-700">
+                За 7 дней: {applicationsSummaryQuery.data?.created_last_7d ?? 0}
+              </Badge>
+              <Badge className="justify-start border-slate-300 bg-slate-50 text-slate-700">
+                Avg review: {applicationsSummaryQuery.data?.avg_review_hours ?? 0} ч
+              </Badge>
+              <Badge className="justify-start border-slate-300 bg-slate-50 text-slate-700">
+                Oldest open: {applicationsSummaryQuery.data?.oldest_open_hours ?? 0} ч
+              </Badge>
+              <Badge className="justify-start border-slate-300 bg-slate-50 text-slate-700">
+                Дубли: {applicationsSummaryQuery.data?.duplicates_count ?? 0}
+              </Badge>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle className="text-base">Фильтры очереди</CardTitle>
             </CardHeader>
-            <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
               <Select value={statusFilter} onValueChange={setStatusFilter}>
                 <SelectTrigger>
                   <SelectValue placeholder="Статус" />
@@ -255,13 +347,18 @@ export default function AdminSellersPage() {
                   <SelectItem value="rejected">Отклоненные</SelectItem>
                 </SelectContent>
               </Select>
-              <Select value={sortBy} onValueChange={(value) => setSortBy(value as "recent" | "oldest")}>
+              <Select value={sortBy} onValueChange={(value) => setSortBy(value as "recent" | "oldest" | "age_desc" | "age_asc" | "company_asc" | "company_desc" | "priority_desc")}>
                 <SelectTrigger>
                   <SelectValue placeholder="Сортировка" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="oldest">Сначала старые</SelectItem>
                   <SelectItem value="recent">Сначала новые</SelectItem>
+                  <SelectItem value="age_desc">SLA: старше сначала</SelectItem>
+                  <SelectItem value="age_asc">SLA: моложе сначала</SelectItem>
+                  <SelectItem value="company_asc">Компания: A-Z</SelectItem>
+                  <SelectItem value="company_desc">Компания: Z-A</SelectItem>
+                  <SelectItem value="priority_desc">Приоритет: высокий сначала</SelectItem>
                 </SelectContent>
               </Select>
               <Select value={queueFilter} onValueChange={setQueueFilter}>
@@ -273,9 +370,25 @@ export default function AdminSellersPage() {
                   <SelectItem value="new">Новые</SelectItem>
                   <SelectItem value="overdue">Просроченные SLA</SelectItem>
                   <SelectItem value="needs_data">Требуют данных</SelectItem>
+                  <SelectItem value="duplicates">Дубли</SelectItem>
                   <SelectItem value="rejected">Отклоненные</SelectItem>
                 </SelectContent>
               </Select>
+              <Select value={countryFilter} onValueChange={setCountryFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Страна" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все страны</SelectItem>
+                  {visibleCountryOptions.map((code) => (
+                    <SelectItem key={code} value={code}>
+                      {code}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input type="date" value={createdFrom} onChange={(event) => setCreatedFrom(event.target.value)} />
+              <Input type="date" value={createdTo} onChange={(event) => setCreatedTo(event.target.value)} />
               <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск по компании/email/телефону" />
             </CardContent>
           </Card>
@@ -333,6 +446,7 @@ export default function AdminSellersPage() {
                 </TableHead>
                 <TableHead>Компания</TableHead>
                 <TableHead>Контакт</TableHead>
+                <TableHead>Страна</TableHead>
                 <TableHead>Статус</TableHead>
                 <TableHead>SLA</TableHead>
                 <TableHead>Приоритет</TableHead>
@@ -350,11 +464,16 @@ export default function AdminSellersPage() {
                   <TableCell>
                     <p className="font-medium">{item.company_name}</p>
                     <p className="text-xs text-muted-foreground">{item.id}</p>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {item.is_duplicate_company ? <Badge className="border-amber-300 bg-amber-50 text-amber-800">Дубль компании</Badge> : null}
+                      {item.is_duplicate_email ? <Badge className="border-amber-300 bg-amber-50 text-amber-800">Дубль email</Badge> : null}
+                    </div>
                   </TableCell>
                   <TableCell>
                     <p className="text-sm">{item.email}</p>
                     <p className="text-xs text-muted-foreground">{item.phone}</p>
                   </TableCell>
+                  <TableCell>{item.country_code ?? "-"}</TableCell>
                   <TableCell>
                     <Badge className={statusBadgeClass(item.status)}>{item.status}</Badge>
                   </TableCell>
@@ -375,7 +494,7 @@ export default function AdminSellersPage() {
               ))}
               {!applications.length ? (
                 <TableRow>
-                  <td colSpan={9} className="px-4 py-3 text-center text-sm text-muted-foreground">
+                  <td colSpan={10} className="px-4 py-3 text-center text-sm text-muted-foreground">
                     Заявки не найдены.
                   </td>
                 </TableRow>
@@ -407,6 +526,42 @@ export default function AdminSellersPage() {
                     <Button variant="destructive" disabled={patchStatus.isPending || !reviewNote.trim()} onClick={() => void submitStatus("rejected")}>
                       Отклонить
                     </Button>
+                  </div>
+                  <div className="space-y-2 rounded-lg border border-border/70 bg-muted/20 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">История коммуникаций</p>
+                    {applicationHistoryQuery.isLoading ? <p className="text-xs text-muted-foreground">Загрузка истории...</p> : null}
+                    {applicationHistoryQuery.data?.items?.length ? (
+                      applicationHistoryQuery.data.items.map((entry) => (
+                        <div key={entry.id} className="rounded-md border border-border/60 bg-background/80 p-2">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-sm font-medium">{historyActionLabel(entry.action)}</p>
+                            <p className="text-xs text-muted-foreground">{formatHistoryDate(entry.created_at)}</p>
+                          </div>
+                          {entry.status_to || entry.status_from ? (
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {formatHistoryStatus(entry.status_from)} {"->"} {formatHistoryStatus(entry.status_to)}
+                            </p>
+                          ) : null}
+                          {entry.review_note ? <p className="mt-1 text-xs text-muted-foreground">Комментарий: {entry.review_note}</p> : null}
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {entry.notification_sent === true ? (
+                              <Badge className="border-emerald-300 bg-emerald-50 text-emerald-800">Email отправлен</Badge>
+                            ) : null}
+                            {entry.notification_sent === false ? (
+                              <Badge className="border-amber-300 bg-amber-50 text-amber-800">Email не отправлен</Badge>
+                            ) : null}
+                            {entry.notification_error ? (
+                              <Badge className="border-rose-300 bg-rose-50 text-rose-800">Ошибка уведомления</Badge>
+                            ) : null}
+                            {entry.actor_user_id ? (
+                              <Badge className="border-slate-300 bg-slate-50 text-slate-700">actor: {entry.actor_user_id}</Badge>
+                            ) : null}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-xs text-muted-foreground">История по заявке пока пустая.</p>
+                    )}
                   </div>
                 </>
               ) : (

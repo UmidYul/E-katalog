@@ -120,12 +120,28 @@ async def seller_update_shop(
 ):
     redis = get_redis()
     user_uuid = str(current_user.get("id") or "").strip().lower()
+    provided_patch = payload.model_dump(exclude_unset=True)
     payload_fingerprint = hashlib.sha256(
-        json.dumps(payload.model_dump(exclude_none=True), sort_keys=True, ensure_ascii=False).encode("utf-8")
+        json.dumps(provided_patch, sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()[:16]
 
     async def _op():
         await enforce_rate_limit(request, redis, bucket="seller-dashboard-write", limit=120)
+        metadata_patch: dict[str, str | None] = {}
+        if "logo_url" in provided_patch:
+            logo_url = provided_patch.get("logo_url")
+            metadata_patch["logo_url"] = str(logo_url).strip() if isinstance(logo_url, str) else None
+        if "banner_url" in provided_patch:
+            banner_url = provided_patch.get("banner_url")
+            metadata_patch["banner_url"] = str(banner_url).strip() if isinstance(banner_url, str) else None
+        if "brand_color" in provided_patch:
+            brand_color = provided_patch.get("brand_color")
+            normalized_brand_color: str | None = None
+            if isinstance(brand_color, str):
+                cleaned = brand_color.strip().lower()
+                if cleaned:
+                    normalized_brand_color = cleaned if cleaned.startswith("#") else f"#{cleaned}"
+            metadata_patch["brand_color"] = normalized_brand_color
         row = (
             await db.execute(
                 text(
@@ -136,6 +152,7 @@ async def seller_update_shop(
                         website_url = coalesce(:website_url, website_url),
                         contact_email = coalesce(:contact_email, contact_email),
                         contact_phone = coalesce(:contact_phone, contact_phone),
+                        metadata = jsonb_strip_nulls(coalesce(metadata, '{}'::jsonb) || cast(:metadata_patch as jsonb)),
                         updated_at = now()
                     where owner_user_uuid = cast(:user_uuid as uuid)
                     returning
@@ -159,6 +176,10 @@ async def seller_update_shop(
                     "website_url": payload.website_url,
                     "contact_email": payload.contact_email,
                     "contact_phone": payload.contact_phone,
+                    "metadata_patch": json.dumps(
+                        metadata_patch,
+                        ensure_ascii=False,
+                    ),
                     "user_uuid": user_uuid,
                 },
             )

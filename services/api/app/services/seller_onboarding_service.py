@@ -67,6 +67,7 @@ def seller_panel_urls(*, status: str, provisioning_status: str, app_base_url: st
 
 def map_seller_application_payload_to_partner_lead(payload: Any) -> dict[str, Any]:
     work_type = str(getattr(payload, "work_type", "online") or "online").strip().lower()
+    contact_person = str(getattr(payload, "contact_person", "") or "").strip()
     logistics_model = "own_warehouse"
     if work_type == "both":
         logistics_model = "hybrid"
@@ -75,6 +76,7 @@ def map_seller_application_payload_to_partner_lead(payload: Any) -> dict[str, An
 
     extra_context = {
         "legal_type": getattr(payload, "legal_type", "individual"),
+        "contact_person": contact_person or None,
         "inn": str(getattr(payload, "inn", "") or "").strip(),
         "legal_address": str(getattr(payload, "legal_address", "") or "").strip(),
         "actual_address": str(getattr(payload, "actual_address", "") or "").strip() or None,
@@ -93,7 +95,7 @@ def map_seller_application_payload_to_partner_lead(payload: Any) -> dict[str, An
         "brand_name": None,
         "tax_id": str(getattr(payload, "inn", "") or "").strip(),
         "website_url": str(getattr(payload, "website_url", "") or "").strip() or None,
-        "contact_name": str(getattr(payload, "shop_name", "") or "").strip(),
+        "contact_name": contact_person or str(getattr(payload, "shop_name", "") or "").strip(),
         "contact_role": "owner",
         "email": str(getattr(payload, "contact_email", "") or "").strip().lower(),
         "phone": str(getattr(payload, "contact_phone", "") or "").strip(),
@@ -110,7 +112,7 @@ def map_seller_application_payload_to_partner_lead(payload: Any) -> dict[str, An
         "returns_policy": None,
         "goals": None,
         "notes": json.dumps(extra_context, ensure_ascii=False),
-        "accepts_terms": True,
+        "accepts_terms": bool(getattr(payload, "accepts_terms", False)),
     }
 
 

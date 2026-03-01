@@ -27,7 +27,15 @@ export function useSellerShop() {
 export function useUpdateSellerShop() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (payload: { shop_name?: string; website_url?: string | null; contact_email?: string; contact_phone?: string }) =>
+    mutationFn: async (payload: {
+      shop_name?: string;
+      website_url?: string | null;
+      contact_email?: string;
+      contact_phone?: string;
+      logo_url?: string | null;
+      banner_url?: string | null;
+      brand_color?: string | null;
+    }) =>
       (await sellerApi.updateShop(payload)).data,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: sellerKeys.shop });
@@ -175,12 +183,14 @@ export function useCreateSellerApplication() {
   return useMutation({
     mutationFn: async (payload: {
       shop_name: string;
+      contact_person: string;
       legal_type: "individual" | "llc" | "other";
       inn: string;
       legal_address: string;
       actual_address?: string | null;
       contact_phone: string;
       contact_email: string;
+      accepts_terms: boolean;
       has_website?: boolean;
       website_url?: string | null;
       work_type?: "online" | "offline" | "both";

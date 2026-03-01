@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from sqlalchemy import text
@@ -92,12 +94,214 @@ def _with_sla(item: dict) -> dict:
     return normalized
 
 
+def _parse_date_start(value: str | None) -> datetime | None:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return None
+    try:
+        return datetime.fromisoformat(f"{normalized}T00:00:00+00:00").astimezone(UTC)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"invalid date value: {normalized}") from exc
+
+
+def _parse_date_end_exclusive(value: str | None) -> datetime | None:
+    start = _parse_date_start(value)
+    if start is None:
+        return None
+    return start + timedelta(days=1)
+
+
+def _duplicate_email_exists_sql(*, alias: str = "pl") -> str:
+    return f"""
+        exists (
+            select 1
+            from b2b_partner_leads dup_email
+            where dup_email.id <> {alias}.id
+              and lower(trim(coalesce(dup_email.email, ''))) = lower(trim(coalesce({alias}.email, '')))
+              and trim(coalesce({alias}.email, '')) <> ''
+        )
+    """
+
+
+def _duplicate_company_exists_sql(*, alias: str = "pl") -> str:
+    return f"""
+        exists (
+            select 1
+            from b2b_partner_leads dup_company
+            where dup_company.id <> {alias}.id
+              and lower(trim(coalesce(dup_company.company_name, ''))) = lower(trim(coalesce({alias}.company_name, '')))
+              and trim(coalesce({alias}.company_name, '')) <> ''
+        )
+    """
+
+
+def _build_partner_leads_where(
+    *,
+    status: str | None,
+    q: str | None,
+    country_code: str | None,
+    created_from: datetime | None,
+    created_to: datetime | None,
+    duplicates_only: bool,
+) -> tuple[str, dict]:
+    where = ["1=1"]
+    params: dict = {}
+    if status:
+        where.append("pl.status = :status")
+        params["status"] = status
+    normalized_q = str(q or "").strip()
+    if normalized_q:
+        where.append("(pl.company_name ilike :q or pl.email ilike :q or pl.contact_name ilike :q)")
+        params["q"] = f"%{normalized_q}%"
+    normalized_country = str(country_code or "").strip().upper()
+    if normalized_country:
+        where.append("upper(pl.country_code) = :country_code")
+        params["country_code"] = normalized_country
+    if created_from is not None:
+        where.append("pl.created_at >= :created_from")
+        params["created_from"] = created_from
+    if created_to is not None:
+        where.append("pl.created_at < :created_to")
+        params["created_to"] = created_to
+    if duplicates_only:
+        where.append(f"({_duplicate_email_exists_sql(alias='pl')} or {_duplicate_company_exists_sql(alias='pl')})")
+    return " and ".join(where), params
+
+
+def _priority_rank(value: str | None) -> int:
+    normalized = str(value or "").strip().lower()
+    if normalized == "critical":
+        return 3
+    if normalized == "high":
+        return 2
+    if normalized == "normal":
+        return 1
+    return 0
+
+
+def _request_ip(request: Request) -> str:
+    x_forwarded_for = str(request.headers.get("x-forwarded-for") or "").strip()
+    if x_forwarded_for:
+        ip = x_forwarded_for.split(",", maxsplit=1)[0].strip()
+        if ip:
+            return ip
+    x_real_ip = str(request.headers.get("x-real-ip") or "").strip()
+    if x_real_ip:
+        return x_real_ip
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def _history_status(value: object) -> str | None:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return None
+    return canonicalize_partner_lead_status(normalized)
+
+
+def _history_note(value: object) -> str | None:
+    normalized = str(value or "").strip()
+    return normalized or None
+
+
+def _history_created_at(value: object) -> str:
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC).isoformat()
+        return value.astimezone(UTC).isoformat()
+    return str(value or "")
+
+
+def _serialize_application_history_row(row: dict[str, Any]) -> dict[str, Any]:
+    payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+    return {
+        "id": str(row.get("event_id") or row.get("uuid") or ""),
+        "action": str(row.get("action") or ""),
+        "actor_user_id": str(row.get("actor_user_uuid") or "") or None,
+        "actor_role": str(row.get("actor_role") or "system"),
+        "status_from": _history_status(payload.get("status_from")),
+        "status_to": _history_status(payload.get("status_to_public") or payload.get("status_to")),
+        "review_note": _history_note(payload.get("review_note")),
+        "notification_sent": bool(payload.get("notification_sent")) if "notification_sent" in payload else None,
+        "notification_error": _history_note(payload.get("notification_error")),
+        "source": str(payload.get("source") or "admin_sellers"),
+        "created_at": _history_created_at(row.get("created_at")),
+    }
+
+
+async def _record_application_history_event(
+    *,
+    db: AsyncSession,
+    current_user: dict,
+    request: Request,
+    application_id: str,
+    action: str,
+    payload: dict[str, Any],
+) -> None:
+    actor_uuid = str(current_user.get("id") or "").strip().lower() or None
+    actor_role = str(current_user.get("role") or "admin").strip().lower() or "admin"
+    request_id = getattr(getattr(request, "state", None), "request_id", None)
+    try:
+        await db.execute(
+            text(
+                """
+                insert into admin_audit_events (
+                    actor_user_uuid,
+                    actor_role,
+                    action,
+                    entity_type,
+                    entity_id,
+                    request_id,
+                    method,
+                    path,
+                    ip_address,
+                    user_agent,
+                    payload
+                )
+                values (
+                    cast(:actor_user_uuid as uuid),
+                    :actor_role,
+                    :action,
+                    'seller_application',
+                    :entity_id,
+                    :request_id,
+                    :method,
+                    :path,
+                    :ip_address,
+                    :user_agent,
+                    cast(:payload as jsonb)
+                )
+                """
+            ),
+            {
+                "actor_user_uuid": actor_uuid,
+                "actor_role": actor_role,
+                "action": action,
+                "entity_id": application_id,
+                "request_id": str(request_id) if request_id else None,
+                "method": request.method,
+                "path": request.url.path,
+                "ip_address": _request_ip(request),
+                "user_agent": str(request.headers.get("user-agent") or "")[:512],
+                "payload": json.dumps(payload, ensure_ascii=False, default=str),
+            },
+        )
+        await db.commit()
+    except Exception:  # noqa: BLE001
+        await db.rollback()
+
+
 @router.get("/applications")
 async def admin_list_seller_applications(
     request: Request,
     status: str | None = Query(default=None, pattern=r"^(pending|review|approved|rejected)$"),
     q: str | None = Query(default=None, min_length=2, max_length=120),
-    sort_by: str = Query(default="recent", pattern=r"^(recent|oldest)$"),
+    country_code: str | None = Query(default=None, pattern=r"^[A-Za-z]{2}$"),
+    created_from: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    created_to: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    duplicates_only: bool = Query(default=False),
+    sort_by: str = Query(default="recent", pattern=r"^(recent|oldest|age_desc|age_asc|company_asc|company_desc|priority_desc)$"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0, le=5000),
     current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
@@ -108,14 +312,131 @@ async def admin_list_seller_applications(
     await enforce_rate_limit(request, redis, bucket="admin-sellers-read", limit=240)
     repo = B2BRepository(db, cursor_secret=settings.cursor_secret)
     b2b_status = internalize_seller_status(status) if status else None
-    result = await repo.list_admin_partner_leads(status=b2b_status, q=q, limit=limit, offset=offset)
+    created_from_dt = _parse_date_start(created_from)
+    created_to_dt = _parse_date_end_exclusive(created_to)
+    if created_from_dt and created_to_dt and created_from_dt >= created_to_dt:
+        raise HTTPException(status_code=422, detail="created_from must be earlier than created_to")
+    result = await repo.list_admin_partner_leads(
+        status=b2b_status,
+        q=q,
+        country_code=country_code,
+        created_from=created_from_dt,
+        created_to=created_to_dt,
+        duplicates_only=duplicates_only,
+        limit=limit,
+        offset=offset,
+    )
     items = [_with_sla(item) for item in result.get("items", [])]
     if sort_by == "oldest":
         items.sort(key=lambda item: _parse_iso(item.get("submitted_at")) or datetime.now(UTC))
+    elif sort_by == "age_desc":
+        items.sort(key=lambda item: int(item.get("age_hours") or 0), reverse=True)
+    elif sort_by == "age_asc":
+        items.sort(key=lambda item: int(item.get("age_hours") or 0))
+    elif sort_by == "company_asc":
+        items.sort(key=lambda item: str(item.get("company_name") or "").strip().lower())
+    elif sort_by == "company_desc":
+        items.sort(key=lambda item: str(item.get("company_name") or "").strip().lower(), reverse=True)
+    elif sort_by == "priority_desc":
+        items.sort(
+            key=lambda item: (
+                _priority_rank(str(item.get("priority") or "")),
+                int(item.get("age_hours") or 0),
+            ),
+            reverse=True,
+        )
     else:
         items.sort(key=lambda item: _parse_iso(item.get("submitted_at")) or datetime.fromtimestamp(0, tz=UTC), reverse=True)
     result["items"] = items
     return result
+
+
+@router.get("/applications/summary")
+async def admin_seller_applications_summary(
+    request: Request,
+    status: str | None = Query(default=None, pattern=r"^(pending|review|approved|rejected)$"),
+    q: str | None = Query(default=None, min_length=2, max_length=120),
+    country_code: str | None = Query(default=None, pattern=r"^[A-Za-z]{2}$"),
+    created_from: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    created_to: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    db: AsyncSession = Depends(get_db_session),
+):
+    del current_user
+    redis = get_redis()
+    await enforce_rate_limit(request, redis, bucket="admin-sellers-read", limit=240)
+
+    b2b_status = internalize_seller_status(status) if status else None
+    created_from_dt = _parse_date_start(created_from)
+    created_to_dt = _parse_date_end_exclusive(created_to)
+    if created_from_dt and created_to_dt and created_from_dt >= created_to_dt:
+        raise HTTPException(status_code=422, detail="created_from must be earlier than created_to")
+    where_sql, where_params = _build_partner_leads_where(
+        status=b2b_status,
+        q=q,
+        country_code=country_code,
+        created_from=created_from_dt,
+        created_to=created_to_dt,
+        duplicates_only=False,
+    )
+    duplicate_email_exists_sql = _duplicate_email_exists_sql(alias="pl")
+    duplicate_company_exists_sql = _duplicate_company_exists_sql(alias="pl")
+    row = (
+        await db.execute(
+            text(
+                f"""
+                select
+                    count(*)::int as total,
+                    count(*) filter (where pl.status = 'submitted')::int as submitted_count,
+                    count(*) filter (where pl.status = 'review')::int as review_count,
+                    count(*) filter (where pl.status = 'approved')::int as approved_count,
+                    count(*) filter (where pl.status = 'rejected')::int as rejected_count,
+                    count(*) filter (where pl.created_at >= now() - interval '7 days')::int as created_last_7d,
+                    count(*) filter (where ({duplicate_email_exists_sql} or {duplicate_company_exists_sql}))::int as duplicates_count,
+                    avg(extract(epoch from (pl.reviewed_at - pl.created_at)) / 3600.0)
+                        filter (where pl.reviewed_at is not null and pl.status in ('review', 'approved', 'rejected')) as avg_review_hours,
+                    percentile_cont(0.5) within group (order by extract(epoch from (now() - pl.created_at)) / 3600.0)
+                        filter (where pl.status in ('submitted', 'review')) as median_open_hours,
+                    max(extract(epoch from (now() - pl.created_at)) / 3600.0)
+                        filter (where pl.status in ('submitted', 'review')) as oldest_open_hours
+                from b2b_partner_leads pl
+                where {where_sql}
+                """
+            ),
+            where_params,
+        )
+    ).mappings().first()
+    if not row:
+        return {
+            "total": 0,
+            "status_counts": {"pending": 0, "review": 0, "approved": 0, "rejected": 0},
+            "created_last_7d": 0,
+            "duplicates_count": 0,
+            "avg_review_hours": 0,
+            "median_open_hours": 0,
+            "oldest_open_hours": 0,
+        }
+    pending_count = int(row.get("submitted_count") or 0)
+    review_count = int(row.get("review_count") or 0)
+    approved_count = int(row.get("approved_count") or 0)
+    rejected_count = int(row.get("rejected_count") or 0)
+    avg_review_hours = float(row.get("avg_review_hours") or 0.0)
+    median_open_hours = float(row.get("median_open_hours") or 0.0)
+    oldest_open_hours = float(row.get("oldest_open_hours") or 0.0)
+    return {
+        "total": int(row.get("total") or 0),
+        "status_counts": {
+            "pending": pending_count,
+            "review": review_count,
+            "approved": approved_count,
+            "rejected": rejected_count,
+        },
+        "created_last_7d": int(row.get("created_last_7d") or 0),
+        "duplicates_count": int(row.get("duplicates_count") or 0),
+        "avg_review_hours": round(avg_review_hours, 1),
+        "median_open_hours": int(round(median_open_hours)),
+        "oldest_open_hours": int(round(oldest_open_hours)),
+    }
 
 
 @router.get("/applications/{application_id}")
@@ -162,6 +483,93 @@ async def admin_get_seller_application(
     return _with_sla(dict(row))
 
 
+@router.get("/applications/{application_id}/history")
+async def admin_get_seller_application_history(
+    request: Request,
+    application_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    limit: int = Query(default=20, ge=1, le=200),
+    offset: int = Query(default=0, ge=0, le=5000),
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    db: AsyncSession = Depends(get_db_session),
+):
+    del current_user
+    redis = get_redis()
+    await enforce_rate_limit(request, redis, bucket="admin-sellers-read", limit=240)
+    lead_exists = (
+        await db.execute(
+            text(
+                """
+                select 1
+                from b2b_partner_leads
+                where uuid = cast(:application_id as uuid)
+                limit 1
+                """
+            ),
+            {"application_id": application_id},
+        )
+    ).scalar_one_or_none()
+    if lead_exists is None:
+        raise HTTPException(status_code=404, detail="application not found")
+
+    total_events = int(
+        (
+            await db.execute(
+                text(
+                    """
+                    select count(*)::int
+                    from admin_audit_events
+                    where entity_type = 'seller_application'
+                      and entity_id = :application_id
+                    """
+                ),
+                {"application_id": application_id},
+            )
+        ).scalar_one()
+        or 0
+    ) + 1
+    rows = (
+        await db.execute(
+            text(
+                """
+                select event_id, actor_user_uuid, actor_role, action, payload, created_at
+                from (
+                    select
+                        ae.uuid::text as event_id,
+                        ae.actor_user_uuid::text as actor_user_uuid,
+                        ae.actor_role as actor_role,
+                        ae.action as action,
+                        ae.payload as payload,
+                        ae.created_at as created_at
+                    from admin_audit_events ae
+                    where ae.entity_type = 'seller_application'
+                      and ae.entity_id = :application_id
+                    union all
+                    select
+                        concat('submitted-', pl.uuid::text) as event_id,
+                        null::text as actor_user_uuid,
+                        'system'::text as actor_role,
+                        'seller_application.submitted'::text as action,
+                        jsonb_build_object('status_to', pl.status, 'source', 'public_intake') as payload,
+                        pl.created_at as created_at
+                    from b2b_partner_leads pl
+                    where pl.uuid = cast(:application_id as uuid)
+                ) history
+                order by created_at desc
+                limit :limit
+                offset :offset
+                """
+            ),
+            {"application_id": application_id, "limit": limit, "offset": offset},
+        )
+    ).mappings().all()
+    return {
+        "items": [_serialize_application_history_row(dict(row)) for row in rows],
+        "total": total_events,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
 @router.patch("/applications/{application_id}/status")
 async def admin_patch_seller_application(
     request: Request,
@@ -191,10 +599,29 @@ async def admin_patch_seller_application(
             status_value=status,
             review_note=payload.review_note,
             updated=updated,
+            previous_status=updated.get("status_before"),
             current_user_id=str(current_user.get("id")),
             repo=repo,
             redis=redis,
             db=db,
+        )
+        result_payload = result if isinstance(result, dict) else updated
+        await _record_application_history_event(
+            db=db,
+            current_user=current_user,
+            request=request,
+            application_id=application_id,
+            action="seller_application.status_patch",
+            payload={
+                "source": "admin_sellers",
+                "mode": "single",
+                "status_from": updated.get("status_before"),
+                "status_to": status,
+                "status_to_public": payload.status,
+                "review_note": payload.review_note,
+                "notification_sent": result_payload.get("notification_sent"),
+                "notification_error": result_payload.get("notification_error"),
+            },
         )
         if isinstance(result, dict):
             return _with_sla(result)
@@ -259,12 +686,32 @@ async def admin_bulk_patch_seller_applications(
                     status_value=target_status,
                     review_note=payload.review_note,
                     updated=updated,
+                    previous_status=updated.get("status_before"),
                     current_user_id=str(current_user.get("id")),
                     repo=repo,
                     redis=redis,
                     db=db,
                 )
-                items.append(_with_sla(result if isinstance(result, dict) else updated))
+                result_payload = result if isinstance(result, dict) else updated
+                await _record_application_history_event(
+                    db=db,
+                    current_user=current_user,
+                    request=request,
+                    application_id=application_id,
+                    action="seller_application.bulk_status_patch",
+                    payload={
+                        "source": "admin_sellers",
+                        "mode": "bulk",
+                        "status_from": updated.get("status_before"),
+                        "status_to": target_status,
+                        "status_to_public": payload.status,
+                        "review_note": payload.review_note,
+                        "notification_sent": result_payload.get("notification_sent"),
+                        "notification_error": result_payload.get("notification_error"),
+                        "batch_size": len(cleaned_ids),
+                    },
+                )
+                items.append(_with_sla(result_payload))
             except HTTPException as exc:
                 failed.append({"application_id": application_id, "detail": str(exc.detail), "status_code": exc.status_code})
             except Exception as exc:  # noqa: BLE001

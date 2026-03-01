@@ -5,8 +5,21 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { adminSellersApi } from "@/lib/api/openapi-client";
 
 export const adminSellersKeys = {
-  applications: (status: string, q: string, sortBy: string, limit: number, offset: number) =>
-    ["admin", "sellers", "applications", status, q, sortBy, limit, offset] as const,
+  applications: (
+    status: string,
+    q: string,
+    countryCode: string,
+    createdFrom: string,
+    createdTo: string,
+    duplicatesOnly: string,
+    sortBy: string,
+    limit: number,
+    offset: number,
+  ) => ["admin", "sellers", "applications", status, q, countryCode, createdFrom, createdTo, duplicatesOnly, sortBy, limit, offset] as const,
+  applicationsSummary: (status: string, q: string, countryCode: string, createdFrom: string, createdTo: string) =>
+    ["admin", "sellers", "applications-summary", status, q, countryCode, createdFrom, createdTo] as const,
+  applicationHistory: (applicationId: string, limit: number, offset: number) =>
+    ["admin", "sellers", "application-history", applicationId, limit, offset] as const,
   shops: (limit: number, offset: number) => ["admin", "sellers", "shops", limit, offset] as const,
   moderation: (status: string, q: string, limit: number, offset: number) =>
     ["admin", "sellers", "moderation", status, q, limit, offset] as const,
@@ -17,23 +30,76 @@ export const adminSellersKeys = {
   assignments: (limit: number) => ["admin", "sellers", "tariff-assignments", limit] as const,
 };
 
-export function useAdminSellerApplications(query: { status?: string; q?: string; sort_by?: "recent" | "oldest"; limit?: number; offset?: number } = {}) {
+export function useAdminSellerApplications(
+  query: {
+    status?: string;
+    q?: string;
+    country_code?: string;
+    created_from?: string;
+    created_to?: string;
+    duplicates_only?: boolean;
+    sort_by?: "recent" | "oldest" | "age_desc" | "age_asc" | "company_asc" | "company_desc" | "priority_desc";
+    limit?: number;
+    offset?: number;
+  } = {},
+) {
   const status = query.status ?? "all";
   const q = query.q ?? "";
+  const countryCode = query.country_code ?? "";
+  const createdFrom = query.created_from ?? "";
+  const createdTo = query.created_to ?? "";
+  const duplicatesOnly = query.duplicates_only ? "1" : "0";
   const sortBy = query.sort_by ?? "recent";
   const limit = query.limit ?? 50;
   const offset = query.offset ?? 0;
+  const normalizedQ = q.trim().length >= 2 ? q.trim() : "";
 
   return useQuery({
-    queryKey: adminSellersKeys.applications(status, q, sortBy, limit, offset),
+    queryKey: adminSellersKeys.applications(status, q, countryCode, createdFrom, createdTo, duplicatesOnly, sortBy, limit, offset),
     queryFn: async () =>
       (
         await adminSellersApi.applications({
           status: status === "all" ? undefined : status,
-          q: q || undefined,
+          q: normalizedQ || undefined,
+          country_code: countryCode || undefined,
+          created_from: createdFrom || undefined,
+          created_to: createdTo || undefined,
+          duplicates_only: query.duplicates_only ? true : undefined,
           sort_by: sortBy,
           limit,
           offset,
+        })
+      ).data,
+    refetchInterval: 30_000,
+    staleTime: 10_000,
+  });
+}
+
+export function useAdminSellerApplicationsSummary(
+  query: {
+    status?: string;
+    q?: string;
+    country_code?: string;
+    created_from?: string;
+    created_to?: string;
+  } = {},
+) {
+  const status = query.status ?? "all";
+  const q = query.q ?? "";
+  const countryCode = query.country_code ?? "";
+  const createdFrom = query.created_from ?? "";
+  const createdTo = query.created_to ?? "";
+  const normalizedQ = q.trim().length >= 2 ? q.trim() : "";
+  return useQuery({
+    queryKey: adminSellersKeys.applicationsSummary(status, q, countryCode, createdFrom, createdTo),
+    queryFn: async () =>
+      (
+        await adminSellersApi.applicationsSummary({
+          status: status === "all" ? undefined : status,
+          q: normalizedQ || undefined,
+          country_code: countryCode || undefined,
+          created_from: createdFrom || undefined,
+          created_to: createdTo || undefined,
         })
       ).data,
     refetchInterval: 30_000,
@@ -60,6 +126,7 @@ export function usePatchAdminSellerApplicationStatus() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["admin", "sellers", "applications"] });
       await queryClient.invalidateQueries({ queryKey: ["admin", "sellers", "shops"] });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "sellers", "application-history"] });
     },
   });
 }
@@ -78,7 +145,25 @@ export function useBulkPatchAdminSellerApplicationsStatus() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["admin", "sellers", "applications"] });
       await queryClient.invalidateQueries({ queryKey: ["admin", "sellers", "shops"] });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "sellers", "application-history"] });
     },
+  });
+}
+
+export function useAdminSellerApplicationHistory(applicationId?: string, query: { limit?: number; offset?: number } = {}) {
+  const normalizedApplicationId = applicationId ?? "";
+  const limit = query.limit ?? 30;
+  const offset = query.offset ?? 0;
+  return useQuery({
+    queryKey: adminSellersKeys.applicationHistory(normalizedApplicationId, limit, offset),
+    queryFn: async () => {
+      if (!normalizedApplicationId) {
+        throw new Error("application id is required");
+      }
+      return (await adminSellersApi.applicationHistory(normalizedApplicationId, { limit, offset })).data;
+    },
+    enabled: Boolean(normalizedApplicationId),
+    staleTime: 10_000,
   });
 }
 

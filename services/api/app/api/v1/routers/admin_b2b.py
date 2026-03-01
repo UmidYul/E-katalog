@@ -63,7 +63,16 @@ async def admin_list_b2b_partner_leads(
     redis = get_redis()
     await enforce_rate_limit(request, redis, bucket="admin-b2b-read", limit=240)
     repo = B2BRepository(db, cursor_secret=settings.cursor_secret)
-    return await repo.list_admin_partner_leads(status=status, q=q, limit=limit, offset=offset)
+    return await repo.list_admin_partner_leads(
+        status=status,
+        q=q,
+        country_code=None,
+        created_from=None,
+        created_to=None,
+        duplicates_only=False,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.patch("/partner-leads/{lead_id}")
@@ -95,6 +104,7 @@ async def admin_patch_b2b_partner_lead(
             status_value=status_value,
             review_note=payload.review_note,
             updated=updated,
+            previous_status=updated.get("status_before"),
             current_user_id=str(current_user.get("id")),
             repo=repo,
             redis=redis,

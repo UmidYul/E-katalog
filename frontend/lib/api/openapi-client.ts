@@ -683,13 +683,48 @@ export type AdminSellerApplication = {
   contact_name?: string | null;
   email: string;
   phone: string;
+  country_code?: string;
+  city?: string | null;
+  categories?: string[];
+  is_duplicate_email?: boolean;
+  is_duplicate_company?: boolean;
   review_note?: string | null;
   provisioning_status?: string | null;
   submitted_at?: string;
+  reviewed_at?: string | null;
   age_hours?: number;
   priority?: "normal" | "high" | "critical" | "resolved" | string;
   created_at: string;
   updated_at: string;
+};
+
+export type AdminSellerApplicationsSummary = {
+  total: number;
+  status_counts: {
+    pending: number;
+    review: number;
+    approved: number;
+    rejected: number;
+  };
+  created_last_7d: number;
+  duplicates_count: number;
+  avg_review_hours: number;
+  median_open_hours: number;
+  oldest_open_hours: number;
+};
+
+export type AdminSellerApplicationHistoryEvent = {
+  id: string;
+  action: string;
+  actor_user_id?: string | null;
+  actor_role?: string | null;
+  status_from?: "pending" | "review" | "approved" | "rejected" | string | null;
+  status_to?: "pending" | "review" | "approved" | "rejected" | string | null;
+  review_note?: string | null;
+  notification_sent?: boolean | null;
+  notification_error?: string | null;
+  source?: string | null;
+  created_at: string;
 };
 
 export type BulkSellerApplicationActionIn = {
@@ -715,9 +750,28 @@ export type AdminSellerShop = {
 };
 
 export const adminSellersApi = {
-  applications: (query: { status?: string; q?: string; sort_by?: "recent" | "oldest"; limit?: number; offset?: number } = {}) =>
+  applications: (
+    query: {
+      status?: string;
+      q?: string;
+      country_code?: string;
+      created_from?: string;
+      created_to?: string;
+      duplicates_only?: boolean;
+      sort_by?: "recent" | "oldest" | "age_desc" | "age_asc" | "company_asc" | "company_desc" | "priority_desc";
+      limit?: number;
+      offset?: number;
+    } = {},
+  ) =>
     apiClient.get<{ items: AdminSellerApplication[]; total: number; limit: number; offset: number }>("/admin/sellers/applications", { params: query }),
+  applicationsSummary: (query: { status?: string; q?: string; country_code?: string; created_from?: string; created_to?: string } = {}) =>
+    apiClient.get<AdminSellerApplicationsSummary>("/admin/sellers/applications/summary", { params: query }),
   applicationById: (applicationId: string) => apiClient.get<AdminSellerApplication>(`/admin/sellers/applications/${applicationId}`),
+  applicationHistory: (applicationId: string, query: { limit?: number; offset?: number } = {}) =>
+    apiClient.get<{ items: AdminSellerApplicationHistoryEvent[]; total: number; limit: number; offset: number }>(
+      `/admin/sellers/applications/${applicationId}/history`,
+      { params: query },
+    ),
   patchApplicationStatus: (applicationId: string, payload: { status: string; review_note?: string | null }) =>
     apiClient.patch(`/admin/sellers/applications/${applicationId}/status`, payload),
   bulkPatchApplicationStatus: (payload: BulkSellerApplicationActionIn) =>
@@ -784,6 +838,9 @@ export type SellerShopPatch = {
   website_url?: string | null;
   contact_email?: string;
   contact_phone?: string;
+  logo_url?: string | null;
+  banner_url?: string | null;
+  brand_color?: string | null;
 };
 
 export type SellerProductStatus = "draft" | "pending_moderation" | "active" | "rejected" | "archived";
@@ -791,12 +848,14 @@ export type SellerApplicationStatus = "pending" | "review" | "approved" | "rejec
 
 export type SellerApplicationCreateIn = {
   shop_name: string;
+  contact_person: string;
   legal_type: "individual" | "llc" | "other";
   inn: string;
   legal_address: string;
   actual_address?: string | null;
   contact_phone: string;
   contact_email: string;
+  accepts_terms: boolean;
   has_website?: boolean;
   website_url?: string | null;
   work_type?: "online" | "offline" | "both";

@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowUpRight,
+  Building2,
   CheckCircle2,
   CircleDotDashed,
   CreditCard,
@@ -32,6 +33,7 @@ import {
   useB2BTickets,
   useCreateB2BTicket,
 } from "@/features/b2b/use-b2b";
+import { useSellerProducts, useSellerShop, useUpdateSellerShop } from "@/features/seller/use-seller";
 import { cn } from "@/lib/utils/cn";
 
 const PERIODS = [
@@ -53,6 +55,10 @@ const toNumber = (value: unknown) => {
 };
 
 const formatMoney = (value: number, currency: string) => `${moneyFormatter.format(value)} ${currency}`;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_REGEX = /^\+?[0-9()\s-]{7,20}$/;
+const URL_REGEX = /^https?:\/\/\S+$/i;
+const HEX_COLOR_REGEX = /^#?[0-9a-fA-F]{6}$/;
 
 const formatDateLabel = (value: unknown) => {
   if (typeof value !== "string" || !value.trim()) return "-";
@@ -88,8 +94,19 @@ export function B2BDashboardPage() {
   const [ticketPriority, setTicketPriority] = useState("normal");
   const [ticketBody, setTicketBody] = useState("");
   const [ticketMessage, setTicketMessage] = useState<string | null>(null);
+  const [profileName, setProfileName] = useState("");
+  const [profileWebsite, setProfileWebsite] = useState("");
+  const [profileEmail, setProfileEmail] = useState("");
+  const [profilePhone, setProfilePhone] = useState("");
+  const [profileLogoUrl, setProfileLogoUrl] = useState("");
+  const [profileBannerUrl, setProfileBannerUrl] = useState("");
+  const [profileBrandColor, setProfileBrandColor] = useState("");
+  const [profileMessage, setProfileMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
 
   const meQuery = useB2BMe();
+  const sellerShopQuery = useSellerShop();
+  const sellerProductsQuery = useSellerProducts({ limit: 1, offset: 0 });
+  const updateSellerShopMutation = useUpdateSellerShop();
   const primaryOrg = useMemo(() => meQuery.data?.organizations?.[0], [meQuery.data?.organizations]);
   const orgId = primaryOrg?.id;
   const currency = primaryOrg?.default_currency ?? "UZS";
@@ -102,6 +119,18 @@ export function B2BDashboardPage() {
   const invoicesQuery = useB2BInvoices(orgId);
   const ticketsQuery = useB2BTickets(orgId);
   const createTicketMutation = useCreateB2BTicket(orgId);
+
+  useEffect(() => {
+    if (!sellerShopQuery.data) return;
+    setProfileName(String(sellerShopQuery.data.shop_name ?? ""));
+    setProfileWebsite(String(sellerShopQuery.data.website_url ?? ""));
+    setProfileEmail(String(sellerShopQuery.data.contact_email ?? ""));
+    setProfilePhone(String(sellerShopQuery.data.contact_phone ?? ""));
+    const metadata = sellerShopQuery.data.metadata ?? {};
+    setProfileLogoUrl(typeof metadata.logo_url === "string" ? metadata.logo_url : "");
+    setProfileBannerUrl(typeof metadata.banner_url === "string" ? metadata.banner_url : "");
+    setProfileBrandColor(typeof metadata.brand_color === "string" ? metadata.brand_color : "");
+  }, [sellerShopQuery.data]);
 
   if (meQuery.isLoading) {
     return <div className="rounded-3xl border border-border bg-card p-6 text-sm text-muted-foreground">Loading seller control center...</div>;
@@ -167,6 +196,40 @@ export function B2BDashboardPage() {
   const lastSync = analyticsQuery.data?.generated_at ? new Date(analyticsQuery.data.generated_at).toLocaleString("ru-RU") : "-";
   const onboardingStatus = meQuery.data.onboarding_status_by_org[orgId] ?? "draft";
   const billingStatus = meQuery.data.billing_status_by_org[orgId] ?? "inactive";
+  const hasAnyProducts = (sellerProductsQuery.data?.length ?? 0) > 0;
+  const hasProfileName = profileName.trim().length >= 2;
+  const hasProfileEmail = EMAIL_REGEX.test(profileEmail.trim().toLowerCase());
+  const hasProfilePhone = PHONE_REGEX.test(profilePhone.trim());
+  const hasWebsite = !profileWebsite.trim() || URL_REGEX.test(profileWebsite.trim());
+  const hasLogoUrl = !profileLogoUrl.trim() || URL_REGEX.test(profileLogoUrl.trim());
+  const hasBannerUrl = !profileBannerUrl.trim() || URL_REGEX.test(profileBannerUrl.trim());
+  const hasBrandColor = !profileBrandColor.trim() || HEX_COLOR_REGEX.test(profileBrandColor.trim());
+  const normalizedBrandColor = profileBrandColor.trim()
+    ? profileBrandColor.trim().startsWith("#")
+      ? profileBrandColor.trim().toLowerCase()
+      : `#${profileBrandColor.trim().toLowerCase()}`
+    : "#0f766e";
+  const brandColorPreview = hasBrandColor ? normalizedBrandColor : "#0f766e";
+
+  const onboardingTasks = [
+    { label: "Set shop name", ok: hasProfileName, hint: hasProfileName ? "Done" : "Add a clear storefront name", href: "#company-profile", cta: "Fix" },
+    { label: "Set work email", ok: hasProfileEmail, hint: hasProfileEmail ? "Done" : "A valid email is required", href: "#company-profile", cta: "Fix" },
+    { label: "Set contact phone", ok: hasProfilePhone, hint: hasProfilePhone ? "Done" : "A reachable phone is required", href: "#company-profile", cta: "Fix" },
+    { label: "Add website (optional)", ok: hasWebsite, hint: hasWebsite ? "Done" : "Use URL with http:// or https://", href: "#company-profile", cta: "Fix" },
+    {
+      label: "Configure branding",
+      ok: hasLogoUrl && hasBannerUrl && hasBrandColor,
+      hint: hasLogoUrl && hasBannerUrl && hasBrandColor ? "Done" : "Set logo, banner, and brand color",
+      href: "#company-profile",
+      cta: "Open",
+    },
+    { label: "Pass onboarding", ok: onboardingStatus === "approved", hint: onboardingStatus, href: "/dashboard/seller/onboarding", cta: "Open" },
+    { label: "Upload first product", ok: hasAnyProducts, hint: hasAnyProducts ? "Done" : "Add at least one SKU", href: "/dashboard/seller/products/new", cta: "Add" },
+    { label: "Activate at least one feed", ok: activeFeeds > 0, hint: `${activeFeeds} active`, href: "/dashboard/seller/feeds", cta: "Open" },
+    { label: "Launch at least one campaign", ok: activeCampaigns > 0, hint: `${activeCampaigns} active`, href: "/dashboard/seller/campaigns", cta: "Launch" },
+  ];
+  const onboardingDone = onboardingTasks.filter((item) => item.ok).length;
+  const onboardingProgress = Math.round((onboardingDone / onboardingTasks.length) * 100);
 
   const checklist = [
     { label: "Onboarding approved", ok: onboardingStatus === "approved", hint: onboardingStatus },
@@ -174,6 +237,52 @@ export function B2BDashboardPage() {
     { label: "At least one active campaign", ok: activeCampaigns > 0, hint: `${activeCampaigns} active` },
     { label: "No overdue invoices", ok: overdueInvoices === 0, hint: `${overdueInvoices} overdue` },
   ];
+
+  const saveCompanyProfile = async () => {
+    setProfileMessage(null);
+    if (!hasProfileName) {
+      setProfileMessage({ kind: "error", text: "Store name must be at least 2 characters." });
+      return;
+    }
+    if (!hasProfileEmail) {
+      setProfileMessage({ kind: "error", text: "Enter a valid work email." });
+      return;
+    }
+    if (!hasProfilePhone) {
+      setProfileMessage({ kind: "error", text: "Enter a valid contact phone." });
+      return;
+    }
+    if (!hasWebsite) {
+      setProfileMessage({ kind: "error", text: "Website URL must start with http:// or https://." });
+      return;
+    }
+    if (!hasLogoUrl) {
+      setProfileMessage({ kind: "error", text: "Logo URL must start with http:// or https://." });
+      return;
+    }
+    if (!hasBannerUrl) {
+      setProfileMessage({ kind: "error", text: "Banner URL must start with http:// or https://." });
+      return;
+    }
+    if (!hasBrandColor) {
+      setProfileMessage({ kind: "error", text: "Brand color must be in hex format, for example #0f766e." });
+      return;
+    }
+    try {
+      await updateSellerShopMutation.mutateAsync({
+        shop_name: profileName.trim(),
+        website_url: profileWebsite.trim() || null,
+        contact_email: profileEmail.trim().toLowerCase(),
+        contact_phone: profilePhone.trim(),
+        logo_url: profileLogoUrl.trim() || null,
+        banner_url: profileBannerUrl.trim() || null,
+        brand_color: profileBrandColor.trim() || null,
+      });
+      setProfileMessage({ kind: "success", text: "Company profile was saved." });
+    } catch {
+      setProfileMessage({ kind: "error", text: "Failed to save company profile. Please try again." });
+    }
+  };
 
   const createTicket = () => {
     setTicketMessage(null);
@@ -272,6 +381,113 @@ export function B2BDashboardPage() {
         />
         <SummaryMetric label="Spend" value={formatMoney(spend, currency)} hint={`Avg CPC ${formatMoney(avgCpc, currency)}`} />
         <SummaryMetric label="Outstanding" value={formatMoney(outstandingAmount, currency)} hint={`CTR ${(ctr * 100).toFixed(2)}%`} tone={outstandingAmount > 0 ? "warn" : "good"} />
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[1.1fr_1fr]">
+        <div id="company-profile">
+          <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <Building2 className="h-4 w-4 text-primary" />
+              Профиль компании
+            </CardTitle>
+            <span className="text-xs text-muted-foreground">Редактируется в Seller Panel</span>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {sellerShopQuery.isLoading ? <p className="text-sm text-muted-foreground">Загрузка профиля магазина...</p> : null}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Название магазина</p>
+                <Input value={profileName} onChange={(event) => setProfileName(event.target.value)} placeholder="Shop name" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Website</p>
+                <Input value={profileWebsite} onChange={(event) => setProfileWebsite(event.target.value)} placeholder="https://example.com" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Email</p>
+                <Input value={profileEmail} onChange={(event) => setProfileEmail(event.target.value)} type="email" placeholder="sales@example.com" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Phone</p>
+                <Input value={profilePhone} onChange={(event) => setProfilePhone(event.target.value)} type="tel" placeholder="+998 90 123 45 67" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Logo URL</p>
+                <Input value={profileLogoUrl} onChange={(event) => setProfileLogoUrl(event.target.value)} placeholder="https://cdn.example.com/logo.png" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Banner URL</p>
+                <Input value={profileBannerUrl} onChange={(event) => setProfileBannerUrl(event.target.value)} placeholder="https://cdn.example.com/banner.jpg" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Brand color</p>
+                <Input value={profileBrandColor} onChange={(event) => setProfileBrandColor(event.target.value)} placeholder="#0f766e" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Preview</p>
+                <div className="flex h-10 items-center gap-3 rounded-lg border border-border/70 px-3">
+                  <span className="h-5 w-5 rounded-full border border-border/80" style={{ backgroundColor: brandColorPreview }} />
+                  <span className="text-xs text-muted-foreground">{hasBrandColor ? normalizedBrandColor : "Invalid hex color"}</span>
+                </div>
+              </div>
+            </div>
+            {profileMessage ? (
+              <p className={cn("text-xs", profileMessage.kind === "error" ? "text-rose-700" : "text-emerald-700")}>{profileMessage.text}</p>
+            ) : null}
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => void saveCompanyProfile()} disabled={updateSellerShopMutation.isPending}>
+                {updateSellerShopMutation.isPending ? "Сохраняем..." : "Сохранить профиль"}
+              </Button>
+              <Link href="/dashboard/seller/onboarding" className={buttonVariants({ variant: "secondary" })}>
+                Открыть онбординг
+              </Link>
+            </div>
+          </CardContent>
+          </Card>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Онбординг-подсказки</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div>
+              <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
+                <span>Готовность кабинета</span>
+                <span>{onboardingProgress}%</span>
+              </div>
+              <div className="h-2 rounded-full bg-slate-200">
+                <div className="h-2 rounded-full bg-emerald-500 transition-all" style={{ width: `${onboardingProgress}%` }} />
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Выполнено: {onboardingDone}/{onboardingTasks.length}
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              {onboardingTasks.map((item) => (
+                <div key={item.label} className="flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-background/60 px-3 py-2">
+                  <div>
+                    <p className="text-sm font-medium">{item.label}</p>
+                    <p className="text-xs text-muted-foreground">{item.hint}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {!item.ok ? (
+                      <Link
+                        href={item.href}
+                        className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-7 px-2 text-xs")}
+                      >
+                        {item.cta}
+                      </Link>
+                    ) : null}
+                    {item.ok ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <AlertTriangle className="h-4 w-4 text-amber-600" />}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       </section>
 
       <section className="grid gap-4 xl:grid-cols-2">
@@ -449,3 +665,4 @@ export function B2BDashboardPage() {
     </div>
   );
 }
+

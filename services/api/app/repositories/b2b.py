@@ -2377,7 +2377,36 @@ class B2BRepository:
         )
         await self.session.commit()
 
-    async def list_admin_partner_leads(self, *, status: str | None, q: str | None, limit: int, offset: int) -> dict[str, Any]:
+    async def list_admin_partner_leads(
+        self,
+        *,
+        status: str | None,
+        q: str | None,
+        country_code: str | None,
+        created_from: datetime | None,
+        created_to: datetime | None,
+        duplicates_only: bool,
+        limit: int,
+        offset: int,
+    ) -> dict[str, Any]:
+        duplicate_email_exists_sql = """
+            exists (
+                select 1
+                from b2b_partner_leads dup_email
+                where dup_email.id <> pl.id
+                  and lower(trim(coalesce(dup_email.email, ''))) = lower(trim(coalesce(pl.email, '')))
+                  and trim(coalesce(pl.email, '')) <> ''
+            )
+        """
+        duplicate_company_exists_sql = """
+            exists (
+                select 1
+                from b2b_partner_leads dup_company
+                where dup_company.id <> pl.id
+                  and lower(trim(coalesce(dup_company.company_name, ''))) = lower(trim(coalesce(pl.company_name, '')))
+                  and trim(coalesce(pl.company_name, '')) <> ''
+            )
+        """
         where = ["1=1"]
         params: dict[str, Any] = {"limit": max(1, min(int(limit), 200)), "offset": max(0, int(offset))}
         if status:
@@ -2387,6 +2416,18 @@ class B2BRepository:
         if normalized_q:
             where.append("(pl.company_name ilike :q or pl.email ilike :q or pl.contact_name ilike :q)")
             params["q"] = f"%{normalized_q}%"
+        normalized_country = str(country_code or "").strip().upper()
+        if normalized_country:
+            where.append("upper(pl.country_code) = :country_code")
+            params["country_code"] = normalized_country
+        if created_from is not None:
+            where.append("pl.created_at >= :created_from")
+            params["created_from"] = created_from
+        if created_to is not None:
+            where.append("pl.created_at < :created_to")
+            params["created_to"] = created_to
+        if duplicates_only:
+            where.append(f"({duplicate_email_exists_sql} or {duplicate_company_exists_sql})")
         where_sql = " and ".join(where)
         total = int(
             (
@@ -2428,6 +2469,8 @@ class B2BRepository:
                         pl.notes,
                         pl.review_note,
                         pl.reviewed_at,
+                        {duplicate_email_exists_sql} as is_duplicate_email,
+                        {duplicate_company_exists_sql} as is_duplicate_company,
                         pl.provisioning_status,
                         pl.provisioned_user_uuid,
                         pl.provisioned_org_uuid,
@@ -2476,6 +2519,8 @@ class B2BRepository:
                     "notes": row.get("notes"),
                     "review_note": row.get("review_note"),
                     "reviewed_at": self._iso(row.get("reviewed_at")),
+                    "is_duplicate_email": bool(row.get("is_duplicate_email")),
+                    "is_duplicate_company": bool(row.get("is_duplicate_company")),
                     "provisioning_status": str(row.get("provisioning_status") or "pending"),
                     "provisioned_user_id": str(row["provisioned_user_uuid"]) if row.get("provisioned_user_uuid") else None,
                     "provisioned_org_id": str(row["provisioned_org_uuid"]) if row.get("provisioned_org_uuid") else None,
@@ -2501,6 +2546,23 @@ class B2BRepository:
         review_note: str | None,
         reviewer_uuid: str,
     ) -> dict[str, Any] | None:
+        current = (
+            await self.session.execute(
+                text(
+                    """
+                    select status
+                    from b2b_partner_leads
+                    where uuid = cast(:lead_uuid as uuid)
+                    for update
+                    """
+                ),
+                {"lead_uuid": self._uuid(lead_uuid)},
+            )
+        ).mappings().first()
+        if not current:
+            await self.session.rollback()
+            return None
+        status_before = str(current.get("status") or "").strip().lower()
         row = (
             await self.session.execute(
                 text(
@@ -2565,9 +2627,12 @@ class B2BRepository:
             await self.session.rollback()
             return None
         await self.session.commit()
+        status_after = str(row["status"]).strip().lower()
         return {
             "id": str(row["uuid"]),
             "status": str(row["status"]),
+            "status_before": status_before,
+            "status_changed": status_before != status_after,
             "company_name": str(row["company_name"]),
             "legal_name": row.get("legal_name"),
             "brand_name": row.get("brand_name"),

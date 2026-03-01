@@ -98,12 +98,17 @@ async def apply_partner_lead_status_actions(
     status_value: str,
     review_note: str | None,
     updated: dict[str, Any],
+    previous_status: str | None = None,
     current_user_id: str,
     repo: B2BRepository,
     redis: Redis,
     db: AsyncSession,
 ) -> dict[str, Any]:
-    normalized_status = str(status_value or "").strip().lower()
+    normalized_status_raw = str(status_value or "").strip().lower()
+    normalized_status = "pending" if normalized_status_raw == "submitted" else normalized_status_raw
+    normalized_previous_raw = str(previous_status or updated.get("status_before") or normalized_status_raw).strip().lower()
+    normalized_previous_status = "pending" if normalized_previous_raw == "submitted" else normalized_previous_raw
+    status_changed = normalized_previous_status != normalized_status
 
     if normalized_status == "approved":
         user, temp_password = await _ensure_seller_user(redis=redis, db=db, updated=updated)
@@ -190,51 +195,75 @@ async def apply_partner_lead_status_actions(
             )
             await db.commit()
 
-        subject = "Seller partner application approved"
-        lines = [
-            f"Hello, {str(updated.get('contact_name') or '').strip() or 'partner'}!",
-            "",
-            f"Your application for {str(updated.get('company_name') or 'your company')} is approved.",
-            f"Login: {_public_url('/login?next=/dashboard/seller')}",
-        ]
-        if temp_password:
+        if status_changed:
+            subject = "Seller partner application approved"
+            lines = [
+                f"Hello, {str(updated.get('contact_name') or '').strip() or 'partner'}!",
+                "",
+                f"Your application for {str(updated.get('company_name') or 'your company')} is approved.",
+                f"Login: {_public_url('/login?next=/dashboard/seller')}",
+            ]
+            if temp_password:
+                lines.extend(
+                    [
+                        f"Temporary password: {temp_password}",
+                        "Please sign in and change password immediately in profile settings.",
+                    ]
+                )
+            else:
+                lines.append("Your existing account now has seller workspace access.")
             lines.extend(
                 [
-                    f"Temporary password: {temp_password}",
-                    "Please sign in and change password immediately in profile settings.",
+                    f"Seller panel: {_public_url('/dashboard/seller')}",
+                    f"Lead status page: {_public_url(f'/partners/status?lead={lead_id}')}",
                 ]
             )
-        else:
-            lines.append("Your existing account now has seller workspace access.")
-        lines.extend(
-            [
-                f"Seller panel: {_public_url('/dashboard/seller')}",
-                f"Lead status page: {_public_url(f'/partners/status?lead={lead_id}')}",
+            sent, error_message = await _send_auth_email(
+                recipient=str(updated.get("email") or "").strip().lower(),
+                subject=subject,
+                text_value="\n".join(lines),
+            )
+            updated["notification_sent"] = bool(sent)
+            if sent:
+                await repo.mark_partner_lead_welcome_email_sent(lead_uuid=lead_id)
+                updated["welcome_email_sent_at"] = _now_iso()
+            elif error_message:
+                updated["notification_error"] = error_message
+
+    if status_changed and normalized_status in {"pending", "review", "rejected"}:
+        if normalized_status == "pending":
+            subject = "Seller partner application received"
+            message_body = [
+                f"Hello, {str(updated.get('contact_name') or '').strip() or 'partner'}!",
+                "",
+                f"We received your application for {str(updated.get('company_name') or 'your company')}.",
+                "The application is queued and will be reviewed by our B2B team.",
+                f"Status page: {_public_url(f'/partners/status?lead={lead_id}')}",
             ]
-        )
+        elif normalized_status == "review":
+            subject = "Seller partner application is under review"
+            message_body = [
+                f"Hello, {str(updated.get('contact_name') or '').strip() or 'partner'}!",
+                "",
+                f"Your application for {str(updated.get('company_name') or 'your company')} is now under review.",
+                str(review_note or "Our manager may contact you for additional details."),
+                f"Status page: {_public_url(f'/partners/status?lead={lead_id}')}",
+            ]
+        else:
+            subject = "Seller partner application update"
+            message_body = [
+                f"Hello, {str(updated.get('contact_name') or '').strip() or 'partner'}!",
+                "",
+                f"Your application for {str(updated.get('company_name') or 'your company')} was rejected.",
+                str(review_note or "Please contact support for additional details."),
+                f"Status page: {_public_url(f'/partners/status?lead={lead_id}')}",
+            ]
         sent, error_message = await _send_auth_email(
             recipient=str(updated.get("email") or "").strip().lower(),
             subject=subject,
-            text_value="\n".join(lines),
-        )
-        if sent:
-            await repo.mark_partner_lead_welcome_email_sent(lead_uuid=lead_id)
-            updated["welcome_email_sent_at"] = _now_iso()
-        elif error_message:
-            updated["notification_error"] = error_message
-
-    if normalized_status == "rejected":
-        message_body = [
-            f"Hello, {str(updated.get('contact_name') or '').strip() or 'partner'}!",
-            "",
-            f"Your application for {str(updated.get('company_name') or 'your company')} was rejected.",
-            str(review_note or "Please contact support for additional details."),
-        ]
-        sent, error_message = await _send_auth_email(
-            recipient=str(updated.get("email") or "").strip().lower(),
-            subject="Seller partner application update",
             text_value="\n".join(message_body),
         )
+        updated["notification_sent"] = bool(sent)
         if not sent and error_message:
             updated["notification_error"] = error_message
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 SellerApplicationStatus = Literal["pending", "review", "approved", "rejected"]
@@ -10,12 +10,14 @@ SellerApplicationStatus = Literal["pending", "review", "approved", "rejected"]
 
 class SellerApplicationCreateIn(BaseModel):
     shop_name: str = Field(min_length=2, max_length=255)
+    contact_person: str = Field(min_length=2, max_length=160)
     legal_type: Literal["individual", "llc", "other"] = "individual"
-    inn: str = Field(min_length=9, max_length=14)
+    inn: str = Field(min_length=9, max_length=14, pattern=r"^\d{9,14}$")
     legal_address: str = Field(min_length=3, max_length=400)
     actual_address: str | None = Field(default=None, max_length=400)
     contact_phone: str = Field(min_length=7, max_length=64)
     contact_email: str = Field(min_length=5, max_length=255)
+    accepts_terms: bool = False
     has_website: bool = False
     website_url: str | None = Field(default=None, max_length=2000)
     work_type: Literal["online", "offline", "both"] = "online"
@@ -23,6 +25,13 @@ class SellerApplicationCreateIn(BaseModel):
     pickup_available: bool = False
     product_categories: list[str] = Field(default_factory=list, max_length=20)
     documents: list[dict] = Field(default_factory=list, max_length=20)
+
+    @field_validator("accepts_terms")
+    @classmethod
+    def validate_accepts_terms(cls, value: bool) -> bool:
+        if not value:
+            raise ValueError("terms must be accepted")
+        return value
 
 
 class SellerApplicationOut(BaseModel):
@@ -86,6 +95,9 @@ class SellerShopPatchIn(BaseModel):
     website_url: str | None = Field(default=None, max_length=2000)
     contact_email: str | None = Field(default=None, min_length=5, max_length=255)
     contact_phone: str | None = Field(default=None, min_length=7, max_length=64)
+    logo_url: str | None = Field(default=None, max_length=2000)
+    banner_url: str | None = Field(default=None, max_length=2000)
+    brand_color: str | None = Field(default=None, pattern=r"^#?[0-9A-Fa-f]{6}$")
 
 
 SellerProductStatus = Literal["draft", "pending_moderation", "active", "rejected", "archived"]
