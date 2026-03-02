@@ -25,8 +25,6 @@ import { formatPrice } from "@/lib/utils/format";
 import { COMPARE_LIMIT, useCompareStore } from "@/store/compare.store";
 import { usePriceAlertsStore } from "@/store/priceAlerts.store";
 import { useRecentlyViewedStore } from "@/store/recentlyViewed.store";
-import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils/cn";
 
 const normalizeCategory = (value: unknown) => {
   if (typeof value !== "string") return undefined;
@@ -238,150 +236,154 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
   };
 
   return (
-    <div className="container min-h-screen space-y-12 py-10">
-      <div className="flex flex-col gap-4">
-        <div className="flex items-center gap-2">
-          <Badge className="w-fit border-primary/20 bg-primary/10 text-primary">Original Product</Badge>
-          <div className="h-1 w-1 rounded-full bg-border" />
-          <span className="text-sm text-muted-foreground">{product.data.category}</span>
-        </div>
-        <Breadcrumbs items={[{ href: "/", label: "Главная" }, { href: "/catalog", label: "Каталог" }, { href: `/product/${slug}`, label: product.data.title }]} />
-      </div>
+    <div className="container space-y-6 py-6">
+      <Breadcrumbs items={[{ href: "/", label: "Главная" }, { href: "/catalog", label: "Каталог" }, { href: `/product/${slug}`, label: product.data.title }]} />
 
-      <div className="grid gap-12 lg:grid-cols-[1fr_450px]">
-        <div className="space-y-12">
-          <section className="relative overflow-hidden rounded-[2rem] border border-border/50 bg-card p-2 md:p-6 shadow-xl">
-            <ProductGallery images={galleryImages} />
-          </section>
+      <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
+        <ProductGallery images={galleryImages} />
 
-          <Tabs defaultValue="offers" className="w-full">
-            <TabsList className="bg-secondary/40 h-auto w-full flex-wrap justify-start gap-2 border-b border-border/50 p-2">
-              <TabsTrigger value="offers" className="rounded-xl px-6 py-3 data-[state=active]:bg-primary data-[state=active]:text-white data-[state=active]:shadow-md">Предложения</TabsTrigger>
-              <TabsTrigger value="history" className="rounded-xl px-6 py-3 data-[state=active]:bg-primary data-[state=active]:text-white data-[state=active]:shadow-md">История цен</TabsTrigger>
-              <TabsTrigger value="specs" className="rounded-xl px-6 py-3 data-[state=active]:bg-primary data-[state=active]:text-white data-[state=active]:shadow-md">Характеристики</TabsTrigger>
-              <TabsTrigger value="reviews" className="rounded-xl px-6 py-3 data-[state=active]:bg-primary data-[state=active]:text-white data-[state=active]:shadow-md">Отзывы</TabsTrigger>
-              <TabsTrigger value="qa" className="rounded-xl px-6 py-3 data-[state=active]:bg-primary data-[state=active]:text-white data-[state=active]:shadow-md">Q&A</TabsTrigger>
-            </TabsList>
-            <div className="mt-8">
-              <TabsContent value="offers"><OfferTable offersByStore={product.data.offers_by_store ?? []} /></TabsContent>
-              <TabsContent value="history"><PriceHistoryCard productId={product.data.id} /></TabsContent>
-              <TabsContent value="specs"><SpecsTable specs={product.data.specs} /></TabsContent>
-              <TabsContent value="reviews"><ProductReviewsPanel productId={product.data.id} /></TabsContent>
-              <TabsContent value="qa"><ProductQuestionsPanel productId={product.data.id} /></TabsContent>
-            </div>
-          </Tabs>
-        </div>
-
-        <aside className="space-y-8">
-          <section className="sticky top-24 space-y-6 rounded-[2rem] border border-border/50 bg-card p-8 shadow-2xl">
-            <div className="space-y-4">
-              <h1 className="font-heading text-3xl font-[900] leading-tight tracking-tight">{product.data.title}</h1>
-              <div className="flex items-center gap-3">
-                <span className="text-3xl font-[900] text-primary">
-                  {currentMinPrice != null ? formatPrice(currentMinPrice) : "Цена уточняется"}
-                </span>
-                {alertSignal?.is_drop && (
-                  <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-200">
-                    -{alertSignal.drop_pct.toFixed(0)}%
-                  </Badge>
-                )}
-              </div>
-            </div>
-
-            <div className="grid gap-4">
-              <Button
-                className="h-14 w-full rounded-2xl bg-primary text-base font-bold text-white shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-[1.0]"
-                onClick={handleFavoriteToggle}
-              >
-                <Heart className={cn("mr-2 h-5 w-5", isFavorite && "fill-current")} />
-                {isFavorite ? "В избранном" : "В список желаний"}
-              </Button>
-              <Button
-                variant="outline"
-                className="h-14 w-full rounded-2xl border-2 border-border font-bold hover:bg-secondary hover:border-primary/20"
-                onClick={() =>
-                  toggleCompare({
-                    id: product.data.id,
-                    title: product.data.title,
-                    slug,
-                    category: product.data.category
-                  })
-                }
-                disabled={compareDisabled}
-              >
-                {inCompare ? "В сравнении" : "К сравнению"}
-              </Button>
-            </div>
-
-            <div className="space-y-4 pt-4">
-              <div className="flex items-center gap-2 border-l-4 border-primary/40 pl-4 py-1">
-                <BellRing className="h-4 w-4 text-primary" />
-                <h2 className="text-lg font-bold">Радар цен</h2>
-              </div>
-
-              {!me.data?.id ? (
-                <div className="rounded-2xl bg-secondary/30 p-4 text-sm text-muted-foreground">
-                  Войдите, чтобы получать пуш-уведомления при снижении цены.
-                </div>
-              ) : !isFavorite ? (
-                <div className="rounded-2xl bg-secondary/30 p-4 text-sm text-muted-foreground">
-                  Активируется при добавлении в избранное.
-                </div>
-              ) : (
-                <div className="space-y-4 rounded-2xl bg-secondary/30 p-6">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold uppercase text-muted-foreground">Целевая цена</span>
-                    <PriceAlertBadge signal={alertSignal} />
-                  </div>
-                  <div className="flex gap-2">
-                    <Input
-                      className="rounded-xl border-none bg-background/50 focus-visible:ring-primary/30"
-                      value={targetPriceInput}
-                      onChange={(e) => setTargetPriceInput(e.target.value)}
-                      placeholder="UZS"
-                    />
-                    <Button size="sm" className="rounded-xl px-4" onClick={handleTargetSave}>Set</Button>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className={cn("h-8 rounded-lg text-xs font-bold", alertMeta?.alerts_enabled ? "text-primary bg-primary/10" : "text-muted-foreground")}
-                      onClick={handleToggleAlertsEnabled}
-                    >
-                      {alertMeta?.alerts_enabled ? "ON" : "OFF"} Notifications
-                    </Button>
-                    <Button variant="ghost" size="sm" className="h-8 rounded-lg text-xs font-bold" onClick={handleResetBaseline}>Reset Base</Button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {product.data.short_description && (
-              <div className="space-y-2 py-4 text-sm leading-relaxed text-muted-foreground border-t border-border/40">
-                <p>{product.data.short_description}</p>
-              </div>
-            )}
-
-            {product.data.whats_new?.length ? (
-              <div className="rounded-2xl bg-amber-500/[0.03] border border-amber-500/10 p-5">
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="text-amber-500">✨</span>
-                  <span className="text-xs font-[900] uppercase tracking-wider text-amber-600">Что нового в модели</span>
-                </div>
-                <ul className="space-y-2">
-                  {product.data.whats_new.map((item, idx) => (
-                    <li key={item} className="text-xs text-amber-700/80 flex items-start gap-2">
-                      <span className="mt-1 h-1 w-1 shrink-0 rounded-full bg-amber-400" />
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              </div>
+        <section className="space-y-4 rounded-2xl border border-border bg-card p-5 shadow-soft">
+          <h1 className="text-2xl font-extrabold">{product.data.title}</h1>
+          <p className="text-sm text-muted-foreground">Проверенные предложения по магазинам и обновляемая история цен в одном месте.</p>
+          <div className="grid gap-2 rounded-xl border border-border/80 bg-background/50 p-3 text-sm">
+            <p>
+              <span className="text-muted-foreground">Категория:</span> {product.data.category}
+            </p>
+            {product.data.brand ? (
+              <p>
+                <span className="text-muted-foreground">Бренд:</span> {product.data.brand}
+              </p>
             ) : null}
-          </section>
-        </aside>
+            <p>
+              <span className="text-muted-foreground">Минимальная цена:</span>{" "}
+              <span className="font-semibold text-primary">{currentMinPrice != null ? formatPrice(currentMinPrice) : "Нет данных"}</span>
+            </p>
+          </div>
+
+          {product.data.short_description ? (
+            <div className="rounded-xl border border-border/70 bg-background/40 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Краткое описание</p>
+              <p className="mt-1 text-sm">{product.data.short_description}</p>
+            </div>
+          ) : null}
+
+          <div className="rounded-xl border border-border/70 bg-background/40 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Что нового</p>
+            {product.data.whats_new?.length ? (
+              <ul className="mt-2 list-disc space-y-1 pl-4 text-sm">
+                {product.data.whats_new.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-1 text-sm text-muted-foreground">Данные об обновлениях этой модели пока отсутствуют.</p>
+            )}
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button className="gap-2" onClick={handleFavoriteToggle}>
+              <Heart className={`h-4 w-4 ${isFavorite ? "fill-current" : ""}`} />
+              {isFavorite ? "В избранном" : "Добавить в избранное"}
+            </Button>
+            <Button
+              variant={inCompare ? "default" : "outline"}
+              onClick={() =>
+                toggleCompare({
+                  id: product.data.id,
+                  title: product.data.title,
+                  slug,
+                  category: product.data.category
+                })
+              }
+              disabled={compareDisabled}
+              title={compareDisabled ? compareDisabledReason : undefined}
+            >
+              {inCompare ? "Уже в сравнении" : "Добавить к сравнению"}
+            </Button>
+          </div>
+        </section>
       </div>
+
+      <section className="rounded-2xl border border-border bg-card p-5 shadow-soft">
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <BellRing className="h-4 w-4 text-primary" />
+          <h2 className="text-lg font-extrabold">Отслеживание цены</h2>
+          <PriceAlertBadge signal={alertSignal} />
+        </div>
+
+        {!me.data?.id ? (
+          <p className="text-sm text-muted-foreground">
+            Чтобы включить отслеживание цены, <Link href="/login" className="font-semibold text-primary hover:underline">войдите в аккаунт</Link>.
+          </p>
+        ) : !isFavorite ? (
+          <p className="text-sm text-muted-foreground">Добавьте товар в избранное, чтобы отслеживать снижение цены и достижение вашей цели.</p>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-xl border border-border/80 bg-background/60 p-3">
+                <p className="text-xs text-muted-foreground">Текущая цена</p>
+                <p className="text-sm font-semibold">{currentMinPrice != null ? formatPrice(currentMinPrice) : "Нет данных"}</p>
+              </div>
+              <div className="rounded-xl border border-border/80 bg-background/60 p-3">
+                <p className="text-xs text-muted-foreground">Базовая цена</p>
+                <p className="text-sm font-semibold">{alertMeta?.baseline_price != null ? formatPrice(alertMeta.baseline_price) : "Не задана"}</p>
+              </div>
+              <div className="rounded-xl border border-border/80 bg-background/60 p-3">
+                <p className="text-xs text-muted-foreground">Целевая цена</p>
+                <p className="text-sm font-semibold">{alertMeta?.target_price != null ? formatPrice(alertMeta.target_price) : "Не задана"}</p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant={alertMeta?.alerts_enabled ? "default" : "outline"}
+                size="sm"
+                onClick={handleToggleAlertsEnabled}
+              >
+                {alertMeta?.alerts_enabled ? "Алерты включены" : "Включить алерты"}
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleResetBaseline}>
+                Обновить базу
+              </Button>
+            </div>
+
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="w-full max-w-xs space-y-1">
+                <label className="text-xs text-muted-foreground">Целевая цена (UZS)</label>
+                <Input value={targetPriceInput} onChange={(event) => setTargetPriceInput(event.target.value)} placeholder="Например: 12000000" />
+              </div>
+              <Button size="sm" onClick={handleTargetSave}>
+                Сохранить цель
+              </Button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <Tabs defaultValue="offers" className="space-y-4">
+        <TabsList className="flex w-full flex-wrap gap-1 p-1">
+          <TabsTrigger value="offers">Предложения</TabsTrigger>
+          <TabsTrigger value="history">История цены</TabsTrigger>
+          <TabsTrigger value="specs">Характеристики</TabsTrigger>
+          <TabsTrigger value="reviews">Отзывы</TabsTrigger>
+          <TabsTrigger value="qa">Вопросы и ответы</TabsTrigger>
+        </TabsList>
+        <TabsContent value="offers">
+          <OfferTable offersByStore={product.data.offers_by_store ?? []} />
+        </TabsContent>
+        <TabsContent value="history">
+          <PriceHistoryCard productId={product.data.id} />
+        </TabsContent>
+        <TabsContent value="specs">
+          <SpecsTable specs={product.data.specs} />
+        </TabsContent>
+        <TabsContent value="reviews">
+          <ProductReviewsPanel productId={product.data.id} />
+        </TabsContent>
+        <TabsContent value="qa">
+          <ProductQuestionsPanel productId={product.data.id} />
+        </TabsContent>
+      </Tabs>
 
       <script
         type="application/ld+json"
