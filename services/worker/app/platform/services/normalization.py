@@ -60,6 +60,76 @@ _DEFAULT_BRAND_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 _SPEC_BRAND_KEYS: tuple[str, ...] = ("brand", "manufacturer", "vendor")
+_ZERO_WIDTH_RE = re.compile(r"[\u200b\u200c\u200d\u2060\ufeff]")
+_CYRILLIC_BRAND_TRANSLATION = str.maketrans(
+    {
+        "\u0430": "a",
+        "\u0432": "b",
+        "\u0441": "c",
+        "\u0435": "e",
+        "\u043d": "h",
+        "\u043a": "k",
+        "\u043c": "m",
+        "\u043e": "o",
+        "\u0440": "p",
+        "\u0442": "t",
+        "\u0443": "y",
+        "\u0445": "x",
+        "\u0456": "i",
+        "\u0458": "j",
+        "\u04cf": "l",
+    }
+)
+_LEET_BRAND_TRANSLATION = str.maketrans(
+    {
+        "0": "o",
+        "1": "i",
+        "3": "e",
+        "4": "a",
+        "5": "s",
+        "7": "t",
+        "8": "b",
+    }
+)
+
+
+def _levenshtein_distance(left: str, right: str) -> int:
+    if left == right:
+        return 0
+    if not left:
+        return len(right)
+    if not right:
+        return len(left)
+    prev = list(range(len(right) + 1))
+    for i, left_char in enumerate(left, start=1):
+        curr = [i]
+        for j, right_char in enumerate(right, start=1):
+            ins = curr[j - 1] + 1
+            delete = prev[j] + 1
+            sub = prev[j - 1] + (0 if left_char == right_char else 1)
+            curr.append(min(ins, delete, sub))
+        prev = curr
+    return prev[-1]
+
+
+def _has_typo_brand_match(alias: str, signal_value: str) -> tuple[bool, int]:
+    if " " in alias or len(alias) < 5:
+        return False, 10**9
+    for match in re.finditer(r"[a-z0-9]+", signal_value):
+        token = match.group(0)
+        if len(token) < 4:
+            continue
+        if abs(len(token) - len(alias)) > 1:
+            continue
+        dist = _levenshtein_distance(token, alias)
+        if dist > 1:
+            continue
+        same_start = token[0] == alias[0]
+        dropped_first = token == alias[1:]
+        extra_first = len(token) == len(alias) + 1 and token[1:] == alias
+        if same_start or dropped_first or extra_first:
+            return True, match.start()
+    return False, 10**9
 
 _DEFAULT_SPEC_KEY_ALIASES: dict[str, str] = {
     "storage": "storage_gb",
@@ -463,23 +533,81 @@ def normalize_seller_name(raw_name: str | None, fallback: str) -> str:
     return source
 
 
+def _normalize_brand_signal(value: str) -> str:
+    text = value.lower().replace("\u00a0", " ")
+    text = _ZERO_WIDTH_RE.sub(" ", text)
+    text = text.translate(_CYRILLIC_BRAND_TRANSLATION)
+    tokens = re.findall(r"[a-z0-9]+", text)
+    normalized_tokens: list[str] = []
+    for token in tokens:
+        if re.search(r"[a-z]", token) and re.search(r"\d", token):
+            normalized_tokens.append(token.translate(_LEET_BRAND_TRANSLATION))
+        else:
+            normalized_tokens.append(token)
+    return " ".join(normalized_tokens).strip()
+
+
 def detect_brand(raw_title: str, specs: dict | None = None) -> str | None:
     brand_aliases: dict[str, list[str]] = get_normalization_rules()["brand_aliases"]
-    values: list[str] = [normalize_title(raw_title)]
+    signals: list[tuple[str, int]] = [(raw_title, 3)]
     if isinstance(specs, dict):
         for key in _SPEC_BRAND_KEYS:
             value = specs.get(key)
             if value is None:
                 continue
-            values.append(normalize_title(str(value)))
+            signals.append((str(value), 6))
 
-    haystack = " ".join(value for value in values if value).strip()
-    if not haystack:
+    normalized_aliases: dict[str, list[str]] = {}
+    for canonical, aliases in brand_aliases.items():
+        cleaned = [_normalize_brand_signal(str(alias)) for alias in aliases]
+        cleaned = [alias for alias in cleaned if alias]
+        if cleaned:
+            normalized_aliases[canonical] = sorted(set(cleaned), key=len, reverse=True)
+
+    normalized_signals: list[tuple[str, int]] = []
+    for raw_value, weight in signals:
+        normalized_value = _normalize_brand_signal(raw_value)
+        if normalized_value:
+            normalized_signals.append((normalized_value, weight))
+    if not normalized_signals:
         return None
 
-    for canonical, aliases in brand_aliases.items():
+    best_brand: str | None = None
+    best_score = 0
+    best_pos = 10**9
+    for canonical, aliases in normalized_aliases.items():
+        score = 0
+        earliest_pos = 10**9
+        alias_hits: set[str] = set()
         for alias in aliases:
-            if re.search(rf"\b{re.escape(alias)}\b", haystack, flags=re.IGNORECASE):
-                return canonical
-    return None
+            pattern = rf"(?<![a-z0-9]){re.escape(alias)}(?![a-z0-9])"
+            for signal_value, weight in normalized_signals:
+                hits = list(re.finditer(pattern, signal_value, flags=re.IGNORECASE))
+                if hits:
+                    alias_hits.add(alias)
+                    score += len(hits) * weight * 10
+                    local_pos = min(match.start() for match in hits)
+                    if local_pos < earliest_pos:
+                        earliest_pos = local_pos
+                    if local_pos < 24:
+                        score += weight * 4
+                    continue
+                typo_hit, typo_pos = _has_typo_brand_match(alias, signal_value)
+                if typo_hit:
+                    alias_hits.add(alias)
+                    score += weight * 4
+                    if typo_pos < earliest_pos:
+                        earliest_pos = typo_pos
+                    if typo_pos < 24:
+                        score += weight * 2
+        if len(alias_hits) > 1:
+            score += 6
+        if score <= 0:
+            continue
+        if score > best_score or (score == best_score and earliest_pos < best_pos):
+            best_brand = canonical
+            best_score = score
+            best_pos = earliest_pos
+
+    return best_brand
 

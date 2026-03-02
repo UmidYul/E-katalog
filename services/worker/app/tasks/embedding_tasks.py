@@ -10,7 +10,7 @@ from app.core.config import settings
 from app.core.logging import logger
 from app.db.session import AsyncSessionLocal
 from app.platform.models import CatalogAIEnrichmentJob
-from app.platform.services.embeddings import simple_embedding
+from app.platform.services.embeddings import batch_embeddings, embedding_backend_name
 from app.platform.services.pipeline_offsets import ensure_offsets_table, get_offset, set_offset
 from app.celery_app import celery_app
 
@@ -86,14 +86,16 @@ async def _run(limit: int, *, reset_offset: bool = False) -> dict:
         skipped = 0
         watermark_ts = last_ts
         watermark_id = int(last_id)
+        title_rows = []
         for row in rows:
-            canonical_product_id = int(row["id"])
             normalized_title = str(row["normalized_title"] or "").strip()
             if not normalized_title:
                 skipped += 1
                 continue
+            title_rows.append((int(row["id"]), normalized_title, row["updated_at"]))
 
-            embedding = simple_embedding(normalized_title)
+        vectors = batch_embeddings([row[1] for row in title_rows])
+        for (canonical_product_id, _normalized_title, updated_at), embedding in zip(title_rows, vectors, strict=True):
             await session.execute(
                 text(
                     """
@@ -112,11 +114,11 @@ async def _run(limit: int, *, reset_offset: bool = False) -> dict:
                     product_id=canonical_product_id,
                     stage="embedding",
                     status="done",
-                    payload={"model": settings.openai_model, "job": job_name},
+                    payload={"model": settings.openai_model, "job": job_name, "embedding_backend": embedding_backend_name()},
                 )
             )
             processed += 1
-            watermark_ts = row["updated_at"]
+            watermark_ts = updated_at
             watermark_id = canonical_product_id
 
         if rows:

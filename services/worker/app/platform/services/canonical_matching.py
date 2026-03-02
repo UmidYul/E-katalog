@@ -13,6 +13,31 @@ from typing import Iterable
 
 from app.platform.services.canonical_aliases import DEFAULT_ALIAS_RULES
 
+try:
+    from rapidfuzz import fuzz as rapidfuzz_fuzz
+except Exception:  # noqa: BLE001
+    rapidfuzz_fuzz = None
+
+try:
+    from sklearn.metrics.pairwise import cosine_similarity as sklearn_cosine_similarity
+except Exception:  # noqa: BLE001
+    sklearn_cosine_similarity = None
+
+try:
+    from sklearn.metrics import auc as sklearn_auc
+except Exception:  # noqa: BLE001
+    sklearn_auc = None
+
+try:
+    import networkx as nx
+except Exception:  # noqa: BLE001
+    nx = None
+
+try:
+    import pandas as pd
+except Exception:  # noqa: BLE001
+    pd = None
+
 
 @dataclass(frozen=True)
 class OfferRecord:
@@ -92,6 +117,37 @@ _CYRILLIC_CONFUSABLE_TRANSLATION = str.maketrans(
         "х": "x",
     }
 )
+_ZERO_WIDTH_RE = re.compile(r"[\u200b\u200c\u200d\u2060\ufeff]")
+_LEET_BRAND_TRANSLATION = str.maketrans(
+    {
+        "0": "o",
+        "1": "i",
+        "3": "e",
+        "4": "a",
+        "5": "s",
+        "7": "t",
+        "8": "b",
+    }
+)
+_BRAND_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "apple": ("apple", "iphone", "iphon"),
+    "samsung": ("samsung", "galaxy"),
+    "xiaomi": ("xiaomi", "redmi", "poco"),
+    "huawei": ("huawei",),
+    "honor": ("honor",),
+    "google": ("google", "pixel"),
+    "oneplus": ("oneplus", "one plus"),
+    "nothing": ("nothing", "phone"),
+    "oppo": ("oppo",),
+    "vivo": ("vivo",),
+    "realme": ("realme",),
+    "motorola": ("motorola", "moto"),
+    "nokia": ("nokia",),
+    "sony": ("sony", "xperia"),
+    "infinix": ("infinix",),
+    "tecno": ("tecno",),
+}
+_STRONG_BRAND_HINTS: set[str] = {"iphone", "galaxy", "redmi", "pixel", "oneplus", "xperia"}
 _MODEL_VARIANT_SUFFIXES: tuple[str, ...] = ("promax", "ultra", "plus", "mini", "max", "pro", "fe", "lite")
 _GENERIC_MODEL_PREFIXES: tuple[str, ...] = (
     "note",
@@ -133,6 +189,45 @@ _STORAGE_MIN_GB = 16
 _STORAGE_MAX_GB = 4096
 
 
+def _levenshtein_distance(left: str, right: str) -> int:
+    if left == right:
+        return 0
+    if not left:
+        return len(right)
+    if not right:
+        return len(left)
+    prev = list(range(len(right) + 1))
+    for i, left_char in enumerate(left, start=1):
+        curr = [i]
+        for j, right_char in enumerate(right, start=1):
+            ins = curr[j - 1] + 1
+            delete = prev[j] + 1
+            sub = prev[j - 1] + (0 if left_char == right_char else 1)
+            curr.append(min(ins, delete, sub))
+        prev = curr
+    return prev[-1]
+
+
+def _has_typo_brand_match(alias: str, signal_value: str) -> tuple[bool, int]:
+    if " " in alias or len(alias) < 5:
+        return False, 10**9
+    for match in re.finditer(r"[a-z0-9]+", signal_value):
+        token = match.group(0)
+        if len(token) < 4:
+            continue
+        if abs(len(token) - len(alias)) > 1:
+            continue
+        dist = _levenshtein_distance(token, alias)
+        if dist > 1:
+            continue
+        same_start = token[0] == alias[0]
+        dropped_first = token == alias[1:]
+        extra_first = len(token) == len(alias) + 1 and token[1:] == alias
+        if same_start or dropped_first or extra_first:
+            return True, match.start()
+    return False, 10**9
+
+
 def _apply_aliases(value: str) -> str:
     text = value
     for pattern, replacement in _ALIAS_RULES:
@@ -172,39 +267,65 @@ def _normalize_text(value: str) -> str:
     return normalized.strip()
 
 
+def _normalize_brand_signal(value: str) -> str:
+    text = value.lower().replace("\u00a0", " ")
+    text = _ZERO_WIDTH_RE.sub(" ", text)
+    text = text.translate(_CYRILLIC_CONFUSABLE_TRANSLATION)
+    tokens = re.findall(r"[a-z0-9]+", text)
+    normalized_tokens: list[str] = []
+    for token in tokens:
+        if re.search(r"[a-z]", token) and re.search(r"\d", token):
+            normalized_tokens.append(token.translate(_LEET_BRAND_TRANSLATION))
+        else:
+            normalized_tokens.append(token)
+    return " ".join(normalized_tokens).strip()
+
+
 def _parse_brand(text: str) -> str:
-    if "iphone" in text or "apple" in text or "iphon" in text:
-        return "apple"
-    if "samsung" in text or "galaxy" in text:
-        return "samsung"
-    if "xiaomi" in text or "redmi" in text or "poco" in text:
-        return "xiaomi"
-    if "huawei" in text:
-        return "huawei"
-    if "honor" in text:
-        return "honor"
-    if "google" in text or "pixel" in text:
-        return "google"
-    if "oneplus" in text or "one plus" in text:
-        return "oneplus"
-    if "nothing" in text:
-        return "nothing"
-    if "oppo" in text:
-        return "oppo"
-    if "vivo" in text:
-        return "vivo"
-    if "realme" in text:
-        return "realme"
-    if "motorola" in text or "moto" in text:
-        return "motorola"
-    if "nokia" in text:
-        return "nokia"
-    if "sony" in text or "xperia" in text:
-        return "sony"
-    if "infinix" in text:
-        return "infinix"
-    if "tecno" in text:
-        return "tecno"
+    normalized = _normalize_brand_signal(text)
+    if not normalized:
+        return "unknown"
+
+    best_brand = "unknown"
+    best_score = 0
+    best_pos = 10**9
+    for brand, keywords in _BRAND_KEYWORDS.items():
+        score = 0
+        earliest_pos = 10**9
+        matched: set[str] = set()
+        for keyword in keywords:
+            pattern = rf"(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])"
+            hits = list(re.finditer(pattern, normalized, flags=re.IGNORECASE))
+            if hits:
+                matched.add(keyword)
+                score += len(hits) * 10
+                if keyword in _STRONG_BRAND_HINTS:
+                    score += len(hits) * 6
+                local_pos = min(match.start() for match in hits)
+                if local_pos < earliest_pos:
+                    earliest_pos = local_pos
+                if local_pos < 24:
+                    score += 4
+                continue
+            typo_hit, typo_pos = _has_typo_brand_match(keyword, normalized)
+            if typo_hit:
+                matched.add(keyword)
+                score += 4
+                if typo_pos < earliest_pos:
+                    earliest_pos = typo_pos
+                if typo_pos < 24:
+                    score += 2
+        if len(matched) > 1:
+            score += 6
+        if score <= 0:
+            continue
+        if score > best_score or (score == best_score and earliest_pos < best_pos):
+            best_brand = brand
+            best_score = score
+            best_pos = earliest_pos
+
+    if best_score > 0:
+        return best_brand
     return "unknown"
 
 
@@ -387,7 +508,7 @@ def _parse_storage(text: str) -> str:
 
 def extract_attributes(title: str) -> ExtractedAttributes:
     normalized = _normalize_text(title)
-    brand = _parse_brand(normalized)
+    brand = _parse_brand(f"{title} {normalized}")
     model, variant = _parse_model(normalized, brand)
     storage = _parse_storage(normalized)
     return ExtractedAttributes(brand=brand, model=model, storage=storage, variant=variant)
@@ -425,6 +546,10 @@ def token_similarity(left: str, right: str) -> float:
 
 
 def fuzzy_similarity(left: str, right: str) -> float:
+    if rapidfuzz_fuzz is not None:
+        ratio = float(rapidfuzz_fuzz.ratio(left, right)) / 100.0
+        token_ratio = float(rapidfuzz_fuzz.token_set_ratio(left, right)) / 100.0
+        return 0.55 * ratio + 0.45 * token_ratio
     lev = levenshtein_distance(left, right)
     max_len = max(len(left), len(right), 1)
     lev_sim = 1.0 - lev / max_len
@@ -437,6 +562,12 @@ def cosine_similarity(left: Iterable[float], right: Iterable[float]) -> float:
     r_vec = list(right)
     if not l_vec or len(l_vec) != len(r_vec):
         return 0.0
+    if sklearn_cosine_similarity is not None:
+        try:
+            score = sklearn_cosine_similarity([l_vec], [r_vec])[0][0]
+            return float(score)
+        except Exception:  # noqa: BLE001
+            pass
     dot = sum(l * r for l, r in zip(l_vec, r_vec, strict=True))
     l_norm = math.sqrt(sum(l * l for l in l_vec))
     r_norm = math.sqrt(sum(r * r for r in r_vec))
@@ -901,6 +1032,16 @@ def _f1_score(precision: float, recall: float) -> float:
     return 2.0 * precision * recall / (precision + recall)
 
 
+def _trapezoid_auc(xs: list[float], ys: list[float]) -> float:
+    if len(xs) != len(ys) or len(xs) < 2:
+        return 0.0
+    total = 0.0
+    for idx in range(1, len(xs)):
+        dx = xs[idx] - xs[idx - 1]
+        total += dx * (ys[idx] + ys[idx - 1]) * 0.5
+    return float(total)
+
+
 def build_fuzzy_threshold_pr_curve(
     offers: list[OfferRecord],
     *,
@@ -938,10 +1079,21 @@ def build_fuzzy_threshold_pr_curve(
         ),
     )
     recommended = ranked[0]
+    sorted_for_curve = sorted(points, key=lambda item: float(item["recall"]))
+    recalls = [float(item["recall"]) for item in sorted_for_curve]
+    precisions = [float(item["precision"]) for item in sorted_for_curve]
+    if sklearn_auc is not None:
+        try:
+            pr_auc = float(sklearn_auc(recalls, precisions))
+        except Exception:  # noqa: BLE001
+            pr_auc = _trapezoid_auc(recalls, precisions)
+    else:
+        pr_auc = _trapezoid_auc(recalls, precisions)
     return {
         "recommended_threshold": recommended["threshold"],
         "dataset_size": len(offers),
         "points": points,
+        "pr_auc": round(pr_auc, 6),
         "selection_policy": "max_f1_then_min_false_merge_then_max_precision_then_higher_threshold",
     }
 
@@ -1005,6 +1157,120 @@ def calibrate_embedding_thresholds_by_brand(
         "dataset_size": len(offers),
         "low_gap": float(low_gap),
         "min_samples_per_brand": int(min_samples_per_brand),
+    }
+
+
+def cluster_offer_titles_graph(
+    offers: list[OfferRecord],
+    *,
+    fuzzy_threshold: float = 0.94,
+    embedding_threshold: float = 0.90,
+) -> dict[str, object]:
+    if not offers:
+        return {"clusters": [], "edge_count": 0, "node_count": 0, "backend": "none"}
+
+    embedder = EmbeddingService()
+    normalized = [_normalize_text(item.title) for item in offers]
+    embeddings = [embedder.embed(item.title) for item in offers]
+
+    edges: list[tuple[int, int]] = []
+    for left_idx in range(len(offers)):
+        for right_idx in range(left_idx + 1, len(offers)):
+            fuzzy = fuzzy_similarity(normalized[left_idx], normalized[right_idx])
+            if fuzzy >= float(fuzzy_threshold):
+                edges.append((left_idx, right_idx))
+                continue
+            emb = cosine_similarity(embeddings[left_idx], embeddings[right_idx])
+            if emb >= float(embedding_threshold):
+                edges.append((left_idx, right_idx))
+
+    clusters: list[list[str]] = []
+    if nx is not None:
+        graph = nx.Graph()
+        graph.add_nodes_from(range(len(offers)))
+        graph.add_edges_from(edges)
+        for component in nx.connected_components(graph):
+            clusters.append(sorted(offers[idx].offer_id for idx in component))
+        backend = "networkx"
+    else:
+        parent = list(range(len(offers)))
+
+        def find(node: int) -> int:
+            while parent[node] != node:
+                parent[node] = parent[parent[node]]
+                node = parent[node]
+            return node
+
+        def union(a: int, b: int) -> None:
+            root_a = find(a)
+            root_b = find(b)
+            if root_a != root_b:
+                parent[root_b] = root_a
+
+        for left_idx, right_idx in edges:
+            union(left_idx, right_idx)
+        grouped: dict[int, list[str]] = {}
+        for idx, offer in enumerate(offers):
+            grouped.setdefault(find(idx), []).append(offer.offer_id)
+        clusters = [sorted(value) for value in grouped.values()]
+        backend = "union_find"
+
+    clusters.sort(key=lambda item: (-len(item), item[0]))
+    return {
+        "clusters": clusters,
+        "edge_count": len(edges),
+        "node_count": len(offers),
+        "backend": backend,
+        "embedding_backend": embedder.backend_name,
+    }
+
+
+def summarize_canonical_decisions(
+    offers: list[OfferRecord],
+    decisions: list[MatchDecision],
+) -> dict[str, object]:
+    if len(offers) != len(decisions):
+        raise ValueError("offers and decisions must have same size")
+
+    rows = []
+    for offer, decision in zip(offers, decisions, strict=True):
+        expected_brand = str(offer.expected_canonical_id).split("|", 1)[0] if offer.expected_canonical_id else "unknown"
+        rows.append(
+            {
+                "offer_id": offer.offer_id,
+                "expected_canonical_id": offer.expected_canonical_id,
+                "predicted_canonical_id": decision.canonical_id,
+                "match_type": decision.match_type,
+                "confidence_score": float(decision.confidence_score),
+                "requires_review": bool(decision.requires_review),
+                "expected_brand": expected_brand or "unknown",
+            }
+        )
+
+    if pd is None:
+        requires_review = sum(1 for row in rows if row["requires_review"])
+        by_match_type = dict(Counter(str(row["match_type"]) for row in rows))
+        by_brand = dict(Counter(str(row["expected_brand"]) for row in rows))
+        return {
+            "rows": len(rows),
+            "requires_review_count": requires_review,
+            "requires_review_ratio": round(requires_review / max(len(rows), 1), 6),
+            "match_type_counts": by_match_type,
+            "brand_counts": by_brand,
+            "backend": "python",
+        }
+
+    frame = pd.DataFrame(rows)
+    match_type_counts = frame["match_type"].value_counts(dropna=False).to_dict()
+    brand_counts = frame["expected_brand"].value_counts(dropna=False).to_dict()
+    requires_review_ratio = float(frame["requires_review"].mean()) if not frame.empty else 0.0
+    return {
+        "rows": int(len(frame)),
+        "requires_review_count": int(frame["requires_review"].sum()),
+        "requires_review_ratio": round(requires_review_ratio, 6),
+        "match_type_counts": {str(k): int(v) for k, v in match_type_counts.items()},
+        "brand_counts": {str(k): int(v) for k, v in brand_counts.items()},
+        "backend": "pandas",
     }
 
 

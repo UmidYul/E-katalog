@@ -7,6 +7,7 @@ from services.worker.app.platform.services.normalization import (
     normalize_specs,
     normalize_title,
 )
+from services.worker.app.platform.services.canonical_matching import extract_attributes
 from shared.config.settings import settings
 
 
@@ -67,3 +68,29 @@ placeholder_spec_values:
         settings.normalization_rules_path = old_path
         settings.normalization_rules_reload_seconds = old_reload
         _reset_normalization_rules_cache()
+
+
+def test_detect_brand_prefers_primary_brand_when_competitor_noise_present() -> None:
+    title = "Xiaomi Redmi Note 13 Pro 256GB Samsung style"
+    assert detect_brand(title) == "xiaomi"
+
+
+def test_detect_brand_handles_mixed_script_and_leet_typos() -> None:
+    assert detect_brand("\u041enePlus 12 256GB") == "oneplus"
+    assert detect_brand("N0thing Phone 2a 128GB") == "nothing"
+    assert detect_brand("H0nor 200 Pro 512GB") == "honor"
+    assert detect_brand("Huawel P60 Pro 256GB") == "huawei"
+    assert detect_brand("onor 200 Pro 512GB") == "honor"
+    assert detect_brand("huaei P60 Pro 256GB") == "huawei"
+
+
+def test_extract_attributes_keeps_brand_for_adversarial_titles() -> None:
+    oneplus = extract_attributes("\u041enePlus 12 256GB")
+    xiaomi = extract_attributes("Xiaomi Redmi Note 13 Pro 256GB Samsung style")
+    huawei = extract_attributes("Huawel P60 Pro 256GB")
+    honor = extract_attributes("onor 200 Pro 512GB")
+    assert oneplus.brand == "oneplus"
+    assert oneplus.storage == "256"
+    assert xiaomi.brand == "xiaomi"
+    assert huawei.brand == "huawei"
+    assert honor.brand == "honor"
