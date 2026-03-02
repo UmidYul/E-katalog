@@ -20,6 +20,7 @@ export function ProductCard({
   onCompare,
   compareDisabled,
   compareDisabledReason,
+  isTracking,
   priceAlertSignal
 }: {
   product: ProductListItem;
@@ -33,6 +34,8 @@ export function ProductCard({
   priceAlertSignal?: PriceAlertSignal | null;
 }) {
   const storesLabel = product.store_count === 1 ? "магазин" : "магазинов";
+  const hasPriceComparison = product.store_count >= 2;
+  const hasPriceRange = product.min_price != null && product.max_price != null && product.max_price > product.min_price;
   const productHref = `/product/${product.id}-${slugify(product.normalized_title)}`;
 
   return (
