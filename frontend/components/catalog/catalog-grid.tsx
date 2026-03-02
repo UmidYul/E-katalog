@@ -66,7 +66,6 @@ export function CatalogGrid({ loading, items }: { loading: boolean; items: Produ
             compared={inCompare}
             compareDisabled={compareDisabled}
             compareDisabledReason={compareDisabledReason}
-            isTracking={isTracking}
             priceAlertSignal={signal}
             onCompare={(id) =>
               toggleCompare({
