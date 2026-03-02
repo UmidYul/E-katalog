@@ -5,8 +5,10 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+import { Breadcrumbs } from "@/components/common/breadcrumbs";
 import { EmptyState } from "@/components/common/empty-state";
 import { ErrorState } from "@/components/common/error-state";
+import { SectionHeading } from "@/components/common/section-heading";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -336,41 +338,53 @@ export function CompareClientPage() {
 
   if (compareItems.length === 0) {
     return (
-      <div className="container space-y-3 py-6">
-        {shareToken ? (
-          <p className="text-sm text-muted-foreground">
-            {sharedCompareQuery.isPending ? "Загружаем сравнение по ссылке..." : shareStatus ?? "Ожидаем данные сравнения..."}
-          </p>
-        ) : null}
-        <EmptyState title="Сравнение пока пустое" message="Добавьте товары из каталога или карточки товара, чтобы начать сравнение." />
-        <Link href="/catalog">
-          <Button>Перейти в каталог</Button>
-        </Link>
+      <div className="container min-h-screen space-y-12 py-16">
+        <header className="space-y-4">
+          <SectionHeading title="Сравнение" description="Здесь вы сможете сопоставить характеристики выбранных товаров." />
+        </header>
+
+        <section className="flex flex-col items-center justify-center rounded-[3rem] border border-dashed border-border/60 bg-secondary/10 p-20 text-center">
+          <EmptyState
+            title="Список сравнения пуст"
+            message="Добавляйте товары из каталога, чтобы увидеть детальную разницу в характеристиках."
+          />
+          <Link href="/catalog" className="mt-8">
+            <Button className="h-14 rounded-2xl px-10 text-base font-bold shadow-xl shadow-primary/20">В каталог товаров</Button>
+          </Link>
+        </section>
+
         {history.length ? (
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>Недавние сравнения</CardTitle>
-              <Button variant="ghost" size="sm" onClick={clearHistory}>
+          <section className="space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-black">Недавние сравнения</h2>
+              <Button variant="ghost" size="sm" onClick={clearHistory} className="text-xs font-bold text-muted-foreground hover:text-destructive">
                 Очистить историю
               </Button>
-            </CardHeader>
-            <CardContent className="space-y-3">
+            </div>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               {history.slice(0, 6).map((entry) => (
-                <div key={entry.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border p-3">
-                  <div>
-                    <p className="line-clamp-1 text-sm font-medium">{entry.items.map((item) => item.title).join(" vs ")}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {formatDateTime(entry.createdAt)} | {entry.items.length} товаров
-                      {entry.category ? ` | ${formatCategory(entry.category)}` : ""}
+                <div key={entry.id} className="group relative overflow-hidden rounded-[2rem] border border-border/50 bg-card p-6 shadow-soft transition-all hover:shadow-xl hover:-translate-y-1">
+                  <div className="space-y-4">
+                    <p className="line-clamp-2 text-sm font-bold leading-tight">
+                      {entry.items.map((item) => item.title).join(" vs ")}
                     </p>
+                    <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                      <span>{entry.items.length} товара</span>
+                      <span>{formatDateTime(entry.createdAt).split(',')[0]}</span>
+                    </div>
                   </div>
-                  <Button size="sm" variant="outline" onClick={() => restoreSnapshot(entry.id)}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => restoreSnapshot(entry.id)}
+                    className="mt-6 w-full rounded-xl bg-secondary/50 font-bold transition-all group-hover:bg-primary group-hover:text-white"
+                  >
                     Восстановить
                   </Button>
                 </div>
               ))}
-            </CardContent>
-          </Card>
+            </div>
+          </section>
         ) : null}
       </div>
     );
@@ -381,46 +395,50 @@ export function CompareClientPage() {
     if (!onlyItem) return null;
 
     return (
-      <div className="container space-y-4 py-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Для сравнения нужно минимум 2 товара</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-sm text-muted-foreground">Сейчас выбран только один товар. Добавьте ещё один, чтобы увидеть полную матрицу сравнения.</p>
-            <div className="flex flex-wrap gap-2">
-              <Link href={`/product/${onlyItem.slug}`}>
-                <Button variant="outline">Открыть выбранный товар</Button>
-              </Link>
-              <Link href="/catalog">
-                <Button>Добавить ещё товар</Button>
-              </Link>
-              <Button variant="ghost" onClick={clear}>
-                Очистить
-              </Button>
+      <div className="container min-h-screen space-y-12 py-16">
+        <header className="space-y-4">
+          <SectionHeading title="Сравнение" description="Для сопоставления характеристик нужно выбрать минимум два товара." />
+        </header>
+
+        <section className="rounded-[3rem] border border-border/50 bg-card p-12 shadow-2xl">
+          <div className="grid gap-12 lg:grid-cols-2 lg:items-center">
+            <div className="space-y-8">
+              <div className="space-y-4">
+                <h3 className="text-3xl font-black leading-tight">Одного товара недостаточно для полноценного сравнения</h3>
+                <p className="text-muted-foreground leading-relaxed">
+                  Добавьте еще один товар из той же категории, и мы автоматически построим детальную матрицу характеристик с подстветкой отличий.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-4">
+                <Link href="/catalog">
+                  <Button className="h-14 rounded-2xl px-10 text-base font-bold shadow-xl shadow-primary/20">Найти еще один</Button>
+                </Link>
+                <Button variant="outline" className="h-14 rounded-2xl border-2 px-10 font-bold" onClick={clear}>Очистить список</Button>
+              </div>
             </div>
-            {history.length ? (
-              <div className="space-y-2 border-t border-border pt-3">
-                <p className="text-xs text-muted-foreground">Недавние сравнения:</p>
-                <div className="flex flex-wrap gap-2">
-                  {history.slice(0, 4).map((entry) => (
-                    <Button key={entry.id} size="sm" variant="outline" onClick={() => restoreSnapshot(entry.id)}>
-                      Восстановить {entry.items.length}
-                    </Button>
-                  ))}
+            <div className="relative aspect-video overflow-hidden rounded-[2rem] border border-border/50 bg-secondary/20 p-8 shadow-inner">
+              <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
+                <div className="relative h-40 w-40 overflow-hidden rounded-2xl bg-white p-4 shadow-lg">
+                  {/* Simplified Image display if available */}
+                  <p className="text-[10px] font-black uppercase text-muted-foreground">Выбран сейчас</p>
+                  <p className="mt-4 line-clamp-2 text-sm font-bold">{onlyItem.title}</p>
+                </div>
+                <div className="h-1 w-20 rounded-full bg-border/40" />
+                <div className="flex h-20 w-20 items-center justify-center rounded-2xl border-2 border-dashed border-primary/40 bg-primary/5 text-primary text-2xl font-black">
+                  +
                 </div>
               </div>
-            ) : null}
-          </CardContent>
-        </Card>
+            </div>
+          </div>
+        </section>
       </div>
     );
   }
 
   if (compareQuery.error) {
     return (
-      <div className="container py-6">
-        <ErrorState title="Не удалось построить сравнение" message="Попробуйте убрать недоступные товары и повторите." />
+      <div className="container py-16">
+        <ErrorState title="Ошибка загрузки сравнения" message="Нам не удалось получить детальные характеристики выбранных товаров." />
       </div>
     );
   }
@@ -428,129 +446,108 @@ export function CompareClientPage() {
   const columns = compareQuery.data?.items ?? [];
 
   return (
-    <div className="container space-y-6 py-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="font-heading text-2xl font-extrabold">Сравнение</h1>
-            <Badge>
-              {compareItems.length}/{COMPARE_LIMIT} выбрано
-            </Badge>
-            {categoryScope ? <Badge className="bg-secondary/80">{formatCategory(categoryScope)}</Badge> : null}
-            {compareQuery.isFetching ? <Badge className="bg-secondary/80">Обновляем...</Badge> : null}
+    <div className="container min-h-screen space-y-12 py-12">
+      <header className="grid gap-8 lg:grid-cols-2 lg:items-end">
+        <div className="space-y-4">
+          <Breadcrumbs items={[{ href: "/", label: "Главная" }, { href: "/compare", label: "Сравнение" }]} />
+          <div className="flex items-center gap-3">
+            <h1 className="font-heading text-4xl font-[900] tracking-tighter">Сравнение</h1>
+            <Badge className="bg-primary/10 text-primary border-primary/20 px-3 font-black">{compareItems.length} товаров</Badge>
           </div>
-          <p className="text-xs text-muted-foreground">Сравнение работает в рамках одной категории. Заголовки и первая колонка закреплены для удобного чтения.</p>
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span className="inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-1 text-success">
-              <span className="h-2 w-2 rounded-full bg-success" /> Лучшее значение
-            </span>
-            <span>Подсветка лучшего значения рассчитывается по эвристике.</span>
-          </div>
-          {shareStatus ? <p className="text-xs text-primary">{shareStatus}</p> : null}
-          {lastShareUrl ? (
-            <p className="text-xs text-muted-foreground">
-              Ссылка:{" "}
-              <a href={lastShareUrl} className="text-primary underline underline-offset-2" target="_blank" rel="noreferrer">
-                открыть
-              </a>
-              {lastShareExpiresAt ? ` (действует до ${formatDateTime(lastShareExpiresAt)})` : ""}
+          {categoryScope && (
+            <p className="text-sm font-bold text-muted-foreground uppercase tracking-widest">
+              Категория: <span className="text-foreground">{formatCategory(categoryScope)}</span>
             </p>
-          ) : null}
+          )}
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant={onlyDiff ? "default" : "outline"} size="sm" onClick={() => setOnlyDiff((prev) => !prev)}>
-            {onlyDiff ? "Показаны отличия" : "Показать только отличия"}
+        <div className="flex flex-wrap justify-end gap-3">
+          <Button
+            variant={onlyDiff ? "default" : "outline"}
+            className="rounded-xl font-bold transition-all"
+            onClick={() => setOnlyDiff((prev) => !prev)}
+          >
+            {onlyDiff ? "✨ Показаны отличия" : "Показать отличия"}
           </Button>
-          <Button variant={focusMode === "key" ? "default" : "outline"} size="sm" onClick={() => setFocusMode((prev) => (prev === "all" ? "key" : "all"))}>
-            {focusMode === "key" ? "Ключевые характеристики" : "Фокус: ключевые"}
+          <Button
+            variant="outline"
+            className="rounded-xl font-bold"
+            onClick={onCreateShareLink}
+            disabled={createShare.isPending}
+          >
+            {createShare.isPending ? "Создание..." : "Поделиться"}
           </Button>
-          <Button variant="outline" size="sm" onClick={onCreateShareLink} disabled={createShare.isPending || productIds.length < 2}>
-            {createShare.isPending ? "Готовим ссылку..." : "Поделиться"}
-          </Button>
-          <Button variant="ghost" size="sm" onClick={clear}>
+          <Button
+            variant="ghost"
+            className="rounded-xl font-bold text-muted-foreground hover:text-destructive"
+            onClick={clear}
+          >
             Очистить всё
           </Button>
-          {history.length ? (
-            <Button variant="ghost" size="sm" onClick={clearHistory}>
-              Очистить историю
-            </Button>
-          ) : null}
         </div>
-      </div>
-      <div className="grid gap-2 md:grid-cols-[minmax(280px,420px)_1fr] md:items-center">
-        <Input
-          value={specQuery}
-          onChange={(event) => setSpecQuery(event.target.value)}
-          placeholder="Поиск по характеристикам: например, камера, ram, wifi"
-          aria-label="Поиск характеристики в матрице сравнения"
-          className="h-9"
-        />
-        <p className="text-xs text-muted-foreground">
-          Строк в матрице: {rows.length}, отличий: {diffRowsCount}.
-        </p>
-      </div>
+      </header>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        {compareItems.map((item) => (
-          <Card key={item.id}>
-            <CardContent className="space-y-2 p-4">
-              {(() => {
-                const matrixItem = matrixMetaById.get(item.id);
-                const image = isImageUrl(matrixItem?.main_image) ? matrixItem.main_image : null;
-                if (!image) return null;
-                return (
-                  <Link href={`/product/${item.slug}`} className="block">
-                    <div className="relative mb-2 aspect-square overflow-hidden rounded-lg border border-border bg-card">
-                      <Image src={image} alt={item.title} fill className="object-contain p-2" sizes="(max-width: 1280px) 50vw, 25vw" />
-                    </div>
-                  </Link>
-                );
-              })()}
-              <Link href={`/product/${item.slug}`} className="line-clamp-2 text-sm font-semibold text-primary hover:underline">
-                {item.title}
-              </Link>
-              <div className="flex gap-2">
-                <Link href={`/product/${item.slug}`}>
-                  <Button size="sm" variant="outline">
-                    Открыть
-                  </Button>
-                </Link>
-                <Button size="sm" variant="ghost" onClick={() => remove(item.id)}>
-                  Убрать
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      <section className="grid gap-6 md:grid-cols-2 lg:grid-cols-[1fr_minmax(0,1fr)] items-center">
+        <div className="relative max-w-md">
+          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/60">🔍</span>
+          <Input
+            value={specQuery}
+            onChange={(event) => setSpecQuery(event.target.value)}
+            placeholder="Быстрый поиск по параметру (RAM, Экран, Вес...)"
+            className="h-12 rounded-2xl border-none bg-secondary/50 pl-12 focus:bg-background focus:ring-primary/20 transition-all font-medium"
+          />
+        </div>
+        <div className="flex justify-end items-center gap-6 text-xs font-bold text-muted-foreground uppercase tracking-wider">
+          <span>Строк: <span className="text-foreground">{rows.length}</span></span>
+          <span className="h-4 w-px bg-border/60" />
+          <span>Отличий: <span className="text-primary">{diffRowsCount}</span></span>
+        </div>
+      </section>
 
-      <Card className="overflow-hidden">
-        <CardContent className="max-h-[70vh] overflow-auto p-0">
+      <div className="rounded-[2.5rem] border border-border/50 bg-card overflow-hidden shadow-2xl">
+        <div className="overflow-x-auto">
           {compareQuery.isLoading ? (
-            <div className="p-4 text-sm text-muted-foreground">Загружаем матрицу сравнения...</div>
+            <div className="p-20 text-center animate-pulse">
+              <p className="text-xl font-black text-muted-foreground">Формируем матрицу сравнения...</p>
+            </div>
           ) : (
-            <table className="min-w-[760px] w-full border-collapse">
+            <table className="w-full border-collapse">
               <thead>
-                <tr className="border-b border-border bg-card">
-                  <th className="sticky left-0 top-0 z-30 min-w-56 bg-card px-4 py-3 text-left text-sm font-semibold">Характеристика</th>
+                <tr className="border-b border-border/50 bg-secondary/10">
+                  <th className="sticky left-0 z-30 min-w-[240px] bg-secondary/[0.05] backdrop-blur-md px-8 py-10 text-left">
+                    <div className="space-y-1">
+                      <p className="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground/60">Параметр</p>
+                      <p className="text-lg font-black italic">Spec Matrix</p>
+                    </div>
+                  </th>
                   {columns.map((item) => {
                     const local = productMetaById.get(item.id);
                     const title = local?.title || item.normalized_title;
                     const slug = local?.slug || `${item.id}-${slugify(item.normalized_title)}`;
                     const image = isImageUrl(item.main_image) ? item.main_image : null;
                     return (
-                      <th key={item.id} className="sticky top-0 z-20 min-w-56 bg-card px-4 py-3 text-left text-sm font-semibold">
-                        <div className="space-y-2">
-                          {image ? (
-                            <Link href={`/product/${slug}`} className="block">
-                              <div className="relative h-24 w-24 overflow-hidden rounded-lg border border-border bg-background">
-                                <Image src={image} alt={title} fill className="object-contain p-1" sizes="96px" />
-                              </div>
+                      <th key={item.id} className="min-w-[280px] p-8 text-left">
+                        <div className="space-y-6">
+                          <div className="group relative aspect-square w-32 overflow-hidden rounded-2xl border border-border/50 bg-background p-4 shadow-sm transition-all hover:shadow-xl hover:-translate-y-1">
+                            <Link href={`/product/${slug}`} className="block h-full w-full">
+                              {image ? (
+                                <Image src={image} alt={title} fill className="object-contain p-2 transition-transform group-hover:scale-110" sizes="128px" />
+                              ) : (
+                                <div className="flex h-full items-center justify-center bg-secondary/20 text-[10px] font-black uppercase text-muted-foreground/40">No Image</div>
+                              )}
                             </Link>
-                          ) : null}
-                          <Link href={`/product/${slug}`} className="hover:text-primary">
-                            {title}
-                          </Link>
+                            <button
+                              onClick={() => remove(item.id)}
+                              className="absolute -right-2 -top-2 h-8 w-8 rounded-full bg-destructive text-white opacity-0 shadow-lg transition-all group-hover:right-2 group-hover:top-2 group-hover:opacity-100"
+                            >
+                              ×
+                            </button>
+                          </div>
+                          <div className="space-y-1">
+                            <Link href={`/product/${slug}`} className="line-clamp-2 block text-sm font-black leading-tight hover:text-primary transition-colors">
+                              {title}
+                            </Link>
+                            <p className="text-xs font-bold text-muted-foreground opacity-60">ID: {item.id.slice(0, 8)}</p>
+                          </div>
                         </div>
                       </th>
                     );
@@ -560,23 +557,35 @@ export function CompareClientPage() {
               <tbody>
                 {rows.length === 0 ? (
                   <tr>
-                    <td className="sticky left-0 z-10 bg-card px-4 py-3 text-sm text-muted-foreground">Отличий не найдено</td>
-                    {columns.map((item) => (
-                      <td key={item.id} className="px-4 py-3 text-sm text-muted-foreground">
-                        -
-                      </td>
-                    ))}
+                    <td colSpan={columns.length + 1} className="p-20 text-center text-muted-foreground font-bold">
+                      Отличий не найдено или ничего не соответствует запросу.
+                    </td>
                   </tr>
                 ) : (
                   rows.map((row, rowIndex) => (
-                    <tr key={row.key} className={cn("border-t border-border", rowIndex % 2 === 1 && "bg-secondary/15")}>
-                      <td className="sticky left-0 z-10 bg-card px-4 py-3 text-sm font-medium">{row.label}</td>
+                    <tr key={row.key} className={cn(
+                      "group border-b border-border/40 transition-colors hover:bg-secondary/10",
+                      rowIndex % 2 === 1 && "bg-secondary/[0.03]"
+                    )}>
+                      <td className="sticky left-0 z-10 bg-card group-hover:bg-secondary/5 font-bold px-8 py-5 text-sm border-r border-border/40">
+                        <span className="bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
+                          {row.label}
+                        </span>
+                      </td>
                       {row.values.map((value, index) => (
                         <td
                           key={`${row.key}:${columns[index]?.id ?? index}`}
-                          className={cn("px-4 py-3 text-sm text-muted-foreground", row.bestCellIndexes.has(index) && "bg-success/15 font-semibold text-success")}
+                          className={cn(
+                            "px-8 py-5 text-sm transition-all",
+                            row.bestCellIndexes.has(index)
+                              ? "bg-emerald-500/[0.03] font-black text-emerald-600 shadow-[inset_0_0_0_1px_rgba(16,185,129,0.1)]"
+                              : "text-muted-foreground font-medium"
+                          )}
                         >
-                          {renderCellValue(row.key, value)}
+                          <div className="flex items-center gap-2">
+                            {row.bestCellIndexes.has(index) && <span className="text-[10px]">🏆</span>}
+                            {renderCellValue(row.key, value)}
+                          </div>
                         </td>
                       ))}
                     </tr>
@@ -585,31 +594,50 @@ export function CompareClientPage() {
               </tbody>
             </table>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
+
+      {shareStatus && (
+        <div className="flex items-center justify-center">
+          <div className="rounded-2xl bg-secondary/50 px-6 py-3 text-xs font-bold text-muted-foreground border border-border/50">
+            {shareStatus}
+          </div>
+        </div>
+      )}
 
       {history.length ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Недавние сравнения</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {history.slice(0, 6).map((entry) => (
-              <div key={entry.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border p-3">
-                <div>
-                  <p className="line-clamp-1 text-sm font-medium">{entry.items.map((item) => item.title).join(" vs ")}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatDateTime(entry.createdAt)} | {entry.items.length} товаров
-                    {entry.category ? ` | ${formatCategory(entry.category)}` : ""}
+        <section className="space-y-8 pt-12">
+          <header className="flex items-center justify-between">
+            <div className="space-y-1">
+              <h2 className="text-2xl font-black italic tracking-tight">Recent Archives</h2>
+              <p className="text-xs font-bold text-muted-foreground uppercase">Ваши предыдущие сравнения</p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={clearHistory} className="rounded-xl text-[10px] font-black uppercase tracking-widest text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
+              Purge History
+            </Button>
+          </header>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            {history.slice(0, 8).map((entry) => (
+              <button
+                key={entry.id}
+                onClick={() => restoreSnapshot(entry.id)}
+                className="flex flex-col items-start gap-3 rounded-[2rem] border border-border/50 bg-card p-6 text-left shadow-soft transition-all hover:shadow-xl hover:-translate-y-1 group"
+              >
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-secondary/80 text-muted-foreground group-hover:bg-primary group-hover:text-white transition-colors">
+                  🔄
+                </div>
+                <div className="space-y-1">
+                  <p className="line-clamp-1 text-sm font-black leading-tight">
+                    {entry.items.map((item) => item.title.split(' ')[0]).join(", ")}
+                  </p>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">
+                    {entry.items.length} Units • {formatDateTime(entry.createdAt).split(',')[0]}
                   </p>
                 </div>
-                <Button size="sm" variant="outline" onClick={() => restoreSnapshot(entry.id)}>
-                  Восстановить
-                </Button>
-              </div>
+              </button>
             ))}
-          </CardContent>
-        </Card>
+          </div>
+        </section>
       ) : null}
     </div>
   );

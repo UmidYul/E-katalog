@@ -7,11 +7,13 @@ import { CatalogFilters, type FilterState } from "@/components/catalog/catalog-f
 import { CatalogGrid } from "@/components/catalog/catalog-grid";
 import { ErrorState } from "@/components/common/error-state";
 import { SectionHeading } from "@/components/common/section-heading";
+import { Breadcrumbs } from "@/components/common/breadcrumbs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useCatalogFiltersFromUrl } from "@/features/catalog/use-catalog-filters";
 import { useBrands, useCatalogProducts, useDynamicFilters } from "@/features/catalog/use-catalog-queries";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
+import { cn } from "@/lib/utils/cn";
 import { debounceMs } from "@/lib/utils/format";
 
 const PRICE_MIN = 0;
@@ -206,67 +208,121 @@ export function CatalogClientPage({
   }
 
   return (
-    <div className="container space-y-6 py-6">
-      <SectionHeading title={pageTitle ?? "Каталог"} description="Сравнивайте цены и предложения по проверенным магазинам." />
-      <div className="grid gap-6 lg:grid-cols-[300px_minmax(0,1fr)] lg:items-start">
-        <CatalogFilters
-          brands={brands.data ?? []}
-          stores={dynamicFilters.data?.stores}
-          sellers={dynamicFilters.data?.sellers}
-          dynamicAttributes={dynamicFilters.data?.attributes}
-          value={filters}
-          onChange={onFiltersChange}
+    <div className="container min-h-screen space-y-10 py-10">
+      <header className="space-y-4">
+        <Breadcrumbs items={[{ href: "/", label: "Главная" }, { href: "/catalog", label: "Каталог" }]} />
+        <SectionHeading
+          title={pageTitle ?? "Каталог товаров"}
+          description="Агрегатор предложений от сотен магазинов с умной фильтрацией."
         />
+      </header>
 
-        <div className="space-y-4">
-          <div className="space-y-3 rounded-2xl border border-border bg-card/90 p-3 shadow-soft">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge>{products.data?.items.length ?? 0} на этой странице</Badge>
-                <Badge>Страница {currentPage}</Badge>
-                {activeFilterCount ? <Badge className="border-primary/40 bg-primary/15 text-primary">{activeFilterCount} активных фильтров</Badge> : null}
-                {products.isFetching && !products.isLoading ? <p className="text-xs text-muted-foreground">Обновляем результаты...</p> : null}
-              </div>
-              {activeFilterCount ? (
-                <Button variant="ghost" size="sm" disabled={products.isFetching} onClick={clearFilters}>
-                  Сбросить фильтры
-                </Button>
-              ) : null}
-            </div>
-            {activeFilterChips.length ? (
-              <div className="flex flex-wrap gap-2">
-                {activeFilterChips.map((chip) => (
-                  <Badge key={chip}>{chip}</Badge>
-                ))}
-              </div>
-            ) : null}
+      <div className="grid gap-10 lg:grid-cols-[300px_1fr]">
+        <aside className="sticky top-24 h-fit space-y-6">
+          <div className="rounded-[2rem] border border-border/50 bg-card p-6 shadow-xl">
+            <CatalogFilters
+              brands={brands.data ?? []}
+              stores={dynamicFilters.data?.stores}
+              sellers={dynamicFilters.data?.sellers}
+              dynamicAttributes={dynamicFilters.data?.attributes}
+              value={filters}
+              onChange={onFiltersChange}
+            />
           </div>
-          <CatalogGrid loading={products.isLoading} items={products.data?.items ?? []} />
-          {showPagination ? (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card p-3">
-              <p className="text-sm text-muted-foreground">Страница {currentPage}</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button variant="outline" size="sm" disabled={!canGoPrevPage || products.isFetching} onClick={() => goToPage(currentPage - 1)}>
-                  Назад
+        </aside>
+
+        <main className="space-y-8">
+          <section className="flex flex-col gap-6 rounded-[2rem] border border-border/50 bg-card/50 p-6 backdrop-blur-sm">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <Badge className="bg-primary/10 text-primary border-primary/20 px-4 py-1.5 font-bold">
+                  {products.data?.items.length ?? 0} товаров
+                </Badge>
+                {activeFilterCount > 0 && (
+                  <Badge className="bg-amber-500/10 text-amber-600 border-amber-200 px-4 py-1.5 font-bold">
+                    {activeFilterCount} фильтров
+                  </Badge>
+                )}
+                {products.isFetching && !products.isLoading && (
+                  <span className="flex items-center gap-2 text-xs font-bold text-muted-foreground animate-pulse">
+                    <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                    Обновление...
+                  </span>
+                )}
+              </div>
+
+              {activeFilterCount > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="rounded-xl text-xs font-bold text-muted-foreground hover:text-destructive transition-colors"
+                  onClick={clearFilters}
+                >
+                  Сбросить всё
                 </Button>
-                {pageButtons.map((page) => (
-                  <Button
-                    key={page}
-                    variant={page === currentPage ? "default" : "outline"}
-                    size="sm"
-                    disabled={products.isFetching}
-                    onClick={() => goToPage(page)}
+              )}
+            </div>
+
+            {activeFilterChips.length > 0 && (
+              <div className="flex flex-wrap gap-2 pt-2 border-t border-border/40">
+                {activeFilterChips.map((chip) => (
+                  <div
+                    key={chip}
+                    className="flex items-center gap-2 rounded-lg bg-background px-3 py-1.5 text-xs font-bold border border-border/60 text-foreground/70"
                   >
-                    {page}
-                  </Button>
+                    {chip}
+                  </div>
                 ))}
-                <Button variant="outline" size="sm" disabled={!hasNextPage || products.isFetching} onClick={() => goToPage(currentPage + 1)}>
-                  Вперёд
+              </div>
+            )}
+          </section>
+
+          <CatalogGrid loading={products.isLoading} items={products.data?.items ?? []} />
+
+          {showPagination && (
+            <div className="flex items-center justify-center pt-8">
+              <div className="flex items-center gap-2 rounded-2xl border border-border/50 bg-card p-2 shadow-lg">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="rounded-xl"
+                  disabled={!canGoPrevPage || products.isFetching}
+                  onClick={() => goToPage(currentPage - 1)}
+                >
+                  ←
+                </Button>
+
+                <div className="flex items-center gap-1 px-4">
+                  {pageButtons.map((page) => (
+                    <Button
+                      key={page}
+                      variant={page === currentPage ? "default" : "ghost"}
+                      size="sm"
+                      className={cn(
+                        "rounded-xl font-bold min-w-[36px]",
+                        page === currentPage ? "shadow-md shadow-primary/20" : "text-muted-foreground"
+                      )}
+                      disabled={products.isFetching}
+                      onClick={() => goToPage(page)}
+                    >
+                      {page}
+                    </Button>
+                  ))}
+                </div>
+
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="rounded-xl"
+                  disabled={!hasNextPage || products.isFetching}
+                  onClick={() => goToPage(currentPage + 1)}
+                >
+                  →
                 </Button>
               </div>
             </div>
-          ) : null}
-        </div>
+          )}
+        </main>
       </div>
     </div>
   );

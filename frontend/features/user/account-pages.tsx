@@ -1,7 +1,12 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, Download, History, LogOut, Mail, Save, ShieldCheck, Sparkles, Trash2, UserRound } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  Copy, Download, History, LogOut, Mail, Save, ShieldCheck, Sparkles, Trash2,
+  UserRound, Camera, Globe, MapPin, Phone, MessageSquare, Key, LayoutGrid,
+  Settings, Fingerprint, Activity, Clock, LogIn, ChevronRight, ExternalLink
+} from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
@@ -20,6 +25,7 @@ import { useAuthMe, useLogout } from "@/features/auth/use-auth";
 import { useNotificationPreferences, useUpdateNotificationPreferences, useUpdateUserProfile, useUserProfile } from "@/features/user/use-profile";
 import { useFavorites } from "@/features/user/use-favorites";
 import { authApi, userApi } from "@/lib/api/openapi-client";
+import { cn } from "@/lib/utils/cn";
 import { formatPrice } from "@/lib/utils/format";
 import { defaultProfilePreferences, type LocalProfileDraft, type ProfilePreferences, useProfileStore } from "@/store/profile.store";
 import { useRecentlyViewedStore } from "@/store/recentlyViewed.store";
@@ -509,390 +515,284 @@ export function ProfileClient() {
   }
 
   return (
-    <div className="container space-y-6 py-6">
-      <Card className="relative overflow-hidden border-primary/25">
-        <div className="pointer-events-none absolute -top-16 right-0 h-40 w-40 rounded-full bg-primary/20 blur-3xl" />
-        <div className="pointer-events-none absolute bottom-0 left-0 h-24 w-24 rounded-full bg-emerald-400/20 blur-2xl" />
-        <CardContent className="relative p-6">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <Avatar name={me.data.full_name} className="h-14 w-14 text-base" />
-              <div className="space-y-1">
-                <p className="text-xl font-semibold">{profileForm.display_name || me.data.full_name}</p>
-                <p className="text-sm text-muted-foreground">{me.data.email}</p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge className="bg-primary text-primary-foreground">Аккаунт {formatShortAccountId(me.data.id)}</Badge>
-                  <Badge>{favoritesCount} в избранном</Badge>
-                  <Badge>{recentCount} недавних просмотров</Badge>
-                </div>
-              </div>
+    <div className="container min-h-screen space-y-12 py-12">
+      {/* Immersive Header Card */}
+      <motion.section
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="relative overflow-hidden rounded-[3rem] border border-border/40 bg-card p-1 shadow-2xl"
+      >
+        <div className="absolute inset-0 bg-gradient-to-tr from-primary/[0.04] to-secondary/10 pointer-events-none" />
+        <div className="absolute -top-24 -right-24 h-64 w-64 rounded-full bg-primary/10 blur-3xl" />
+        <div className="relative flex flex-wrap items-center justify-between gap-8 p-8 md:p-12">
+          <div className="flex flex-wrap items-center gap-8">
+            <div className="relative group">
+              <div className="absolute -inset-1 rounded-[2.5rem] bg-gradient-to-tr from-primary to-secondary opacity-30 blur group-hover:opacity-50 transition-all" />
+              <Avatar name={me.data.full_name} className="relative h-28 w-28 rounded-[2rem] border-4 border-white shadow-xl text-3xl font-black" />
+              <button className="absolute -bottom-2 -right-2 flex h-10 w-10 items-center justify-center rounded-2xl bg-white shadow-lg text-primary hover:scale-110 active:scale-95 transition-all">
+                <Camera className="h-5 w-5" />
+              </button>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" className="gap-2" onClick={exportAccountSnapshot}>
-                <Download className="h-4 w-4" /> Экспорт данных
-              </Button>
-              <Button variant="outline" className="gap-2" onClick={() => logout.mutate()} disabled={logout.isPending}>
-                <LogOut className="h-4 w-4" /> {logout.isPending ? "Выходим..." : "Выйти"}
-              </Button>
-            </div>
-          </div>
-          {status ? <p className="mt-4 text-sm text-primary">{status}</p> : null}
-          {copyStatus ? <p className="mt-1 text-sm text-primary">{copyStatus}</p> : null}
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-6 xl:grid-cols-2">
-        <div className="space-y-6">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="flex items-center gap-2">
-                <UserRound className="h-4 w-4 text-primary" /> Данные профиля
-              </CardTitle>
-              <Badge className="bg-secondary/80">Заполнено: {completionScore}%</Badge>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="h-2 overflow-hidden rounded-full bg-secondary">
-                <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${completionScore}%` }} />
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Отображаемое имя</label>
-                  <Input value={profileForm.display_name} onChange={(e) => onDraftFieldChange("display_name", e.target.value)} />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Телефон</label>
-                  <Input placeholder="+998 ..." value={profileForm.phone} onChange={(e) => onDraftFieldChange("phone", e.target.value)} />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Город</label>
-                  <Input value={profileForm.city} onChange={(e) => onDraftFieldChange("city", e.target.value)} />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Telegram</label>
-                  <Input
-                    placeholder="@username"
-                    value={profileForm.telegram}
-                    autoComplete="off"
-                    onChange={(e) => onDraftFieldChange("telegram", e.target.value)}
-                  />
-                </div>
-              </div>
+            <div className="space-y-4">
               <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">О себе</label>
-                <Textarea value={profileForm.about} onChange={(e) => onDraftFieldChange("about", e.target.value)} placeholder="Кратко о себе, интересах и любимых брендах..." />
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="text-xs text-muted-foreground">Изменения сохраняются через API, а локальная копия профиля хранится в этом браузере.</p>
-                <div className="flex gap-2">
-                  <Button variant="ghost" size="sm" onClick={resetProfileForm} disabled={!hasDraftChanges || updateProfile.isPending}>
-                    Сбросить
-                  </Button>
-                  <Button size="sm" className="gap-2" onClick={saveServerProfile} disabled={!hasDraftChanges || updateProfile.isPending}>
-                    <Save className="h-4 w-4" /> {updateProfile.isPending ? "Сохраняем..." : "Сохранить"}
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-primary" /> Настройки
-              </CardTitle>
-              <Button variant="ghost" size="sm" onClick={onResetPreferences}>
-                Сбросить
-              </Button>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <PreferenceRow
-                title="Алерты снижения цены"
-                description="Показывать сигналы, когда отслеживаемые товары дешевеют."
-                checked={preferences.price_drop_alerts}
-                onChange={(checked) => onPreferenceChange("price_drop_alerts", checked)}
-              />
-              <PreferenceRow
-                title="Алерты наличия"
-                description="Сообщать, когда товар снова доступен в наличии."
-                checked={preferences.stock_alerts}
-                onChange={(checked) => onPreferenceChange("stock_alerts", checked)}
-              />
-              <PreferenceRow
-                title="Еженедельная сводка"
-                description="Показывать еженедельный обзор обновлений каталога."
-                checked={preferences.weekly_digest}
-                onChange={(checked) => onPreferenceChange("weekly_digest", checked)}
-              />
-              <PreferenceRow
-                title="Публичный профиль"
-                description="Разрешить публикацию карточки профиля."
-                checked={preferences.public_profile}
-                onChange={(checked) => onPreferenceChange("public_profile", checked)}
-              />
-              <PreferenceRow
-                title="Компактный вид"
-                description="Использовать более плотный интерфейс в кабинете."
-                checked={preferences.compact_view}
-                onChange={(checked) => onPreferenceChange("compact_view", checked)}
-              />
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle>Сводка аккаунта</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <StatRow label="Email" value={me.data.email} />
-              <StatRow label="Полное имя" value={me.data.full_name || "-"} />
-              <StatRow label="Избранное" value={String(favoritesCount)} />
-              <StatRow label="Недавние просмотры" value={String(recentCount)} />
-              <StatRow label="Профиль на сервере обновлён" value={formatDateTime(profileQuery.data?.updated_at ?? undefined)} />
-              <StatRow label="Локальная копия обновлена" value={formatDateTime(storedDraft.updated_at)} />
-              <StatRow label="Последний просмотр" value={latestViewed ? formatDateTime(latestViewed.viewedAt) : "Нет активности"} />
-              <div className="grid grid-cols-2 gap-2 pt-2">
-                <Link href="/favorites">
-                  <Button variant="outline" className="w-full justify-center">
-                    Избранное
-                  </Button>
-                </Link>
-                <Link href="/recently-viewed">
-                  <Button variant="outline" className="w-full justify-center">
-                    Просмотры
-                  </Button>
-                </Link>
-              </div>
-            </CardContent>
-          </Card>
-
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="flex items-center gap-2">
-                <History className="h-4 w-4 text-primary" /> Недавняя активность
-              </CardTitle>
-              <Button variant="ghost" size="sm" className="gap-1" onClick={onClearRecent} disabled={!recentItems.length}>
-                <Trash2 className="h-4 w-4" /> Очистить
-              </Button>
-            </CardHeader>
-            <CardContent>
-              {recentPreview.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Активности пока нет.</p>
-              ) : (
-                <div className="space-y-3">
-                  {recentPreview.map((item) => (
-                    <div key={item.id} className="rounded-xl border border-border p-3">
-                      <Link href={`/product/${item.slug}`} className="line-clamp-2 text-sm font-medium hover:text-primary">
-                        {item.title}
-                      </Link>
-                      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-xs text-muted-foreground">{formatDateTime(item.viewedAt)}</p>
-                        {item.minPrice != null ? <Badge className="bg-secondary/70">{formatPrice(item.minPrice)}</Badge> : null}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-
-        </div>
-
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <ShieldCheck className="h-4 w-4 text-primary" /> Безопасность
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="rounded-xl border border-border p-3">
-                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-medium">Security posture</p>
-                  <Badge className={securityScore >= 80 ? "bg-emerald-600 text-white" : securityScore >= 55 ? "bg-warning text-warning-foreground" : "bg-destructive text-destructive-foreground"}>
-                    {securityScore}/100
+                <h1 className="font-heading text-4xl font-[900] tracking-tighter">
+                  {profileForm.display_name || me.data.full_name}
+                </h1>
+                <div className="flex flex-wrap items-center gap-3">
+                  <p className="text-sm font-bold text-muted-foreground">{me.data.email}</p>
+                  <div className="h-1 w-1 rounded-full bg-border" />
+                  <Badge className="bg-primary/5 text-primary border-primary/20 px-4 py-1.5 font-black rounded-full text-[10px] uppercase shadow-none">
+                    ID: {formatShortAccountId(me.data.id)}
                   </Badge>
                 </div>
-                <div className="grid gap-2 text-xs text-muted-foreground">
-                  <p>2FA: {twoFactorEnabled ? "включена" : "выключена"}</p>
-                  <p>Активные сессии: {sessionRiskSummary.total}</p>
-                  <p>Риск-сессии: {sessionRiskSummary.highRisk}</p>
-                </div>
               </div>
-              <div className="flex items-center justify-between gap-2 rounded-xl border border-border p-3">
-                <div>
-                  <p className="text-sm font-medium">ID аккаунта</p>
-                  <p className="text-xs text-muted-foreground">{me.data.id}</p>
-                </div>
-                <Button variant="ghost" size="sm" className="gap-1" onClick={() => (me.data ? copyValue(String(me.data.id), "ID аккаунта") : undefined)}>
-                  <Copy className="h-4 w-4" /> Копировать
+              <div className="flex flex-wrap gap-2">
+                <Badge className="bg-secondary/40 px-4 py-1.5 font-black rounded-full text-[10px] uppercase shadow-none">
+                  {favoritesCount} ИЗБРАННОЕ
+                </Badge>
+                <Badge className="bg-secondary/40 px-4 py-1.5 font-black rounded-full text-[10px] uppercase shadow-none tracking-widest leading-none">
+                  {recentCount} ПРОСМОТРОВ
+                </Badge>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-3">
+            <Button variant="outline" className="h-14 rounded-2xl px-6 font-bold border-2 transition-all hover:bg-secondary" onClick={exportAccountSnapshot}>
+              <Download className="mr-2 h-5 w-5" /> Экспорт
+            </Button>
+            <Button
+              variant="destructive"
+              className="h-14 rounded-2xl px-6 font-bold shadow-xl shadow-destructive/20"
+              onClick={() => logout.mutate()}
+              disabled={logout.isPending}
+            >
+              <LogOut className="mr-2 h-5 w-5" /> {logout.isPending ? "Выход..." : "Выйти"}
+            </Button>
+          </div>
+        </div>
+      </motion.section>
+
+      {status && (
+        <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="fixed bottom-8 right-8 z-50 rounded-2xl bg-primary px-6 py-4 font-bold text-white shadow-2xl shadow-primary/40">
+          {status}
+        </motion.div>
+      )}
+
+      <div className="grid gap-10 lg:grid-cols-[1fr_400px]">
+        {/* Left Column: Essential Settings */}
+        <div className="space-y-10">
+          {/* Profile Information */}
+          <section className="space-y-6">
+            <div className="flex items-end justify-between px-4">
+              <div className="space-y-1">
+                <h2 className="text-2xl font-black italic tracking-tight">Public Profile</h2>
+                <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Основная информация</p>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" onClick={resetProfileForm} disabled={!hasDraftChanges || updateProfile.isPending} className="font-bold">
+                  Сбросить
+                </Button>
+                <Button size="sm" onClick={saveServerProfile} disabled={!hasDraftChanges || updateProfile.isPending} className="h-10 rounded-xl px-6 font-black shadow-lg shadow-primary/20">
+                  {updateProfile.isPending ? "Сохранение..." : "Сохранить изменения"}
                 </Button>
               </div>
-              <div className="flex items-center justify-between gap-2 rounded-xl border border-border p-3">
-                <div>
-                  <p className="text-sm font-medium">Email</p>
-                  <p className="text-xs text-muted-foreground">{me.data.email}</p>
-                </div>
-                <Button variant="ghost" size="sm" className="gap-1" onClick={() => (me.data ? copyValue(me.data.email, "Email") : undefined)}>
-                  <Mail className="h-4 w-4" /> Копировать
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                В API уже доступны смена пароля, управление сессиями и 2FA. Для UI-расширения можно использовать <code>docs/PROFILE_FUTURE_FEATURES.md</code>.
-              </p>
-              <div className="rounded-xl border border-border p-3 space-y-3">
-                <p className="text-sm font-medium">Change Password</p>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="group relative rounded-[2rem] border border-border/40 bg-secondary/10 p-6 transition-all hover:bg-secondary/20">
+                <label className="mb-2 block text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Отображаемое имя</label>
                 <Input
-                  type="password"
-                  placeholder="Current password"
-                  value={currentPassword}
-                  onChange={(event) => setCurrentPassword(event.target.value)}
+                  value={profileForm.display_name}
+                  onChange={(e) => onDraftFieldChange("display_name", e.target.value)}
+                  className="border-none bg-transparent p-0 text-lg font-black focus-visible:ring-0"
                 />
+                <UserRound className="absolute right-6 top-6 h-5 w-5 text-muted-foreground/20 group-hover:text-primary/40 transition-colors" />
+              </div>
+              <div className="group relative rounded-[2rem] border border-border/40 bg-secondary/10 p-6 transition-all hover:bg-secondary/20">
+                <label className="mb-2 block text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Телефон</label>
                 <Input
-                  type="password"
-                  placeholder="New password"
-                  value={newPassword}
-                  onChange={(event) => setNewPassword(event.target.value)}
+                  placeholder="+998 ..."
+                  value={profileForm.phone}
+                  onChange={(e) => onDraftFieldChange("phone", e.target.value)}
+                  className="border-none bg-transparent p-0 text-lg font-black focus-visible:ring-0"
                 />
+                <Phone className="absolute right-6 top-6 h-5 w-5 text-muted-foreground/20 group-hover:text-primary/40 transition-colors" />
+              </div>
+              <div className="group relative rounded-[2rem] border border-border/40 bg-secondary/10 p-6 transition-all hover:bg-secondary/20">
+                <label className="mb-2 block text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Город</label>
                 <Input
-                  type="password"
-                  placeholder="Confirm new password"
-                  value={confirmNewPassword}
-                  onChange={(event) => setConfirmNewPassword(event.target.value)}
+                  value={profileForm.city}
+                  onChange={(e) => onDraftFieldChange("city", e.target.value)}
+                  className="border-none bg-transparent p-0 text-lg font-black focus-visible:ring-0"
                 />
-                <div className="rounded-lg border border-border/70 p-2">
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <span className="text-xs text-muted-foreground">Password strength</span>
-                    <Badge className={newPasswordStrength.label === "strong" ? "bg-emerald-600 text-white" : newPasswordStrength.label === "medium" ? "bg-warning text-warning-foreground" : "bg-secondary text-foreground"}>
-                      {newPasswordStrength.label}
-                    </Badge>
+                <MapPin className="absolute right-6 top-6 h-5 w-5 text-muted-foreground/20 group-hover:text-primary/40 transition-colors" />
+              </div>
+              <div className="group relative rounded-[2rem] border border-border/40 bg-secondary/10 p-6 transition-all hover:bg-secondary/20">
+                <label className="mb-2 block text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Telegram</label>
+                <Input
+                  placeholder="@username"
+                  value={profileForm.telegram}
+                  onChange={(e) => onDraftFieldChange("telegram", e.target.value)}
+                  className="border-none bg-transparent p-0 text-lg font-black focus-visible:ring-0"
+                />
+                <MessageSquare className="absolute right-6 top-6 h-5 w-5 text-muted-foreground/20 group-hover:text-primary/40 transition-colors" />
+              </div>
+            </div>
+
+            <div className="group relative rounded-[2.5rem] border border-border/40 bg-secondary/10 p-8 transition-all hover:bg-secondary/20">
+              <label className="mb-4 block text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Биография</label>
+              <Textarea
+                value={profileForm.about}
+                onChange={(e) => onDraftFieldChange("about", e.target.value)}
+                placeholder="Расскажите немного о себе..."
+                className="min-h-[120px] resize-none border-none bg-transparent p-0 text-base font-bold leading-relaxed focus-visible:ring-0"
+              />
+            </div>
+          </section>
+
+          {/* Preferences */}
+          <section className="space-y-6">
+            <div className="px-4 space-y-1">
+              <h2 className="text-2xl font-black italic tracking-tight">System Preferences</h2>
+              <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Управление уведомлениями и опытом</p>
+            </div>
+            <div className="grid gap-4">
+              <PreferenceRow
+                title="Price Radar"
+                description="Алерты о снижении цены на отслеживаемые товары."
+                checked={preferences.price_drop_alerts}
+                onChange={(checked) => onPreferenceChange("price_drop_alerts", checked)}
+                icon={Activity}
+              />
+              <PreferenceRow
+                title="Stock Guardian"
+                description="Уведомления о пополнении запасов в магазинах."
+                checked={preferences.stock_alerts}
+                onChange={(checked) => onPreferenceChange("stock_alerts", checked)}
+                icon={Sparkles}
+              />
+              <PreferenceRow
+                title="Weekly Intel"
+                description="Еженедельный дайджест лучших предложений и акций."
+                checked={preferences.weekly_digest}
+                onChange={(checked) => onPreferenceChange("weekly_digest", checked)}
+                icon={Clock}
+              />
+            </div>
+          </section>
+        </div>
+
+        {/* Right Column: Security & Metrics */}
+        <div className="space-y-10">
+          {/* Security Hub */}
+          <section className="relative overflow-hidden rounded-[2.5rem] border border-border/40 bg-card p-8 shadow-xl">
+            <div className="absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r from-primary via-secondary to-primary pointer-events-none" />
+            <div className="mb-8 flex items-center justify-between">
+              <div className="space-y-1">
+                <h2 className="text-xl font-bold italic tracking-tight">Security Hub</h2>
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Защита аккаунта</p>
+              </div>
+              <div className={cn(
+                "flex h-12 w-12 items-center justify-center rounded-2xl font-black text-white shadow-lg",
+                securityScore >= 80 ? "bg-emerald-500 shadow-emerald-500/20" : securityScore >= 50 ? "bg-amber-500 shadow-amber-500/20" : "bg-destructive shadow-destructive-20"
+              )}>
+                {securityScore}
+              </div>
+            </div>
+
+            <div className="space-y-6">
+              <div className="space-y-4 rounded-3xl bg-secondary/20 p-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white shadow-sm ring-1 ring-border/20">
+                    <Fingerprint className="h-5 w-5 text-primary" />
                   </div>
-                  <div className="grid grid-cols-5 gap-1">
-                    {Array.from({ length: 5 }).map((_, index) => (
-                      <div
-                        key={index}
-                        className={index < newPasswordStrength.score ? "h-1.5 rounded bg-primary" : "h-1.5 rounded bg-secondary"}
-                      />
-                    ))}
-                  </div>
+                  <p className="text-sm font-black">2FA Status</p>
+                  <Badge className={cn("rounded-full px-4 font-black shadow-none", twoFactorEnabled ? "bg-emerald-500/10 text-emerald-600 border-none px-4" : "bg-warning/10 text-warning-foreground border-none px-4")}>
+                    {twoFactorEnabled ? "ВКЛ" : "ОТКЛ"}
+                  </Badge>
                 </div>
-                <div className="flex items-center justify-between gap-2 rounded-lg border border-border/70 p-2">
-                  <span className="text-xs text-muted-foreground">Revoke other sessions after password change</span>
-                  <Switch checked={revokeOtherSessionsOnPasswordChange} onCheckedChange={setRevokeOtherSessionsOnPasswordChange} />
-                </div>
-                <Button
-                  size="sm"
-                  onClick={onChangePassword}
-                  disabled={changePasswordMutation.isPending || !currentPassword || !newPassword || !confirmNewPassword}
-                >
-                  {changePasswordMutation.isPending ? "Updating..." : "Update Password"}
-                </Button>
+                {!twoFactorEnabled ? (
+                  <Button size="sm" onClick={onStartTwoFactorSetup} className="h-10 w-full rounded-xl font-black shadow-lg shadow-primary/20">
+                    Настроить 2FA
+                  </Button>
+                ) : (
+                  <Button variant="ghost" size="sm" onClick={onDisableTwoFactor} className="h-10 w-full rounded-xl font-bold text-muted-foreground">
+                    Отключить 2FA
+                  </Button>
+                )}
               </div>
 
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between gap-2">
-              <CardTitle className="text-sm font-semibold">Two-Factor Authentication (2FA)</CardTitle>
-              <Badge className={twoFactorEnabled ? "bg-emerald-600 text-white" : "bg-secondary text-foreground"}>
-                {twoFactorEnabled ? "Enabled" : "Disabled"}
-              </Badge>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {!twoFactorEnabled ? (
-                <Button size="sm" onClick={onStartTwoFactorSetup} disabled={setupTwoFactorMutation.isPending}>
-                  {setupTwoFactorMutation.isPending ? "Preparing..." : "Enable 2FA"}
-                </Button>
-              ) : (
-                <Button variant="outline" size="sm" onClick={onDisableTwoFactor} disabled={disableTwoFactorMutation.isPending}>
-                  {disableTwoFactorMutation.isPending ? "Disabling..." : "Disable 2FA"}
-                </Button>
-              )}
-              {twoFactorSetupPayload ? (
-                <div className="space-y-3">
-                  <div className="space-y-2 rounded-lg border border-border/70 p-3">
-                    <p className="text-sm font-medium">1. Scan QR code</p>
-                    <p className="text-xs text-muted-foreground">Open Google/Microsoft Authenticator and scan the QR.</p>
-                    <div
-                      className="overflow-hidden rounded-md bg-white p-2 [&>svg]:mx-auto [&>svg]:block [&>svg]:h-auto [&>svg]:max-w-full"
-                      dangerouslySetInnerHTML={{ __html: twoFactorSetupPayload.qr_svg }}
-                    />
-                  </div>
-
-                  <div className="space-y-2 rounded-lg border border-border/70 p-3">
-                    <p className="text-sm font-medium">2. Enter one-time code</p>
-                    <Input
-                      placeholder="One-time code"
-                      inputMode="numeric"
-                      value={twoFactorCode}
-                      onChange={(event) => setTwoFactorCode(event.target.value)}
-                    />
-                    <Button size="sm" onClick={onVerifyTwoFactorSetup} disabled={verifyTwoFactorMutation.isPending || !twoFactorCode.trim()}>
-                      {verifyTwoFactorMutation.isPending ? "Verifying..." : "Verify and Enable"}
-                    </Button>
-                  </div>
-
-                  <div className="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-medium">3. Recovery codes will be shown after verification</p>
+              {twoFactorSetupPayload && (
+                <div className="space-y-4 pt-2">
+                  <div className="rounded-3xl border-2 border-primary/20 bg-primary/5 p-6 space-y-4">
+                    <div className="mx-auto flex h-40 w-40 items-center justify-center rounded-2xl bg-white p-4 shadow-inner" dangerouslySetInnerHTML={{ __html: twoFactorSetupPayload.qr_svg }} />
+                    <div className="space-y-2">
+                      <Input placeholder="6-значный код..." inputMode="numeric" value={twoFactorCode} onChange={(e) => setTwoFactorCode(e.target.value)} className="h-12 rounded-2xl border-none bg-white shadow-inner font-black text-center tracking-[0.5em] text-lg" />
+                      <Button size="sm" onClick={onVerifyTwoFactorSetup} className="h-12 w-full rounded-2xl font-black shadow-xl shadow-primary/20">
+                        Подтвердить и активировать
+                      </Button>
                     </div>
-                    <p className="text-xs text-muted-foreground">After "Verify and Enable" you will see codes in a separate modal window.</p>
                   </div>
                 </div>
-              ) : null}
-            </CardContent>
-          </Card>
+              )}
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between gap-2">
-              <CardTitle className="text-sm font-semibold">Active Sessions</CardTitle>
-              <Button variant="outline" size="sm" onClick={onRevokeOtherSessions} disabled={revokeOtherSessionsMutation.isPending}>
-                {revokeOtherSessionsMutation.isPending ? "Revoking..." : "Revoke Others"}
-              </Button>
-            </CardHeader>
-            <CardContent>
-              {sessionsQuery.isLoading ? (
-                <p className="text-xs text-muted-foreground">Loading sessions...</p>
-              ) : sessionsQuery.data && sessionsQuery.data.length ? (
+              <div className="space-y-4">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60 text-center">Active Sessions</p>
                 <div className="space-y-2">
-                  {sessionsQuery.data.map((session) => (
-                    <div key={session.id} className="rounded-lg border border-border/70 p-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="text-xs font-medium">{session.device}</p>
-                            {isHighRiskSession(session) ? <Badge className="bg-warning text-warning-foreground">Risk</Badge> : <Badge className="bg-emerald-600 text-white">Safe</Badge>}
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            {session.ip_address} | {session.location}
-                          </p>
-                          <p className="text-[11px] text-muted-foreground">
-                            Last seen: {formatDateTime(session.last_seen_at)}
-                            {session.is_current ? " (current)" : ""}
-                          </p>
-                        </div>
-                        {!session.is_current ? (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => onRevokeSession(session.id)}
-                            disabled={revokeSessionMutation.isPending}
-                          >
-                            Revoke
-                          </Button>
-                        ) : (
-                          <Badge>Current</Badge>
-                        )}
+                  {sessionsQuery.data?.slice(0, 3).map((session) => (
+                    <div key={session.id} className="flex items-center justify-between rounded-2xl border border-border/30 bg-background/50 p-4 transition-all hover:border-primary/20">
+                      <div className="space-y-1">
+                        <p className="text-xs font-black">{session.device} {session.is_current && <span className="text-[10px] text-primary">(текущая)</span>}</p>
+                        <p className="text-[10px] font-medium text-muted-foreground">{session.ip_address} · {session.location}</p>
                       </div>
+                      {!session.is_current && (
+                        <button onClick={() => onRevokeSession(session.id)} className="text-muted-foreground/40 hover:text-destructive transition-colors">
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
                     </div>
                   ))}
+                  {sessionsQuery.data && sessionsQuery.data.length > 3 && (
+                    <Button variant="ghost" className="w-full text-[10px] font-black uppercase text-primary">Показать все сессии</Button>
+                  )}
                 </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">No active sessions found.</p>
-              )}
-            </CardContent>
-          </Card>
+              </div>
+            </div>
+          </section>
+
+          {/* Metrics & Identity */}
+          <section className="rounded-[2.5rem] bg-secondary/10 p-8 space-y-6">
+            <div className="space-y-1">
+              <h2 className="text-lg font-bold italic tracking-tight">Identity Vault</h2>
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Квалификационные данные</p>
+            </div>
+            <div className="space-y-1">
+              <StatRow label="Account Email" value={me.data.email} icon={Mail} />
+              <StatRow label="Account Status" value="Verified" icon={ShieldCheck} />
+              <StatRow label="Language" value="Russian (RU)" icon={Globe} />
+              <StatRow label="Timezone" value="Asia/Tashkent" icon={Clock} />
+            </div>
+
+            <div className="pt-4 grid grid-cols-2 gap-3">
+              <div className="rounded-2xl bg-white p-4 shadow-sm border border-border/20 text-center">
+                <p className="text-[10px] font-black uppercase text-muted-foreground/60 mb-1 leading-none">Избранное</p>
+                <p className="text-2xl font-black italic text-primary">{favoritesCount}</p>
+              </div>
+              <div className="rounded-2xl bg-white p-4 shadow-sm border border-border/20 text-center">
+                <p className="text-[10px] font-black uppercase text-muted-foreground/60 mb-1 leading-none">Недавнее</p>
+                <p className="text-2xl font-black italic text-secondary-foreground">{recentCount}</p>
+              </div>
+            </div>
+          </section>
+
+          <div className="rounded-[2.5rem] bg-gradient-to-br from-primary to-secondary p-8 text-white shadow-2xl">
+            <h3 className="text-xl font-black italic tracking-tight mb-2">Need Assistance?</h3>
+            <p className="text-xs font-bold opacity-80 mb-6 leading-relaxed">Наша команда поддержки готова помочь вам в любое время дня и ночи.</p>
+            <Button className="h-12 w-full rounded-2xl bg-white text-primary font-black hover:bg-white/90 shadow-lg shadow-black/10 transition-colors">
+              Связаться с нами
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -901,27 +801,28 @@ export function ProfileClient() {
         onOpenChange={setRecoveryCodesModalOpen}
         title="Recovery codes"
         footer={
-          <Button size="sm" onClick={() => setRecoveryCodesModalOpen(false)}>
+          <Button size="sm" onClick={() => setRecoveryCodesModalOpen(false)} className="rounded-xl font-bold px-6">
             I saved these codes
           </Button>
         }
       >
-        <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">
-            Save these recovery codes in a safe place. Each code can be used once if you lose access to your authenticator app.
-          </p>
-          <div className="grid grid-cols-1 gap-1 text-xs sm:grid-cols-2">
+        <div className="space-y-6">
+          <div className="flex items-center gap-4 rounded-2xl bg-amber-500/10 p-4 border border-amber-500/20">
+            <Key className="h-6 w-6 text-amber-600" />
+            <p className="text-xs font-bold text-amber-800 leading-relaxed">
+              Сохраните эти коды восстановления в надежном месте. Каждый код можно использовать один раз, если вы потеряете доступ к приложению аутентификации.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
             {latestRecoveryCodes.map((code) => (
-              <code key={code} className="rounded bg-secondary px-2 py-1">
+              <code key={code} className="rounded-xl bg-secondary/40 px-4 py-3 text-center text-xs font-black tracking-widest">
                 {code}
               </code>
             ))}
           </div>
-          <div className="flex justify-end">
-            <Button type="button" variant="outline" size="sm" onClick={() => copyValue(latestRecoveryCodes.join("\n"), "Recovery codes")}>
-              Copy codes
-            </Button>
-          </div>
+          <Button variant="outline" className="w-full h-12 rounded-xl font-bold" onClick={() => copyValue(latestRecoveryCodes.join("\n"), "Recovery codes")}>
+            <Copy className="mr-2 h-4 w-4" /> Скопировать все коды
+          </Button>
         </div>
       </Modal>
     </div>
@@ -932,29 +833,41 @@ function PreferenceRow({
   title,
   description,
   checked,
-  onChange
+  onChange,
+  icon: Icon
 }: {
   title: string;
   description: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
+  icon?: any;
 }) {
   return (
-    <div className="flex items-start justify-between gap-3 rounded-xl border border-border p-3">
-      <div className="space-y-1">
-        <p className="text-sm font-medium">{title}</p>
-        <p className="text-xs text-muted-foreground">{description}</p>
+    <div className="group flex items-center justify-between gap-4 rounded-2xl border border-border/40 bg-secondary/10 p-4 transition-all hover:bg-secondary/20">
+      <div className="flex items-center gap-4">
+        {Icon && (
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white shadow-sm ring-1 ring-border/20">
+            <Icon className="h-5 w-5 text-primary/80" />
+          </div>
+        )}
+        <div className="space-y-0.5">
+          <p className="text-sm font-black tracking-tight">{title}</p>
+          <p className="text-xs font-bold text-muted-foreground leading-none">{description}</p>
+        </div>
       </div>
       <Switch checked={checked} onCheckedChange={onChange} />
     </div>
   );
 }
 
-function StatRow({ label, value }: { label: string; value: string }) {
+function StatRow({ label, value, icon: Icon }: { label: string; value: string; icon?: any }) {
   return (
-    <div className="flex items-center justify-between gap-2 border-b border-border/70 pb-2 last:border-none last:pb-0">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <span className="text-right text-sm font-medium">{value}</span>
+    <div className="flex items-center justify-between py-3 border-b border-border/30 last:border-none">
+      <div className="flex items-center gap-2">
+        {Icon && <Icon className="h-3.5 w-3.5 text-muted-foreground/60" />}
+        <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">{label}</span>
+      </div>
+      <span className="text-xs font-bold">{value}</span>
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { ShoppingBag } from "lucide-react";
 import Link from "next/link";
 
 const footerColumns = [
@@ -40,22 +41,39 @@ export function SiteFooter() {
   const currentYear = new Date().getUTCFullYear();
 
   return (
-    <footer className="mt-20 border-t border-border/80 bg-background/70 py-10 backdrop-blur">
-      <div className="container space-y-8">
-        <div className="grid gap-6 md:grid-cols-[1.4fr_repeat(4,minmax(0,1fr))]">
-          <div className="space-y-2">
-            <p className="font-heading text-xl font-extrabold tracking-tight">Doxx</p>
-            <p className="text-sm text-muted-foreground">Строгое и прозрачное сравнение цен по проверенным магазинам.</p>
-            <p className="text-xs text-muted-foreground">Актуальные офферы, история стоимости и удобный выбор техники в одном месте.</p>
+    <footer className="mt-32 border-t border-border/50 bg-secondary/20 py-20 backdrop-blur-sm">
+      <div className="container space-y-16">
+        <div className="grid gap-12 md:grid-cols-2 lg:grid-cols-5">
+          <div className="lg:col-span-2 space-y-6">
+            <Link href="/" className="flex items-center gap-2 font-heading text-2xl font-[900] tracking-tighter">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary shadow-lg shadow-primary/20">
+                <ShoppingBag className="h-4 w-4 text-white" />
+              </div>
+              <span className="bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">Doxx</span>
+            </Link>
+            <p className="max-w-xs text-sm leading-relaxed text-muted-foreground">
+              Умный агрегатор цен и характеристик. Мы помогаем делать осознанный выбор среди сотен магазинов, экономя ваше время и бюджет.
+            </p>
+            <div className="flex gap-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-background border border-border/50 hover:bg-primary hover:text-white transition-all cursor-pointer hover:-translate-y-1">
+                𝕏
+              </div>
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-background border border-border/50 hover:bg-primary hover:text-white transition-all cursor-pointer hover:-translate-y-1">
+                ✈️
+              </div>
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-background border border-border/50 hover:bg-primary hover:text-white transition-all cursor-pointer hover:-translate-y-1">
+                📱
+              </div>
+            </div>
           </div>
 
           {footerColumns.map((column) => (
-            <div key={column.title} className="space-y-2">
-              <p className="text-sm font-semibold">{column.title}</p>
-              <ul className="space-y-1.5 text-sm text-muted-foreground">
+            <div key={column.title} className="space-y-4">
+              <p className="text-[10px] font-[900] uppercase tracking-widest text-muted-foreground">{column.title}</p>
+              <ul className="space-y-3 text-sm text-muted-foreground">
                 {column.links.map((item) => (
                   <li key={item.href}>
-                    <Link href={item.href} className="transition-colors hover:text-foreground">
+                    <Link href={item.href} className="transition-all hover:text-primary hover:translate-x-1 inline-block">
                       {item.label}
                     </Link>
                   </li>
@@ -65,9 +83,18 @@ export function SiteFooter() {
           ))}
         </div>
 
-        <div className="flex flex-col gap-2 border-t border-border/80 pt-4 text-xs text-muted-foreground md:flex-row md:items-center md:justify-between">
-          <p>{currentYear} Doxx. Все права защищены.</p>
-          <p>Данные по ценам агрегируются автоматически и обновляются регулярно.</p>
+        <div className="flex flex-col gap-6 border-t border-border/50 pt-8 md:flex-row md:items-center md:justify-between text-xs text-muted-foreground">
+          <div className="space-y-1">
+            <p className="font-bold text-foreground opacity-70">© {currentYear} Doxx Technology Group.</p>
+            <p>Дизайн и разработка в стиле Premium SaaS Interface.</p>
+          </div>
+          <div className="flex flex-wrap gap-x-6 gap-y-2">
+            <span>Powered by Smart Algorithms</span>
+            <span className="flex items-center gap-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              Service Status: Online
+            </span>
+          </div>
         </div>
       </div>
     </footer>

@@ -1,7 +1,8 @@
 "use client";
 
 import { useQueries } from "@tanstack/react-query";
-import { ShieldCheck, Sparkles, TimerReset, TrendingUp } from "lucide-react";
+import { motion } from "framer-motion";
+import { ArrowRight, ShieldCheck, Sparkles, TimerReset, TrendingUp } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo } from "react";
 
@@ -9,13 +10,13 @@ import { CatalogGrid } from "@/components/catalog/catalog-grid";
 import { PriceAlertBadge } from "@/components/common/price-alert-badge";
 import { SectionHeading } from "@/components/common/section-heading";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
 import { useAuthMe } from "@/features/auth/use-auth";
 import { useCatalogProducts, useCategories } from "@/features/catalog/use-catalog-queries";
 import { useFavorites } from "@/features/user/use-favorites";
 import { catalogApi } from "@/lib/api/openapi-client";
 import { buildPriceAlertSignal, toPositivePriceOrNull } from "@/lib/utils/price-alerts";
 import { formatPrice } from "@/lib/utils/format";
+import { cn } from "@/lib/utils/cn";
 import { usePriceAlertsStore } from "@/store/priceAlerts.store";
 import { useRecentlyViewedStore } from "@/store/recentlyViewed.store";
 
@@ -23,56 +24,65 @@ const trustItems = [
   {
     icon: ShieldCheck,
     title: "Проверенные магазины",
-    description: "Работаем с доверенными источниками и показываем прозрачные офферы."
+    description: "Работаем только с доверенными партнерами для вашей безопасности.",
+    color: "text-blue-500"
   },
   {
     icon: TimerReset,
-    title: "Актуализация цен",
-    description: "Регулярно обновляем прайс-данные, чтобы выбор был ближе к реальности."
+    title: "Цены в реальном времени",
+    description: "Данные обновляются каждые 15 минут, чтобы вы не упустили выгоду.",
+    color: "text-amber-500"
   },
   {
     icon: Sparkles,
-    title: "Умное сравнение",
-    description: "Быстро сравнивайте цену, характеристики и доступность в одном интерфейсе."
+    title: "Умные алгоритмы",
+    description: "Искусственный интеллект помогает найти лучшее сочетание цены и качества.",
+    color: "text-purple-500"
   }
 ];
 
 const encyclopediaSections = [
   {
-    title: "Как выбрать смартфон",
-    description: "Разбор ключевых параметров: камера, экран, автономность, производительность.",
-    href: "/catalog?q=смартфон"
+    title: "Как выбрать идеальный смартфон",
+    description: "Разбор ключевых параметров: от матрицы экрана до светосилы камер.",
+    href: "/catalog?q=смартфон",
+    image: "📱"
   },
   {
-    title: "Гид по ноутбукам",
-    description: "Для учебы, работы и игр: что важно в CPU, RAM, накопителе и экране.",
-    href: "/catalog?q=ноутбук"
+    title: "Гид по современным ноутбукам",
+    description: "Для работы, творчества и игр: подбираем оптимальное железо под ваши задачи.",
+    href: "/catalog?q=ноутбук",
+    image: "💻"
   },
   {
-    title: "Наушники и звук",
-    description: "Сравнение TWS, полноразмерных моделей, шумоподавления и кодеков.",
-    href: "/catalog?q=наушники"
+    title: "Мир Hi-Fi звука и TWS",
+    description: "Сравнение кодеков, драйверов и систем активного шумоподавления.",
+    href: "/catalog?q=наушники",
+    image: "🎧"
   }
 ];
 
 const editorialSelections = [
   {
-    title: "Топ смартфонов до 8 млн",
-    description: "Подборка моделей с лучшим балансом камеры, автономности и производительности.",
-    href: "/catalog?q=смартфон&max_price=8000000&sort=price_asc",
-    tag: "Подборка"
+    title: "Флагманы 2026: Битва титанов",
+    description: "Честное сравнение топовых моделей года по всем характеристикам.",
+    href: "/catalog?q=смартфон&max_price=15000000&sort=popular",
+    tag: "Подборка",
+    gradient: "from-blue-500/10 to-cyan-500/10"
   },
   {
-    title: "Ноутбуки для учебы 2026",
-    description: "Легкие и надежные модели с хорошей автономностью и комфортной клавиатурой.",
-    href: "/catalog?q=ноутбук+для+учебы&sort=popular",
-    tag: "Гид"
+    title: "Рабочие станции для PRO",
+    description: "Выбор профессионалов для монтажа 8K и тяжелого 3D-рендеринга.",
+    href: "/catalog?q=ноутбук+для+работы&sort=popular",
+    tag: "Гид",
+    gradient: "from-purple-500/10 to-pink-500/10"
   },
   {
-    title: "Игровые решения месяца",
-    description: "Актуальные устройства с акцентом на производительность и охлаждение.",
-    href: "/catalog?q=игровой&sort=popular",
-    tag: "Тренд"
+    title: "Бюджетный гейминг: Миф или реальность?",
+    description: "Собираем игровой сетап, который не ударит по карману, но потянет хиты.",
+    href: "/catalog?q=игровой&sort=price_asc",
+    tag: "Тренд",
+    gradient: "from-orange-500/10 to-red-500/10"
   }
 ];
 
@@ -190,173 +200,343 @@ export function HomeClient() {
     return suggestions;
   }, [brands, categories.data]);
 
+  const fadeUp = { hidden: { opacity: 0, y: 30 }, visible: { opacity: 1, y: 0 } };
+
   return (
-    <div className="container space-y-12 py-6">
-      <section className="relative overflow-hidden rounded-2xl border border-border/80 bg-card p-8 shadow-soft">
-        <div className="pointer-events-none absolute right-0 top-0 h-64 w-64 rounded-full bg-primary/20 blur-3xl" />
-        <div className="pointer-events-none absolute bottom-0 left-0 h-40 w-40 rounded-full bg-accent/20 blur-3xl" />
+    <div className="container space-y-24 py-12">
+      {/* ── Hero ────────────────────────────────────────────────── */}
+      <motion.section
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.7 }}
+        className="relative min-h-[540px] overflow-hidden rounded-[3rem] border border-border/40 bg-card p-1 shadow-2xl"
+      >
+        {/* Decorative orbs */}
+        <div className="pointer-events-none absolute -right-32 -top-32 h-[420px] w-[420px] rounded-full bg-primary/10 blur-[120px]" />
+        <div className="pointer-events-none absolute -bottom-32 -left-32 h-[420px] w-[420px] rounded-full bg-accent/10 blur-[120px]" />
+        <div className="pointer-events-none absolute left-1/2 top-1/2 h-[500px] w-[500px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary/5 blur-[140px]" />
 
-        <Badge className="mb-4 w-fit border-primary/30 bg-primary/15 text-primary">Doxx</Badge>
-        <h1 className="max-w-3xl text-3xl font-extrabold tracking-tight md:text-5xl">Сравнивайте цены на технику по проверенным магазинам за пару кликов.</h1>
-        <p className="mt-4 max-w-2xl text-muted-foreground">
-          Единый каталог, прозрачные предложения, история стоимости и удобные инструменты для взвешенной покупки.
-        </p>
-        <div className="mt-6 flex flex-wrap gap-3">
-          <Link href="/catalog" className="rounded-2xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-soft">
-            Перейти в каталог
-          </Link>
-          <Link href="/compare" className="rounded-2xl border border-border bg-background/80 px-5 py-3 text-sm font-semibold">
-            Открыть сравнение
-          </Link>
+        <div className="relative z-10 flex flex-col items-center px-8 py-20 text-center md:px-16 md:py-28">
+          <Badge className="mb-8 rounded-full border-primary/20 bg-primary/10 px-5 py-2 text-sm font-black uppercase tracking-widest text-primary backdrop-blur-sm shadow-none">
+            E-katalog Premium
+          </Badge>
+
+          <h1 className="max-w-5xl font-heading text-4xl font-[900] italic leading-[1.05] tracking-tighter md:text-7xl">
+            Умное сравнение цен для{" "}
+            <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
+              идеальных покупок.
+            </span>
+          </h1>
+
+          <p className="mt-10 max-w-2xl text-lg font-bold leading-relaxed text-muted-foreground md:text-xl">
+            Мы агрегируем тысячи предложений от проверенных магазинов, чтобы вы могли сэкономить время и деньги, выбирая лучшее.
+          </p>
+
+          <div className="mt-14 flex flex-col items-center justify-center gap-4 sm:flex-row">
+            <Link
+              href="/catalog"
+              className="group relative inline-flex h-16 items-center justify-center overflow-hidden rounded-2xl bg-primary px-12 py-4 font-black text-primary-foreground shadow-xl shadow-primary/30 transition-all hover:scale-105 hover:shadow-2xl hover:shadow-primary/40 active:scale-100"
+            >
+              <span className="relative z-10 flex items-center gap-2">
+                Начать поиск <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
+              </span>
+              <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/15 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
+            </Link>
+            <Link
+              href="/compare"
+              className="inline-flex h-16 items-center justify-center rounded-2xl border-2 border-border bg-background/50 px-12 py-4 font-black backdrop-blur-sm transition-all hover:border-primary/30 hover:bg-secondary hover:shadow-lg"
+            >
+              Таблица сравнения
+            </Link>
+          </div>
         </div>
-      </section>
+      </motion.section>
 
-      <section className="grid gap-4 md:grid-cols-3">
-        {trustItems.map((item) => (
-          <Card key={item.title}>
-            <CardContent className="space-y-3 p-5">
-              <item.icon className="h-5 w-5 text-primary" />
-              <h3 className="font-heading text-base font-bold">{item.title}</h3>
-              <p className="text-sm text-muted-foreground">{item.description}</p>
-            </CardContent>
-          </Card>
+      {/* ── Trust Bar ──────────────────────────────────────────── */}
+      <motion.section
+        variants={fadeUp}
+        initial="hidden"
+        whileInView="visible"
+        viewport={{ once: true, amount: 0.3 }}
+        transition={{ duration: 0.5 }}
+        className="grid overflow-hidden rounded-[2.5rem] border border-border/40 bg-card/60 backdrop-blur-sm md:grid-cols-3"
+      >
+        {trustItems.map((item, idx) => (
+          <div
+            key={item.title}
+            className={cn(
+              "group flex flex-col items-start gap-5 p-10 transition-all hover:bg-card/80",
+              idx !== trustItems.length - 1 && "md:border-r border-border/40"
+            )}
+          >
+            <div className={cn("rounded-2xl p-4 shadow-sm ring-1 ring-border/20 transition-transform group-hover:scale-110", item.color, "bg-background")}>
+              <item.icon className="h-7 w-7" />
+            </div>
+            <div className="space-y-2">
+              <h3 className="font-heading text-lg font-black tracking-tight">{item.title}</h3>
+              <p className="text-sm font-medium leading-relaxed text-muted-foreground">{item.description}</p>
+            </div>
+          </div>
         ))}
-      </section>
+      </motion.section>
 
-      <section>
+      {/* ── Trending Products ──────────────────────────────────── */}
+      <motion.section
+        variants={fadeUp}
+        initial="hidden"
+        whileInView="visible"
+        viewport={{ once: true, amount: 0.2 }}
+        transition={{ duration: 0.5 }}
+      >
         <SectionHeading title="Популярные товары" description="Чаще всего просматривают за последние дни" action={<TrendingUp className="h-5 w-5 text-primary" />} />
         <CatalogGrid loading={trending.isLoading} items={trending.data?.items ?? []} />
-      </section>
+      </motion.section>
 
+      {/* ── Watchlist Price Drops ───────────────────────────────── */}
       {showWatchlistTeaser ? (
-        <section className="rounded-2xl border border-border/80 bg-card/90 p-5 shadow-soft">
-          <SectionHeading title="Снижения цен по вашему списку отслеживания" description="Локальные алерты на базе избранного и текущих минимальных цен." />
-          <div className="grid gap-3 md:grid-cols-2">
+        <motion.section
+          variants={fadeUp}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, amount: 0.2 }}
+          transition={{ duration: 0.5 }}
+          className="relative overflow-hidden rounded-[2.5rem] border border-primary/20 bg-card/90 p-8 shadow-xl md:p-10"
+        >
+          <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-primary/10 blur-3xl" />
+          <SectionHeading title="Снижения цен по вашему списку" description="Алерты на базе избранного и текущих минимальных цен." />
+          <div className="grid gap-4 md:grid-cols-2">
             {priceDropItems.map((item) => (
-              <Link key={item.id} href={`/product/${item.slug}`} className="rounded-xl border border-border/80 bg-background/70 p-4 transition-colors hover:bg-secondary/50">
-                <div className="mb-2 flex flex-wrap items-center gap-2">
+              <Link
+                key={item.id}
+                href={`/product/${item.slug}`}
+                className="group rounded-[2rem] border border-border/40 bg-background/60 p-6 transition-all hover:border-primary/30 hover:bg-secondary/30 hover:shadow-lg"
+              >
+                <div className="mb-3 flex flex-wrap items-center gap-3">
                   <PriceAlertBadge signal={item.signal} />
-                  <Badge>{item.signal.drop_pct.toFixed(1)}%</Badge>
+                  <Badge className="rounded-full bg-primary/10 px-3 py-1 font-black text-primary shadow-none">{item.signal.drop_pct.toFixed(1)}%</Badge>
                 </div>
-                <p className="line-clamp-2 text-sm font-semibold">{item.title}</p>
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="line-clamp-2 text-sm font-black leading-snug group-hover:text-primary transition-colors">{item.title}</p>
+                <p className="mt-2 text-xs font-bold text-muted-foreground">
                   Текущая цена: {item.currentPrice != null ? formatPrice(item.currentPrice) : "нет данных"}
                 </p>
               </Link>
             ))}
           </div>
-        </section>
+        </motion.section>
       ) : null}
 
-      <section>
+      {/* ── Categories ─────────────────────────────────────────── */}
+      <motion.section
+        variants={fadeUp}
+        initial="hidden"
+        whileInView="visible"
+        viewport={{ once: true, amount: 0.2 }}
+        transition={{ duration: 0.5 }}
+      >
         <SectionHeading title="Категории" description="Быстрый переход к основным разделам каталога" />
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
-          {(categories.data ?? []).slice(0, 12).map((category) => (
-            <Link key={category.id} href={`/category/${category.slug}`}>
-              <Card className="h-full transition-colors hover:border-primary/50">
-                <CardContent className="p-4 text-sm font-semibold">{category.name}</CardContent>
-              </Card>
+        <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+          {(categories.data ?? []).slice(0, 12).map((category, idx) => (
+            <Link key={category.id} href={`/category/${category.slug}`} className="group relative">
+              <div className="flex h-full flex-col items-center justify-center rounded-[2rem] border border-border/40 bg-card/60 p-6 text-center backdrop-blur-sm transition-all hover:border-primary/40 hover:bg-card hover:shadow-xl hover:-translate-y-1">
+                <div className={cn(
+                  "mb-4 flex h-16 w-16 items-center justify-center rounded-2xl text-2xl font-black text-white shadow-lg transition-transform group-hover:scale-110",
+                  ["bg-gradient-to-br from-blue-500 to-blue-600", "bg-gradient-to-br from-purple-500 to-purple-600", "bg-gradient-to-br from-amber-500 to-amber-600", "bg-gradient-to-br from-emerald-500 to-emerald-600", "bg-gradient-to-br from-rose-500 to-rose-600", "bg-gradient-to-br from-indigo-500 to-indigo-600"][idx % 6]
+                )}>
+                  {category.name.charAt(0)}
+                </div>
+                <span className="text-sm font-black leading-tight tracking-tight group-hover:text-primary transition-colors">
+                  {category.name}
+                </span>
+              </div>
             </Link>
           ))}
         </div>
-      </section>
+      </motion.section>
 
+      {/* ── Category Pulse Ratings ─────────────────────────────── */}
       {categoryPulse.length ? (
-        <section>
+        <motion.section
+          variants={fadeUp}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, amount: 0.2 }}
+          transition={{ duration: 0.5 }}
+        >
           <SectionHeading title="Рейтинг категорий" description="Оценка интереса и насыщенности предложений по популярным товарам." />
-          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {categoryPulse.map((item) => (
-              <Card key={item.category}>
-                <CardContent className="space-y-2 p-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-semibold">{item.category}</p>
-                    <Badge className="border-primary/40 bg-primary/15 text-primary">{item.score.toFixed(1)} / 5</Badge>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
+              <div key={item.category} className="rounded-[2rem] border border-border/40 bg-card/60 p-6 backdrop-blur-sm transition-all hover:bg-card hover:shadow-lg">
+                <div className="mb-4 flex items-center justify-between gap-2">
+                  <p className="text-sm font-black tracking-tight">{item.category}</p>
+                  <Badge className="rounded-full border-primary/30 bg-primary/10 px-3 py-1 font-black text-primary shadow-none">{item.score.toFixed(1)} / 5</Badge>
+                </div>
+                {/* Visual score bar */}
+                <div className="mb-4 h-2 overflow-hidden rounded-full bg-secondary/60">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-primary to-accent transition-all"
+                    style={{ width: `${(item.score / 5) * 100}%` }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs font-bold text-muted-foreground">
                     В среднем {item.coverage.toFixed(1)} магазина на товар.
                   </p>
-                  <p className="text-xs text-muted-foreground">
-                    {item.avgPrice != null ? `Средняя минимальная цена: ${formatPrice(item.avgPrice)}` : "Цена уточняется"}
+                  <p className="text-xs font-bold text-muted-foreground">
+                    {item.avgPrice != null ? `Средняя мин. цена: ${formatPrice(item.avgPrice)}` : "Цена уточняется"}
                   </p>
-                  <p className="text-xs text-muted-foreground">Основано на {item.sampleSize} карточках в трендах.</p>
-                </CardContent>
-              </Card>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/50">
+                    Основано на {item.sampleSize} карточках
+                  </p>
+                </div>
+              </div>
             ))}
           </div>
-        </section>
+        </motion.section>
       ) : null}
 
+      {/* ── Popular Queries ────────────────────────────────────── */}
       {popularRequests.length ? (
-        <section>
+        <motion.section
+          variants={fadeUp}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, amount: 0.3 }}
+          transition={{ duration: 0.5 }}
+        >
           <SectionHeading title="Популярные запросы" description="Быстрые сценарии поиска, которыми часто пользуются покупатели." />
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-3">
             {popularRequests.map((item) => (
-              <Link key={item.label} href={item.href} className="rounded-2xl border border-border bg-card px-4 py-2 text-sm transition-colors hover:border-primary/50 hover:bg-secondary/40">
+              <Link
+                key={item.label}
+                href={item.href}
+                className="rounded-full border border-border/60 bg-card/60 px-5 py-2.5 text-sm font-bold backdrop-blur-sm transition-all hover:border-primary/40 hover:bg-primary/10 hover:text-primary hover:shadow-md"
+              >
                 {item.label}
               </Link>
             ))}
           </div>
-        </section>
+        </motion.section>
       ) : null}
 
-      <section>
+      {/* ── Encyclopedia ───────────────────────────────────────── */}
+      <motion.section
+        variants={fadeUp}
+        initial="hidden"
+        whileInView="visible"
+        viewport={{ once: true, amount: 0.2 }}
+        transition={{ duration: 0.5 }}
+        className="rounded-[2.5rem] bg-secondary/20 px-8 py-14 md:px-14"
+      >
         <SectionHeading title="Энциклопедия выбора" description="Короткие тематические гиды для более осознанной покупки." />
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="mt-10 grid gap-5 md:grid-cols-3">
           {encyclopediaSections.map((section) => (
             <Link key={section.title} href={section.href}>
-              <Card className="h-full transition-colors hover:border-primary/50">
-                <CardContent className="space-y-2 p-4">
-                  <p className="text-sm font-semibold">{section.title}</p>
-                  <p className="text-xs text-muted-foreground">{section.description}</p>
-                </CardContent>
-              </Card>
+              <div className="group h-full overflow-hidden rounded-[2rem] border border-border/40 bg-card/80 transition-all hover:-translate-y-2 hover:border-primary/40 hover:shadow-2xl">
+                <div className="flex h-36 items-center justify-center bg-gradient-to-br from-secondary/60 to-secondary/30 text-6xl transition-transform group-hover:scale-110">
+                  {section.image}
+                </div>
+                <div className="space-y-3 p-7">
+                  <h3 className="font-heading text-lg font-black tracking-tight group-hover:text-primary transition-colors">{section.title}</h3>
+                  <p className="text-sm font-medium leading-relaxed text-muted-foreground">{section.description}</p>
+                  <p className="flex items-center gap-1 text-xs font-black uppercase tracking-widest text-primary opacity-0 transition-opacity group-hover:opacity-100">
+                    Читать гид <ArrowRight className="h-3 w-3" />
+                  </p>
+                </div>
+              </div>
             </Link>
           ))}
         </div>
-      </section>
+      </motion.section>
 
-      <section>
-        <SectionHeading title="Редакционные подборки" description="Кураторские сценарии выбора: что смотреть в первую очередь в популярных сегментах." />
-        <div className="grid gap-3 md:grid-cols-3">
+      {/* ── Editorial Selections ───────────────────────────────── */}
+      <motion.section
+        variants={fadeUp}
+        initial="hidden"
+        whileInView="visible"
+        viewport={{ once: true, amount: 0.2 }}
+        transition={{ duration: 0.5 }}
+      >
+        <SectionHeading title="Редакционные подборки" description="Кураторские сценарии выбора: что смотреть в первую очередь." />
+        <div className="mt-10 grid gap-6 md:grid-cols-3">
           {editorialSelections.map((item) => (
             <Link key={item.title} href={item.href}>
-              <Card className="h-full transition-colors hover:border-primary/50">
-                <CardContent className="space-y-2 p-4">
-                  <Badge className="w-fit border-primary/30 bg-primary/15 text-primary">{item.tag}</Badge>
-                  <p className="text-sm font-semibold">{item.title}</p>
-                  <p className="text-xs text-muted-foreground">{item.description}</p>
-                </CardContent>
-              </Card>
+              <div className={cn(
+                "group h-full overflow-hidden rounded-[2.5rem] border-none p-1 transition-all hover:scale-[1.03] hover:shadow-xl bg-gradient-to-br",
+                item.gradient
+              )}>
+                <div className="flex h-full flex-col justify-between rounded-[2.3rem] bg-card/80 p-8 backdrop-blur-sm">
+                  <div>
+                    <Badge className="mb-5 rounded-full border-primary/20 bg-background/60 px-4 py-1.5 font-black uppercase tracking-widest text-primary shadow-none backdrop-blur-sm">
+                      {item.tag}
+                    </Badge>
+                    <h3 className="font-heading text-xl font-[900] italic leading-tight tracking-tight">{item.title}</h3>
+                    <p className="mt-3 text-sm font-medium text-foreground/60 leading-relaxed">{item.description}</p>
+                  </div>
+                  <div className="mt-6 flex items-center gap-2 text-xs font-black uppercase tracking-widest text-primary transition-all group-hover:gap-3">
+                    Смотреть подборку <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
+                  </div>
+                </div>
+              </div>
             </Link>
           ))}
         </div>
-      </section>
+      </motion.section>
 
-      <section>
+      {/* ── Popular Brands ─────────────────────────────────────── */}
+      <motion.section
+        variants={fadeUp}
+        initial="hidden"
+        whileInView="visible"
+        viewport={{ once: true, amount: 0.3 }}
+        transition={{ duration: 0.5 }}
+      >
         <SectionHeading title="Популярные бренды" />
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-3">
           {brands.map((brand) => (
-            <Badge key={brand} className="rounded-2xl px-4 py-2 text-sm">
+            <Badge
+              key={brand}
+              className="rounded-full border-border/60 bg-card/60 px-5 py-2.5 text-sm font-black backdrop-blur-sm transition-all hover:border-primary/40 hover:bg-primary/10 hover:text-primary hover:shadow-md cursor-default"
+            >
               {brand}
             </Badge>
           ))}
         </div>
-      </section>
+      </motion.section>
 
-      <section>
-        <SectionHeading title="Недавно просмотренные" />
+      {/* ── Recently Viewed ────────────────────────────────────── */}
+      <motion.section
+        variants={fadeUp}
+        initial="hidden"
+        whileInView="visible"
+        viewport={{ once: true, amount: 0.2 }}
+        transition={{ duration: 0.5 }}
+      >
+        <SectionHeading title="Недавно просмотренные" description="История ваших последних интересов для быстрого возврата." />
         {recent.length ? (
-          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-8 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {recent.map((item) => (
-              <Link key={item.id} href={`/product/${item.slug}`} className="rounded-2xl border border-border bg-card p-4 text-sm shadow-soft">
-                {item.title}
+              <Link key={item.id} href={`/product/${item.slug}`} className="group block">
+                <div className="flex items-center gap-5 rounded-[2rem] border border-border/40 bg-card/60 p-5 backdrop-blur-sm transition-all hover:border-primary/30 hover:bg-card hover:shadow-lg hover:-translate-y-0.5">
+                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-secondary/80 to-secondary/40 text-2xl shadow-inner">
+                    🔍
+                  </div>
+                  <div className="min-w-0">
+                    <p className="line-clamp-1 text-sm font-black group-hover:text-primary transition-colors">{item.title}</p>
+                    <p className="mt-1.5 flex items-center gap-1 text-xs font-bold text-muted-foreground">
+                      Открыть товар <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-1" />
+                    </p>
+                  </div>
+                </div>
               </Link>
             ))}
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">Здесь появятся товары, которые вы недавно открывали.</p>
+          <div className="mt-8 flex flex-col items-center justify-center rounded-[2.5rem] border-2 border-dashed border-border/40 py-16 text-center">
+            <div className="mb-5 text-5xl opacity-20">🕒</div>
+            <p className="text-sm font-bold text-muted-foreground">Здесь появятся товары, которые вы недавно открывали.</p>
+          </div>
         )}
-      </section>
+      </motion.section>
     </div>
   );
 }
