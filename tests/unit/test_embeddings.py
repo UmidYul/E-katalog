@@ -23,7 +23,7 @@ def test_batch_embeddings_matches_single_calls() -> None:
 
 
 def test_embedding_backend_name_is_known() -> None:
-    assert embedding_backend_name() in {"hashing", "fastembed"}
+    assert embedding_backend_name() in {"hashing", "sentence_transformers"}
 
 
 def test_cosine_similarity_bounds() -> None:

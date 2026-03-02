@@ -22,7 +22,7 @@ qrcode==7.4.2
 sentry-sdk[fastapi]==2.22.0
 PyYAML==6.0.2
 rapidfuzz==3.12.1
-fastembed==0.7.3
+sentence-transformers==3.4.1
 scikit-learn==1.6.1
 networkx==3.4.2
 pandas==2.2.3
