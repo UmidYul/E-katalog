@@ -1,6 +1,6 @@
 "use client";
 
-import { GitCompareArrows, Heart, Search, ShieldCheck, ShoppingBag } from "lucide-react";
+import { Search, ShoppingBag } from "lucide-react";
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
