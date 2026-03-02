@@ -5,6 +5,7 @@ import { Heart, Scale } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 
+import { PriceAlertBadge } from "@/components/common/price-alert-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils/cn";
@@ -28,6 +29,7 @@ export function ProductCard({
   onCompare?: (id: string) => void;
   compareDisabled?: boolean;
   compareDisabledReason?: string;
+  isTracking?: boolean;
   priceAlertSignal?: PriceAlertSignal | null;
 }) {
   const storesLabel = product.store_count === 1 ? "магазин" : "магазинов";
