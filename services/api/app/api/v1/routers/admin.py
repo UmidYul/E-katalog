@@ -3622,14 +3622,14 @@ async def get_settings(redis: Redis = Depends(get_redis)) -> dict[str, Any]:
     payload = await redis.hgetall(key)
     if not payload:
         payload = {
-            "site_name": "ZincMarket",
+            "site_name": "Doxx",
             "support_email": "support@zinc.local",
             "branding_logo_url": "",
             "feature_ai_enabled": "true",
         }
         await redis.hset(key, mapping=payload)
     return {
-        "site_name": payload.get("site_name", "ZincMarket"),
+        "site_name": payload.get("site_name", "Doxx"),
         "support_email": payload.get("support_email", "support@zinc.local"),
         "branding_logo_url": payload.get("branding_logo_url") or None,
         "feature_ai_enabled": payload.get("feature_ai_enabled", "true") == "true",

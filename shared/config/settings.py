@@ -176,7 +176,7 @@ class Settings(BaseSettings):
     slo_api_latency_p95_target_seconds: float = 0.5
     slo_api_latency_p99_target_seconds: float = 1.0
     next_public_app_url: str = "http://localhost"
-    oauth_totp_issuer: str = "ZincMarket"
+    oauth_totp_issuer: str = "Doxx"
     oauth_google_client_id: str | None = None
     oauth_google_client_secret: str | None = None
     oauth_facebook_client_id: str | None = None

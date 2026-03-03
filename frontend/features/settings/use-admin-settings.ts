@@ -6,7 +6,7 @@ import { adminApi } from "@/lib/api/openapi-client";
 import type { AdminSettings } from "@/types/admin";
 
 const fallback: AdminSettings = {
-  site_name: "ZincMarket",
+  site_name: "Doxx",
   support_email: "support@example.com",
   branding_logo_url: null,
   feature_ai_enabled: true,
