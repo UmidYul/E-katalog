@@ -6,7 +6,9 @@ from typing import Iterable
 
 try:
     from fastembed import TextEmbedding
+    from fastembed import TextEmbedding
 except Exception:  # noqa: BLE001
+    TextEmbedding = None
     TextEmbedding = None
 
 try:
@@ -25,6 +27,17 @@ if TextEmbedding is not None:
     except Exception:  # noqa: BLE001
         _BACKEND_MODEL = None
         _BACKEND_NAME = "hashing"
+_DEFAULT_SENTENCE_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+_BACKEND_NAME = "hashing"
+
+if TextEmbedding is not None:
+    try:
+        _BACKEND_MODEL: TextEmbedding | None = TextEmbedding(_DEFAULT_SENTENCE_MODEL)
+        _BACKEND_NAME = "fastembed"
+    except Exception:  # noqa: BLE001
+        _BACKEND_MODEL = None
+else:
+    _BACKEND_MODEL = None
 
 
 def _hash_embedding(text: str, dim: int) -> list[float]:
@@ -33,6 +46,10 @@ def _hash_embedding(text: str, dim: int) -> list[float]:
     return [((seed + i * 31) % 1000) / 1000 for i in range(dim)]
 
 
+def _to_float_list(vector: object) -> list[float]:
+    if hasattr(vector, "tolist"):
+        return [float(item) for item in vector.tolist()]
+    return [float(item) for item in vector]  # type: ignore[arg-type]
 def _to_float_vector(raw: object) -> list[float]:
     if hasattr(raw, "tolist"):
         return [float(item) for item in raw.tolist()]
@@ -44,6 +61,8 @@ def _to_float_vector(raw: object) -> list[float]:
 def simple_embedding(text: str, dim: int = 768) -> list[float]:
     if _BACKEND_MODEL is not None:
         try:
+            encoded = list(_BACKEND_MODEL.embed([text]))
+            return _to_float_list(encoded[0])
             vectors = list(_BACKEND_MODEL.embed([text]))
             if vectors:
                 return _to_float_vector(vectors[0])
@@ -62,6 +81,8 @@ def batch_embeddings(texts: Iterable[str], dim: int = 768) -> list[list[float]]:
         return []
     if _BACKEND_MODEL is not None:
         try:
+            encoded = list(_BACKEND_MODEL.embed(rows))
+            return [_to_float_list(row) for row in encoded]
             vectors = list(_BACKEND_MODEL.embed(rows))
             return [_to_float_vector(row) for row in vectors]
         except Exception:  # noqa: BLE001

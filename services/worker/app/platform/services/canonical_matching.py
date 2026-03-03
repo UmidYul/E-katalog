@@ -595,20 +595,15 @@ class HashingEmbedder:
         return [x / norm for x in vec]
 
 
-class FastEmbedder:
-    def __init__(self, model_name: str = "paraphrase-multilingual-MiniLM-L12-v2") -> None:
-        from fastembed import TextEmbedding
+class SentenceTransformerEmbedder:
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2") -> None:
+        from sentence_transformers import SentenceTransformer
 
-        self.model = TextEmbedding(model_name=model_name)
+        self.model = SentenceTransformer(model_name, local_files_only=True)
 
     def encode(self, text: str) -> list[float]:
-        vectors = list(self.model.embed([text]))
-        if not vectors:
-            return []
-        first = vectors[0]
-        if hasattr(first, "tolist"):
-            return [float(x) for x in first.tolist()]
-        return [float(x) for x in list(first)]
+        encoded = self.model.encode([text], normalize_embeddings=True)
+        return [float(x) for x in encoded[0].tolist()]
 
 
 class EmbeddingService:
