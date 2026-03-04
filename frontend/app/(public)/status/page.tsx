@@ -4,33 +4,37 @@ import { env } from "@/config/env";
 
 export const metadata: Metadata = {
   title: "Service Status",
-  alternates: { canonical: `${env.appUrl}/status` }
+  alternates: { canonical: `${env.appUrl}/status` },
 };
 
 export default function StatusPage() {
   return (
-    <main className="container py-10">
-      <article className="mx-auto max-w-3xl space-y-4">
-        <h1 className="font-heading text-3xl font-bold tracking-tight">Service Status</h1>
-        <p className="text-sm text-muted-foreground">Operational baseline page</p>
-        <p>
-          This page documents runtime health endpoints and incident communication channels.
+    <main className="mx-auto max-w-7xl px-4 py-10">
+      <article className="mx-auto max-w-3xl rounded-xl border border-border bg-card p-6 shadow-sm md:p-8">
+        <span className="inline-flex rounded-full bg-accent/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.1em] text-accent">
+          Platform Operations
+        </span>
+        <h1 className="mt-4 font-heading text-3xl font-bold tracking-tight md:text-4xl">Service Status</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Runtime health endpoints and incident communication channels are listed below.
         </p>
-        <ul className="list-disc space-y-1 pl-6">
-          <li>
-            API health: <code>/api/v1/health</code>
-          </li>
-          <li>
-            API readiness: <code>/api/v1/ready</code>
-          </li>
-          <li>
-            API liveness: <code>/api/v1/live</code>
-          </li>
-          <li>
-            Metrics: <code>/api/v1/metrics</code>
-          </li>
-        </ul>
-        <p>
+
+        <div className="mt-6 space-y-3">
+          <div className="rounded-lg border border-border bg-background/60 p-3 text-sm">
+            API health: <code className="rounded bg-muted px-1.5 py-0.5 text-xs">/api/v1/health</code>
+          </div>
+          <div className="rounded-lg border border-border bg-background/60 p-3 text-sm">
+            API readiness: <code className="rounded bg-muted px-1.5 py-0.5 text-xs">/api/v1/ready</code>
+          </div>
+          <div className="rounded-lg border border-border bg-background/60 p-3 text-sm">
+            API liveness: <code className="rounded bg-muted px-1.5 py-0.5 text-xs">/api/v1/live</code>
+          </div>
+          <div className="rounded-lg border border-border bg-background/60 p-3 text-sm">
+            Metrics: <code className="rounded bg-muted px-1.5 py-0.5 text-xs">/api/v1/metrics</code>
+          </div>
+        </div>
+
+        <p className="mt-6 text-sm text-muted-foreground">
           Incident notifications and postmortem updates are published through support channels listed on the contacts page.
         </p>
       </article>
