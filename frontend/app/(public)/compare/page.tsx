@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 
 export default function ComparePage() {
   return (
-    <Suspense fallback={<div className="h-24" />}>
+    <Suspense fallback={<div className="mx-auto max-w-7xl px-4 py-6 text-sm text-muted-foreground">Загружаем сравнение...</div>}>
       <CompareClientPage />
     </Suspense>
   );

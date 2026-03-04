@@ -336,7 +336,7 @@ export function CompareClientPage() {
 
   if (compareItems.length === 0) {
     return (
-      <div className="container space-y-3 py-6">
+      <div className="mx-auto max-w-7xl space-y-3 px-4 py-6">
         {shareToken ? (
           <p className="text-sm text-muted-foreground">
             {sharedCompareQuery.isPending ? "Загружаем сравнение по ссылке..." : shareStatus ?? "Ожидаем данные сравнения..."}
@@ -381,7 +381,7 @@ export function CompareClientPage() {
     if (!onlyItem) return null;
 
     return (
-      <div className="container space-y-4 py-6">
+      <div className="mx-auto max-w-7xl space-y-4 px-4 py-6">
         <Card>
           <CardHeader>
             <CardTitle>Для сравнения нужно минимум 2 товара</CardTitle>
@@ -419,7 +419,7 @@ export function CompareClientPage() {
 
   if (compareQuery.error) {
     return (
-      <div className="container py-6">
+      <div className="mx-auto max-w-7xl px-4 py-6">
         <ErrorState title="Не удалось построить сравнение" message="Попробуйте убрать недоступные товары и повторите." />
       </div>
     );
@@ -428,7 +428,7 @@ export function CompareClientPage() {
   const columns = compareQuery.data?.items ?? [];
 
   return (
-    <div className="container space-y-6 py-6">
+    <div className="mx-auto max-w-7xl space-y-6 px-4 py-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2">
