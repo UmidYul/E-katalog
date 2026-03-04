@@ -162,9 +162,9 @@ export function RegisterForm() {
   });
 
   return (
-    <Card className="mx-auto max-w-md border-border/80">
+    <Card className="mx-auto max-w-md rounded-xl border-border shadow-sm">
       <CardHeader className="space-y-1">
-        <CardTitle className="font-heading text-xl">Регистрация</CardTitle>
+        <CardTitle className="font-heading text-xl font-bold">Регистрация</CardTitle>
         <p className="text-sm text-muted-foreground">Создайте профиль, чтобы сохранять товары и настраивать отслеживание цен.</p>
       </CardHeader>
       <CardContent>
@@ -184,7 +184,7 @@ export function RegisterForm() {
           <Input placeholder="Email" {...form.register("email")} />
           <Input type="password" placeholder="Пароль" {...form.register("password")} />
           <Input type="password" placeholder="Подтверждение пароля" {...form.register("confirmPassword")} />
-          <Button type="submit" className="w-full" disabled={register.isPending}>
+          <Button type="submit" variant="accent" className="w-full" disabled={register.isPending}>
             {register.isPending ? "Создаем аккаунт..." : "Зарегистрироваться"}
           </Button>
           {submitError ? <p className="text-sm text-destructive">{submitError}</p> : null}
