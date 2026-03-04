@@ -32,7 +32,7 @@ export function CatalogGrid({ loading, items }: { loading: boolean; items: Produ
     return (
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {Array.from({ length: 9 }).map((_, idx) => (
-          <Skeleton key={idx} className="h-[360px]" />
+          <Skeleton key={idx} className="h-[340px] rounded-xl" />
         ))}
       </div>
     );

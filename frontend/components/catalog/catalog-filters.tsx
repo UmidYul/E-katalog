@@ -28,7 +28,7 @@ const numberFormatter = new Intl.NumberFormat("en-US");
 
 const normalizePriceRange = (next: number[]): [number, number] => [
   Math.min(next[0] ?? PRICE_MIN, next[1] ?? PRICE_MAX),
-  Math.max(next[0] ?? PRICE_MIN, next[1] ?? PRICE_MAX)
+  Math.max(next[0] ?? PRICE_MIN, next[1] ?? PRICE_MAX),
 ];
 
 const countActiveFilters = (value: FilterState): number => {
@@ -55,7 +55,7 @@ export function CatalogFilters({
   sellers,
   dynamicAttributes,
   value,
-  onChange
+  onChange,
 }: {
   brands: Array<{ id: string; name: string }>;
   stores?: Array<{ id: string; name: string }>;
@@ -89,7 +89,7 @@ export function CatalogFilters({
       minPrice: undefined,
       maxPrice: undefined,
       maxDeliveryDays: undefined,
-      attrs: undefined
+      attrs: undefined,
     });
   };
 
@@ -97,13 +97,13 @@ export function CatalogFilters({
     <div className="space-y-4">
       <div className="space-y-2">
         <label className="text-sm font-medium">Поиск</label>
-        <Input value={value.q ?? ""} onChange={(e) => onChange({ ...value, q: e.target.value || undefined })} placeholder="Название модели..." />
+        <Input value={value.q ?? ""} onChange={(event) => onChange({ ...value, q: event.target.value || undefined })} placeholder="Название модели..." />
       </div>
 
       <div className="space-y-2">
         <label className="text-sm font-medium">Сортировка</label>
         <Select value={value.sort} onValueChange={(next) => onChange({ ...value, sort: next as FilterState["sort"] })}>
-          <SelectTrigger>
+          <SelectTrigger className="rounded-lg">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -116,7 +116,7 @@ export function CatalogFilters({
         </Select>
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-2 rounded-xl border border-border bg-secondary/40 p-3">
         <label className="text-sm font-medium">Диапазон цен</label>
         <Slider
           value={priceRange}
@@ -131,7 +131,7 @@ export function CatalogFilters({
             onChange({
               ...value,
               minPrice: normalized[0] > PRICE_MIN ? normalized[0] : undefined,
-              maxPrice: normalized[1] < PRICE_MAX ? normalized[1] : undefined
+              maxPrice: normalized[1] < PRICE_MAX ? normalized[1] : undefined,
             });
           }}
         />
@@ -144,7 +144,7 @@ export function CatalogFilters({
           {brands.map((brand) => {
             const active = value.brands.includes(brand.id);
             return (
-              <label key={brand.id} className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+              <label key={brand.id} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground">
                 <input
                   type="checkbox"
                   checked={active}
@@ -167,7 +167,7 @@ export function CatalogFilters({
             {stores.map((store) => {
               const active = value.stores.includes(store.id);
               return (
-                <label key={store.id} className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+                <label key={store.id} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground">
                   <input
                     type="checkbox"
                     checked={active}
@@ -191,7 +191,7 @@ export function CatalogFilters({
             {sellers.slice(0, 20).map((seller) => {
               const active = value.sellers.includes(seller.id);
               return (
-                <label key={seller.id} className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+                <label key={seller.id} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground">
                   <input
                     type="checkbox"
                     checked={active}
@@ -215,7 +215,7 @@ export function CatalogFilters({
           min={0}
           max={30}
           value={value.maxDeliveryDays ?? ""}
-          onChange={(e) => onChange({ ...value, maxDeliveryDays: e.target.value ? Number(e.target.value) : undefined })}
+          onChange={(event) => onChange({ ...value, maxDeliveryDays: event.target.value ? Number(event.target.value) : undefined })}
           placeholder="Без ограничения"
         />
       </div>
@@ -227,7 +227,7 @@ export function CatalogFilters({
             {attribute.values.map((option) => {
               const selected = value.attrs?.[attribute.key]?.includes(option.value) ?? false;
               return (
-                <label key={option.value} className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+                <label key={option.value} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground">
                   <input
                     type="checkbox"
                     checked={selected}
@@ -242,7 +242,7 @@ export function CatalogFilters({
                       }
                       onChange({
                         ...value,
-                        attrs: Object.keys(nextAttrs).length ? nextAttrs : undefined
+                        attrs: Object.keys(nextAttrs).length ? nextAttrs : undefined,
                       });
                     }}
                   />
@@ -259,10 +259,10 @@ export function CatalogFilters({
   return (
     <>
       <aside className="hidden self-start lg:sticky lg:top-20 lg:block">
-        <div className="overflow-hidden rounded-2xl border border-border bg-card">
+        <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
           <div className="flex items-center justify-between gap-2 border-b border-border p-4">
             <div>
-              <p className="text-sm font-semibold">Фильтры</p>
+              <p className="font-heading text-base font-bold">Фильтры</p>
               <p className="text-xs text-muted-foreground">{hasActiveFilters ? `Активных: ${activeFilterCount}` : "Активных фильтров нет"}</p>
             </div>
             <Button variant="ghost" size="sm" disabled={!hasActiveFilters} onClick={resetFilters}>
@@ -275,7 +275,7 @@ export function CatalogFilters({
       <div className="lg:hidden">
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
           <SheetTrigger asChild>
-            <Button variant="outline" className="w-full justify-center gap-2">
+            <Button variant="outline" className="w-full justify-center gap-2 rounded-lg">
               <SlidersHorizontal className="h-4 w-4" /> Фильтры{hasActiveFilters ? ` (${activeFilterCount})` : ""}
             </Button>
           </SheetTrigger>
@@ -283,7 +283,7 @@ export function CatalogFilters({
             <div className="flex h-full flex-col">
               <div className="flex items-center justify-between gap-2 border-b border-border px-5 py-4 pr-14">
                 <div>
-                  <p className="text-sm font-semibold">Фильтры</p>
+                  <p className="font-heading text-base font-bold">Фильтры</p>
                   <p className="text-xs text-muted-foreground">{hasActiveFilters ? `Активных: ${activeFilterCount}` : "Активных фильтров нет"}</p>
                 </div>
                 <Button variant="ghost" size="sm" disabled={!hasActiveFilters} onClick={resetFilters}>
@@ -298,4 +298,3 @@ export function CatalogFilters({
     </>
   );
 }
-
