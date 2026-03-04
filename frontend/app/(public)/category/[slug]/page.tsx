@@ -44,7 +44,7 @@ const resolveVirtualCategory = (slug: string, categories: Category[], brands: Br
       categoryId: undefined,
       brandId: brand?.id,
       presetQuery: brand ? undefined : fallbackQuery,
-      title: `Бренд: ${brandLabel}`
+      title: `Бренд: ${brandLabel}`,
     };
   }
 
@@ -58,7 +58,7 @@ const resolveVirtualCategory = (slug: string, categories: Category[], brands: Br
     categoryId: baseCategory.id,
     brandId: brand?.id,
     presetQuery: brand ? undefined : fallbackQuery,
-    title: `${baseCategory.name} - ${brandLabel}`
+    title: `${baseCategory.name} - ${brandLabel}`,
   };
 };
 
@@ -67,7 +67,7 @@ async function loadCategoryIndex(): Promise<{ categories: Category[]; brands: Br
     const [categories, brands] = await Promise.all([serverGet<Category[]>("/categories"), serverGet<Brand[]>("/brands")]);
     return {
       categories: Array.isArray(categories) ? categories : [],
-      brands: Array.isArray(brands) ? brands : []
+      brands: Array.isArray(brands) ? brands : [],
     };
   } catch {
     return { categories: [], brands: [] };
@@ -83,7 +83,7 @@ export async function generateMetadata({ params }: { params: { slug: string } })
     return {
       title: `${category.name} - цены и предложения`,
       description: `Сравнение цен и магазинов по категории ${category.name}. Выберите лучший вариант покупки.`,
-      alternates: { canonical }
+      alternates: { canonical },
     };
   }
 
@@ -92,13 +92,13 @@ export async function generateMetadata({ params }: { params: { slug: string } })
     return {
       title: `${virtual.title} - цены и предложения`,
       description: `Сравнение цен и магазинов по подборке ${virtual.title}.`,
-      alternates: { canonical }
+      alternates: { canonical },
     };
   }
 
   return {
     title: `Категория: ${params.slug}`,
-    alternates: { canonical }
+    alternates: { canonical },
   };
 }
 
@@ -111,7 +111,7 @@ export default async function CategoryPage({ params }: { params: { slug: string 
   const category = categories.find((item) => item.slug === params.slug);
   if (category) {
     return (
-      <Suspense fallback={<div className="container py-8 text-sm text-muted-foreground">Загрузка каталога...</div>}>
+      <Suspense fallback={<div className="mx-auto max-w-7xl px-4 py-8 text-sm text-muted-foreground">Загрузка каталога...</div>}>
         <CatalogClientPage categoryId={category.id} pageTitle={category.name} />
       </Suspense>
     );
@@ -123,13 +123,8 @@ export default async function CategoryPage({ params }: { params: { slug: string 
   }
 
   return (
-    <Suspense fallback={<div className="container py-8 text-sm text-muted-foreground">Загрузка каталога...</div>}>
-      <CatalogClientPage
-        categoryId={virtual.categoryId}
-        presetBrandId={virtual.brandId}
-        presetQuery={virtual.presetQuery}
-        pageTitle={virtual.title}
-      />
+    <Suspense fallback={<div className="mx-auto max-w-7xl px-4 py-8 text-sm text-muted-foreground">Загрузка каталога...</div>}>
+      <CatalogClientPage categoryId={virtual.categoryId} presetBrandId={virtual.brandId} presetQuery={virtual.presetQuery} pageTitle={virtual.title} />
     </Suspense>
   );
 }

@@ -494,7 +494,7 @@ export function ProfileClient() {
 
   if (me.isLoading || (profileQuery.isLoading && !profileQuery.data)) {
     return (
-      <div className="container space-y-4 py-6">
+      <div className="mx-auto max-w-7xl space-y-4 px-4 py-6">
         <Skeleton className="h-40 w-full" />
         <div className="grid gap-4 lg:grid-cols-2">
           <Skeleton className="h-80 w-full" />
@@ -509,7 +509,7 @@ export function ProfileClient() {
   }
 
   return (
-    <div className="container space-y-6 py-6">
+    <div className="mx-auto max-w-7xl space-y-6 px-4 py-6">
       <Card className="relative overflow-hidden border-primary/25">
         <div className="pointer-events-none absolute -top-16 right-0 h-40 w-40 rounded-full bg-primary/20 blur-3xl" />
         <div className="pointer-events-none absolute bottom-0 left-0 h-24 w-24 rounded-full bg-emerald-400/20 blur-2xl" />
@@ -986,7 +986,7 @@ export function RecentlyViewedClient() {
   };
 
   return (
-    <div className="container space-y-4 py-6">
+    <div className="mx-auto max-w-7xl space-y-4 px-4 py-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-heading text-2xl font-extrabold">Недавно просмотренные</h1>
         <Button variant="ghost" onClick={clearAll} disabled={items.length === 0}>

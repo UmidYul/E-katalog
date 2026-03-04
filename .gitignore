@@ -14,3 +14,4 @@ mediapark_chunk_*.js
 docs/reports/*.log
 docs/reports/*.jsonl
 docs/reports/*canonical_report*.json
+reference

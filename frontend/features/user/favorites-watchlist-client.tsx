@@ -210,7 +210,7 @@ export function FavoritesWatchlistClient() {
 
   if (favorites.isLoading) {
     return (
-      <div className="container space-y-4 py-6">
+      <div className="mx-auto max-w-7xl space-y-4 px-4 py-6">
         <h1 className="font-heading text-2xl font-extrabold">Избранное</h1>
         <Skeleton className="h-24 w-full" />
         <Skeleton className="h-24 w-full" />
@@ -219,7 +219,7 @@ export function FavoritesWatchlistClient() {
   }
 
   return (
-    <div className="container py-6">
+    <div className="mx-auto max-w-7xl px-4 py-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-heading text-2xl font-extrabold">Избранное</h1>
         <Badge>{favoriteIds.length} сохранено</Badge>

@@ -66,7 +66,7 @@ export function ProductGallery({ images }: { images: string[] }) {
 
   return (
     <div className="space-y-3">
-      <div className="relative aspect-square overflow-hidden rounded-2xl border border-border bg-card">
+      <div className="relative aspect-square overflow-hidden rounded-xl border border-border bg-card shadow-sm">
         {active ? (
           <Image
             src={active}
@@ -79,13 +79,18 @@ export function ProductGallery({ images }: { images: string[] }) {
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
             <p className="text-sm font-medium text-muted-foreground">Фото товара недоступно</p>
-            <p className="text-xs text-muted-foreground/80">Пробуем обновить карточку из проверенных источников.</p>
+            <p className="text-xs text-muted-foreground/80">Попробуйте открыть карточку позже, когда данные обновятся.</p>
           </div>
         )}
       </div>
       <div className="grid grid-cols-5 gap-2">
         {visibleList.slice(0, 5).map((src) => (
-          <button key={src} className={`relative aspect-square overflow-hidden rounded-xl border ${active === src ? "border-primary" : "border-border"}`} onClick={() => setActive(src)}>
+          <button
+            key={src}
+            type="button"
+            className={`relative aspect-square overflow-hidden rounded-lg border ${active === src ? "border-accent" : "border-border"}`}
+            onClick={() => setActive(src)}
+          >
             <Image src={src} alt="Product thumbnail" fill className="object-contain p-1" sizes="120px" onError={() => markFailed(src)} />
           </button>
         ))}
@@ -93,4 +98,3 @@ export function ProductGallery({ images }: { images: string[] }) {
     </div>
   );
 }
-

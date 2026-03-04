@@ -41,7 +41,7 @@ function SocialAuthButtons({ nextPath }: { nextPath: string }) {
       return data.providers;
     },
     retry: false,
-    staleTime: 5 * 60 * 1000
+    staleTime: 5 * 60 * 1000,
   });
 
   const providers = useMemo(() => {
@@ -53,7 +53,7 @@ function SocialAuthButtons({ nextPath }: { nextPath: string }) {
       .filter((provider) => provider.enabled)
       .map((provider) => ({
         id: provider.provider as "google" | "facebook",
-        title: provider.provider === "google" ? "Войти через Google" : "Войти через Facebook"
+        title: provider.provider === "google" ? "Войти через Google" : "Войти через Facebook",
       }));
   }, [providersQuery.data]);
 
@@ -64,7 +64,7 @@ function SocialAuthButtons({ nextPath }: { nextPath: string }) {
   return (
     <div className="space-y-2">
       {providers.map((provider) => (
-        <a key={provider.id} href={buildOAuthStartUrl(provider.id, nextPath)} className={cn(buttonVariants({ variant: "outline" }), "w-full")}>
+        <a key={provider.id} href={buildOAuthStartUrl(provider.id, nextPath)} className={cn(buttonVariants({ variant: "outline" }), "w-full rounded-lg")}>
           {provider.title}
         </a>
       ))}
@@ -87,10 +87,10 @@ export function LoginForm() {
   const form = useForm<LoginFormValues>({ resolver: zodResolver(loginSchema), defaultValues: { email: "", password: "" } });
 
   return (
-    <Card className="mx-auto max-w-md border-border/80">
+    <Card className="mx-auto max-w-md rounded-xl border-border shadow-sm">
       <CardHeader className="space-y-1">
-        <CardTitle className="font-heading text-xl">Вход в аккаунт</CardTitle>
-        <p className="text-sm text-muted-foreground">Сравнивайте цены, сохраняйте избранное и отслеживайте изменение стоимости.</p>
+        <CardTitle className="font-heading text-xl font-bold">Вход в аккаунт</CardTitle>
+        <p className="text-sm text-muted-foreground">Единый кабинет для избранного, сравнения и ценовых алертов.</p>
       </CardHeader>
       <CardContent>
         <form
@@ -102,7 +102,7 @@ export function LoginForm() {
                 email: values.email,
                 password: values.password,
                 two_factor_code: challengeToken ? twoFactorCode || undefined : undefined,
-                recovery_code: challengeToken ? recoveryCode || undefined : undefined
+                recovery_code: challengeToken ? recoveryCode || undefined : undefined,
               });
 
               if ("requires_2fa" in data && data.requires_2fa) {
@@ -127,17 +127,12 @@ export function LoginForm() {
 
           {challengeToken ? (
             <>
-              <Input
-                placeholder="Код 2FA (6 цифр)"
-                inputMode="numeric"
-                value={twoFactorCode}
-                onChange={(event) => setTwoFactorCode(event.target.value)}
-              />
+              <Input placeholder="Код 2FA (6 цифр)" inputMode="numeric" value={twoFactorCode} onChange={(event) => setTwoFactorCode(event.target.value)} />
               <Input placeholder="Recovery code (если нет 2FA-кода)" value={recoveryCode} onChange={(event) => setRecoveryCode(event.target.value)} />
             </>
           ) : null}
 
-          <Button type="submit" className="w-full" disabled={login.isPending}>
+          <Button type="submit" variant="accent" className="w-full" disabled={login.isPending}>
             {login.isPending ? "Выполняем вход..." : challengeToken ? "Подтвердить 2FA" : "Войти"}
           </Button>
           {submitError ? <p className="text-sm text-destructive">{submitError}</p> : null}
@@ -163,13 +158,13 @@ export function RegisterForm() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const form = useForm<RegisterFormValues>({
     resolver: zodResolver(registerSchema),
-    defaultValues: { email: "", fullName: "", password: "", confirmPassword: "" }
+    defaultValues: { email: "", fullName: "", password: "", confirmPassword: "" },
   });
 
   return (
-    <Card className="mx-auto max-w-md border-border/80">
+    <Card className="mx-auto max-w-md rounded-xl border-border shadow-sm">
       <CardHeader className="space-y-1">
-        <CardTitle className="font-heading text-xl">Регистрация</CardTitle>
+        <CardTitle className="font-heading text-xl font-bold">Регистрация</CardTitle>
         <p className="text-sm text-muted-foreground">Создайте профиль, чтобы сохранять товары и настраивать отслеживание цен.</p>
       </CardHeader>
       <CardContent>
@@ -189,7 +184,7 @@ export function RegisterForm() {
           <Input placeholder="Email" {...form.register("email")} />
           <Input type="password" placeholder="Пароль" {...form.register("password")} />
           <Input type="password" placeholder="Подтверждение пароля" {...form.register("confirmPassword")} />
-          <Button type="submit" className="w-full" disabled={register.isPending}>
+          <Button type="submit" variant="accent" className="w-full" disabled={register.isPending}>
             {register.isPending ? "Создаем аккаунт..." : "Зарегистрироваться"}
           </Button>
           {submitError ? <p className="text-sm text-destructive">{submitError}</p> : null}

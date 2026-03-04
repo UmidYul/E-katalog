@@ -12,16 +12,17 @@ import { PriceHistoryCard } from "@/components/product/price-history-card";
 import { ProductQuestionsPanel, ProductReviewsPanel } from "@/components/product/product-feedback-panels";
 import { ProductGallery } from "@/components/product/product-gallery";
 import { SpecsTable } from "@/components/product/specs-table";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuthMe } from "@/features/auth/use-auth";
 import { useProduct } from "@/features/catalog/use-catalog-queries";
-import { useToggleFavorite, useFavorites } from "@/features/user/use-favorites";
+import { useFavorites, useToggleFavorite } from "@/features/user/use-favorites";
 import { useDeleteUserPriceAlert, useUpsertUserPriceAlert, useUserPriceAlerts } from "@/features/user/use-price-alerts";
 import { userApi, type UserPriceAlert } from "@/lib/api/openapi-client";
-import { buildPriceAlertSignal, toPositivePriceOrNull } from "@/lib/utils/price-alerts";
 import { formatPrice } from "@/lib/utils/format";
+import { buildPriceAlertSignal, toPositivePriceOrNull } from "@/lib/utils/price-alerts";
 import { COMPARE_LIMIT, useCompareStore } from "@/store/compare.store";
 import { usePriceAlertsStore } from "@/store/priceAlerts.store";
 import { useRecentlyViewedStore } from "@/store/recentlyViewed.store";
@@ -54,17 +55,17 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
   const serverPriceAlerts = useUserPriceAlerts();
   const upsertPriceAlert = useUpsertUserPriceAlert();
   const deletePriceAlert = useDeleteUserPriceAlert();
-  const pushRecentlyViewed = useRecentlyViewedStore((s) => s.push);
-  const compareItemsStore = useCompareStore((s) => s.items);
-  const toggleCompare = useCompareStore((s) => s.toggle);
-  const alertMetas = usePriceAlertsStore((s) => s.metas);
-  const mergeServerMetas = usePriceAlertsStore((s) => s.mergeServerMetas);
-  const ensureAlertMeta = usePriceAlertsStore((s) => s.ensureMeta);
-  const setAlertsEnabled = usePriceAlertsStore((s) => s.setAlertsEnabled);
-  const setTargetPrice = usePriceAlertsStore((s) => s.setTargetPrice);
-  const resetBaseline = usePriceAlertsStore((s) => s.resetBaseline);
-  const updateLastSeen = usePriceAlertsStore((s) => s.updateLastSeen);
-  const removeAlertMeta = usePriceAlertsStore((s) => s.removeMeta);
+  const pushRecentlyViewed = useRecentlyViewedStore((state) => state.push);
+  const compareItemsStore = useCompareStore((state) => state.items);
+  const toggleCompare = useCompareStore((state) => state.toggle);
+  const alertMetas = usePriceAlertsStore((state) => state.metas);
+  const mergeServerMetas = usePriceAlertsStore((state) => state.mergeServerMetas);
+  const ensureAlertMeta = usePriceAlertsStore((state) => state.ensureMeta);
+  const setAlertsEnabled = usePriceAlertsStore((state) => state.setAlertsEnabled);
+  const setTargetPrice = usePriceAlertsStore((state) => state.setTargetPrice);
+  const resetBaseline = usePriceAlertsStore((state) => state.resetBaseline);
+  const updateLastSeen = usePriceAlertsStore((state) => state.updateLastSeen);
+  const removeAlertMeta = usePriceAlertsStore((state) => state.removeMeta);
   const [mounted, setMounted] = useState(false);
   const [targetPriceInput, setTargetPriceInput] = useState("");
 
@@ -99,7 +100,7 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
       id: currentProductId,
       slug,
       title: currentProductTitle,
-      minPrice: currentMinPrice
+      minPrice: currentMinPrice,
     });
     if (me.data?.id) {
       void userApi.pushRecentlyViewed(currentProductId).catch(() => undefined);
@@ -125,11 +126,11 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
   }, [alertMeta?.target_price]);
 
   if (product.error) {
-    return <ErrorState title="Товар недоступен" message="Похоже, этот товар был удалён или временно недоступен." />;
+    return <ErrorState title="Товар недоступен" message="Этот товар был удален или временно недоступен." />;
   }
 
   if (product.isLoading || !product.data) {
-    return <div className="container py-8 text-sm text-muted-foreground">Загружаем карточку товара...</div>;
+    return <div className="mx-auto max-w-7xl px-4 py-8 text-sm text-muted-foreground">Загружаем карточку товара...</div>;
   }
 
   const inCompare = compareItems.some((item) => item.id === product.data.id);
@@ -138,13 +139,12 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
   const productCategory = normalizeCategory(product.data.category);
   const categoryMismatch = Boolean(referenceCompareCategory && productCategory && referenceCompareCategory !== productCategory);
   const compareDisabled = !inCompare && (compareFull || categoryMismatch);
-  const compareDisabledReason = compareFull ? `Лимит: ${COMPARE_LIMIT} товара` : categoryMismatch ? "Сравнение доступно только в рамках одной категории" : undefined;
-  const galleryImages =
-    product.data.gallery_images?.length
-      ? product.data.gallery_images
-      : product.data.main_image
-        ? [product.data.main_image]
-        : [];
+  const compareDisabledReason = compareFull
+    ? `Лимит: ${COMPARE_LIMIT} товара`
+    : categoryMismatch
+      ? "Сравнение доступно только в рамках одной категории"
+      : undefined;
+  const galleryImages = product.data.gallery_images?.length ? product.data.gallery_images : product.data.main_image ? [product.data.main_image] : [];
 
   const handleFavoriteToggle = () => {
     const id = product.data.id;
@@ -164,10 +164,7 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
       }
     } else {
       removeAlertMeta(id);
-      const alertId =
-        alertMeta && typeof (alertMeta as { id?: unknown }).id === "string"
-          ? (alertMeta as unknown as { id: string }).id
-          : null;
+      const alertId = alertMeta && typeof (alertMeta as { id?: unknown }).id === "string" ? (alertMeta as unknown as { id: string }).id : null;
       if (me.data?.id && alertId) {
         void deletePriceAlert.mutateAsync(alertId).catch(() => undefined);
       }
@@ -236,14 +233,14 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
   };
 
   return (
-    <div className="container space-y-6 py-6">
+    <div className="mx-auto max-w-7xl space-y-6 px-4 py-6">
       <Breadcrumbs items={[{ href: "/", label: "Главная" }, { href: "/catalog", label: "Каталог" }, { href: `/product/${slug}`, label: product.data.title }]} />
 
       <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
         <ProductGallery images={galleryImages} />
 
-        <section className="space-y-4 rounded-2xl border border-border bg-card p-5 shadow-soft">
-          <h1 className="text-2xl font-extrabold">{product.data.title}</h1>
+        <section className="space-y-4 rounded-xl border border-border bg-card p-5 shadow-sm">
+          <h1 className="font-heading text-2xl font-bold">{product.data.title}</h1>
           <p className="text-sm text-muted-foreground">Проверенные предложения по магазинам и обновляемая история цен в одном месте.</p>
           <div className="grid gap-2 rounded-xl border border-border/80 bg-background/50 p-3 text-sm">
             <p>
@@ -256,7 +253,7 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
             ) : null}
             <p>
               <span className="text-muted-foreground">Минимальная цена:</span>{" "}
-              <span className="font-semibold text-primary">{currentMinPrice != null ? formatPrice(currentMinPrice) : "Нет данных"}</span>
+              <span className="font-semibold text-accent">{currentMinPrice != null ? formatPrice(currentMinPrice) : "Нет данных"}</span>
             </p>
           </div>
 
@@ -292,7 +289,7 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
                   id: product.data.id,
                   title: product.data.title,
                   slug,
-                  category: product.data.category
+                  category: product.data.category,
                 })
               }
               disabled={compareDisabled}
@@ -304,16 +301,16 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
         </section>
       </div>
 
-      <section className="rounded-2xl border border-border bg-card p-5 shadow-soft">
+      <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
         <div className="mb-4 flex flex-wrap items-center gap-2">
-          <BellRing className="h-4 w-4 text-primary" />
-          <h2 className="text-lg font-extrabold">Отслеживание цены</h2>
+          <BellRing className="h-4 w-4 text-accent" />
+          <h2 className="font-heading text-lg font-bold">Отслеживание цены</h2>
           <PriceAlertBadge signal={alertSignal} />
         </div>
 
         {!me.data?.id ? (
           <p className="text-sm text-muted-foreground">
-            Чтобы включить отслеживание цены, <Link href="/login" className="font-semibold text-primary hover:underline">войдите в аккаунт</Link>.
+            Чтобы включить отслеживание цены, <Link href="/login" className="font-semibold text-accent hover:underline">войдите в аккаунт</Link>.
           </p>
         ) : !isFavorite ? (
           <p className="text-sm text-muted-foreground">Добавьте товар в избранное, чтобы отслеживать снижение цены и достижение вашей цели.</p>
@@ -335,11 +332,7 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <Button
-                variant={alertMeta?.alerts_enabled ? "default" : "outline"}
-                size="sm"
-                onClick={handleToggleAlertsEnabled}
-              >
+              <Button variant={alertMeta?.alerts_enabled ? "default" : "outline"} size="sm" onClick={handleToggleAlertsEnabled}>
                 {alertMeta?.alerts_enabled ? "Алерты включены" : "Включить алерты"}
               </Button>
               <Button variant="outline" size="sm" onClick={handleResetBaseline}>
@@ -361,7 +354,7 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
       </section>
 
       <Tabs defaultValue="offers" className="space-y-4">
-        <TabsList className="flex w-full flex-wrap gap-1 p-1">
+        <TabsList className="flex w-full flex-wrap gap-1 rounded-xl bg-secondary p-1">
           <TabsTrigger value="offers">Предложения</TabsTrigger>
           <TabsTrigger value="history">История цены</TabsTrigger>
           <TabsTrigger value="specs">Характеристики</TabsTrigger>
@@ -398,13 +391,12 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
                 price: offer.price_amount,
                 priceCurrency: offer.currency,
                 availability: offer.in_stock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
-                seller: { "@type": "Organization", name: offer.seller_name }
+                seller: { "@type": "Organization", name: offer.seller_name },
               }))
-            )
-          })
+            ),
+          }),
         }}
       />
     </div>
   );
 }
-

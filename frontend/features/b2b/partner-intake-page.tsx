@@ -116,7 +116,7 @@ export function PartnerIntakePage() {
   };
 
   return (
-    <div className="container py-8">
+    <div className="mx-auto max-w-7xl px-4 py-8">
       <div className="mx-auto max-w-4xl space-y-6">
         <section className="rounded-3xl border border-sky-200/70 bg-gradient-to-br from-sky-100 via-cyan-50 to-emerald-100 p-6">
           <p className="inline-flex items-center gap-2 rounded-full border border-sky-300/70 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-sky-900">

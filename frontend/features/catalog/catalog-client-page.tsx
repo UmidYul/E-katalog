@@ -6,7 +6,6 @@ import { useEffect, useMemo, useState } from "react";
 import { CatalogFilters, type FilterState } from "@/components/catalog/catalog-filters";
 import { CatalogGrid } from "@/components/catalog/catalog-grid";
 import { ErrorState } from "@/components/common/error-state";
-import { SectionHeading } from "@/components/common/section-heading";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useCatalogFiltersFromUrl } from "@/features/catalog/use-catalog-filters";
@@ -24,7 +23,7 @@ const sortLabelMap: Record<FilterState["sort"], string> = {
   relevance: "Релевантные",
   price_asc: "Цена: по возрастанию",
   price_desc: "Цена: по убыванию",
-  newest: "Сначала новые"
+  newest: "Сначала новые",
 };
 
 const toQueryString = (filters: FilterState & { cursor?: string; page?: number }) => {
@@ -67,7 +66,7 @@ export function CatalogClientPage({
   categoryId,
   presetBrandId,
   presetQuery,
-  pageTitle
+  pageTitle,
 }: {
   categoryId?: string;
   presetBrandId?: string;
@@ -99,7 +98,7 @@ export function CatalogClientPage({
     brands: mergeUnique([...(fromUrl.brand_id ?? []), ...(presetBrandId ? [presetBrandId] : [])]),
     stores: fromUrl.store_id ?? [],
     sellers: fromUrl.seller_id ?? [],
-    attrs: fromUrl.attrs
+    attrs: fromUrl.attrs,
   };
   const activeFilterCount = useMemo(() => getActiveFilterCount(filters), [filters]);
 
@@ -127,7 +126,7 @@ export function CatalogClientPage({
       attrs: debounced.attrs,
       category_id: categoryId,
       cursor: fromUrl.cursor,
-      limit: 24
+      limit: 24,
     }),
     [categoryId, debounced, fromUrl.cursor, presetBrandId]
   );
@@ -171,16 +170,17 @@ export function CatalogClientPage({
     const payload: FilterState = {
       ...next,
       q: next.q ?? presetQuery,
-      brands: mergeUnique([...(next.brands ?? []), ...(presetBrandId ? [presetBrandId] : [])])
+      brands: mergeUnique([...(next.brands ?? []), ...(presetBrandId ? [presetBrandId] : [])]),
     };
     const query = toQueryString(payload);
     router.replace(`${pathname}${query ? `?${query}` : ""}`, { scroll: false });
   };
+
   const clearFilters = () =>
     onFiltersChange({
       ...EMPTY_FILTERS,
       q: presetQuery,
-      brands: presetBrandId ? [presetBrandId] : []
+      brands: presetBrandId ? [presetBrandId] : [],
     });
 
   const goToPage = (targetPage: number) => {
@@ -191,8 +191,7 @@ export function CatalogClientPage({
       params.delete("page");
       params.delete("cursor");
     } else {
-      const targetCursor =
-        targetPage === currentPage + 1 ? (products.data?.next_cursor ?? cursorByPage[targetPage]) : cursorByPage[targetPage];
+      const targetCursor = targetPage === currentPage + 1 ? (products.data?.next_cursor ?? cursorByPage[targetPage]) : cursorByPage[targetPage];
       if (!targetCursor) return;
       params.set("page", String(targetPage));
       params.set("cursor", targetCursor);
@@ -206,8 +205,12 @@ export function CatalogClientPage({
   }
 
   return (
-    <div className="container space-y-6 py-6">
-      <SectionHeading title={pageTitle ?? "Каталог"} description="Сравнивайте цены и предложения по проверенным магазинам." />
+    <div className="mx-auto max-w-7xl space-y-6 px-4 py-6">
+      <section className="rounded-xl border border-border bg-card p-6 shadow-sm">
+        <h1 className="font-heading text-2xl font-bold text-foreground md:text-3xl">{pageTitle ?? "Каталог"}</h1>
+        <p className="mt-2 text-sm text-muted-foreground">Сравнивайте цены и предложения по проверенным магазинам.</p>
+      </section>
+
       <div className="grid gap-6 lg:grid-cols-[300px_minmax(0,1fr)] lg:items-start">
         <CatalogFilters
           brands={brands.data ?? []}
@@ -219,12 +222,12 @@ export function CatalogClientPage({
         />
 
         <div className="space-y-4">
-          <div className="space-y-3 rounded-2xl border border-border bg-card/90 p-3 shadow-soft">
+          <div className="space-y-3 rounded-xl border border-border bg-card p-4 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge>{products.data?.items.length ?? 0} на этой странице</Badge>
                 <Badge>Страница {currentPage}</Badge>
-                {activeFilterCount ? <Badge className="border-primary/40 bg-primary/15 text-primary">{activeFilterCount} активных фильтров</Badge> : null}
+                {activeFilterCount ? <Badge className="bg-accent/10 text-accent">{activeFilterCount} активных фильтров</Badge> : null}
                 {products.isFetching && !products.isLoading ? <p className="text-xs text-muted-foreground">Обновляем результаты...</p> : null}
               </div>
               {activeFilterCount ? (
@@ -241,22 +244,18 @@ export function CatalogClientPage({
               </div>
             ) : null}
           </div>
+
           <CatalogGrid loading={products.isLoading} items={products.data?.items ?? []} />
+
           {showPagination ? (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card p-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-3 shadow-sm">
               <p className="text-sm text-muted-foreground">Страница {currentPage}</p>
               <div className="flex flex-wrap items-center gap-2">
                 <Button variant="outline" size="sm" disabled={!canGoPrevPage || products.isFetching} onClick={() => goToPage(currentPage - 1)}>
                   Назад
                 </Button>
                 {pageButtons.map((page) => (
-                  <Button
-                    key={page}
-                    variant={page === currentPage ? "default" : "outline"}
-                    size="sm"
-                    disabled={products.isFetching}
-                    onClick={() => goToPage(page)}
-                  >
+                  <Button key={page} variant={page === currentPage ? "default" : "outline"} size="sm" disabled={products.isFetching} onClick={() => goToPage(page)}>
                     {page}
                   </Button>
                 ))}
@@ -271,4 +270,3 @@ export function CatalogClientPage({
     </div>
   );
 }
-

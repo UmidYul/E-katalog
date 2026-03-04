@@ -65,8 +65,8 @@ const config: Config = {
         soft: "0 18px 34px -22px rgba(7, 18, 38, 0.42)"
       },
       fontFamily: {
-        sans: ["Source Sans 3", "Segoe UI", "system-ui", "sans-serif"],
-        heading: ["Manrope", "Segoe UI", "system-ui", "sans-serif"]
+        sans: ["var(--font-body)", "Source Sans 3", "Segoe UI", "system-ui", "sans-serif"],
+        heading: ["var(--font-heading)", "Manrope", "Segoe UI", "system-ui", "sans-serif"]
       }
     }
   },
