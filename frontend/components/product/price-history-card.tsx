@@ -23,11 +23,11 @@ type HistoryPoint = {
 const dayFormatter = new Intl.DateTimeFormat("ru-RU", {
   month: "short",
   day: "numeric",
-  timeZone: "UTC"
+  timeZone: "UTC",
 });
 const compactNumberFormatter = new Intl.NumberFormat("ru-RU", {
   notation: "compact",
-  maximumFractionDigits: 1
+  maximumFractionDigits: 1,
 });
 
 const formatDay = (value: string) => {
@@ -53,7 +53,7 @@ export function PriceHistoryCard({ productId }: { productId: string }) {
       void queryClient.prefetchQuery({
         queryKey: catalogKeys.priceHistory(productId, nextPeriod),
         queryFn: () => catalogApi.getProductPriceHistory(productId, nextPeriod),
-        staleTime: 2 * 60_000
+        staleTime: 2 * 60_000,
       });
     }
   }, [productId, queryClient]);
@@ -68,7 +68,7 @@ export function PriceHistoryCard({ productId }: { productId: string }) {
         return {
           date: point.date,
           min: Number(min),
-          max: Number(max)
+          max: Number(max),
         };
       })
       .filter((point): point is HistoryPoint => point !== null)
@@ -81,7 +81,7 @@ export function PriceHistoryCard({ productId }: { productId: string }) {
       minValue: Math.min(...points.map((point) => point.min)),
       maxValue: Math.max(...points.map((point) => point.max)),
       lastMin: points[points.length - 1]?.min ?? null,
-      lastMax: points[points.length - 1]?.max ?? null
+      lastMax: points[points.length - 1]?.max ?? null,
     };
   }, [points]);
 
@@ -98,9 +98,9 @@ export function PriceHistoryCard({ productId }: { productId: string }) {
   const isBackgroundLoading = history.isFetching && !isInitialLoading && Boolean(chart);
 
   return (
-    <Card>
+    <Card className="rounded-xl border-border shadow-sm">
       <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <CardTitle>История цены</CardTitle>
+        <CardTitle className="font-heading text-xl font-bold">История цены</CardTitle>
         <div className="flex gap-2">
           {PERIODS.map((item) => (
             <Button key={item} size="sm" variant={period === item ? "default" : "outline"} onClick={() => setPeriod(item)}>
@@ -152,37 +152,16 @@ export function PriceHistoryCard({ productId }: { productId: string }) {
                     contentStyle={{
                       borderRadius: 12,
                       border: "1px solid hsl(var(--border))",
-                      background: "hsl(var(--card))"
+                      background: "hsl(var(--card))",
                     }}
                     formatter={(value: number | string, name: string) => {
                       const numeric = typeof value === "number" ? value : Number(value);
                       return [Number.isFinite(numeric) ? formatPrice(numeric) : "-", name];
                     }}
                   />
-                  <Legend
-                    verticalAlign="top"
-                    height={26}
-                    iconType="circle"
-                    wrapperStyle={{ fontSize: 12, color: "hsl(var(--muted-foreground))" }}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="max"
-                    name="Максимум"
-                    stroke="hsl(var(--accent))"
-                    strokeWidth={2.5}
-                    dot={false}
-                    activeDot={{ r: 4 }}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="min"
-                    name="Минимум"
-                    stroke="hsl(var(--success))"
-                    strokeWidth={2.5}
-                    dot={false}
-                    activeDot={{ r: 4 }}
-                  />
+                  <Legend verticalAlign="top" height={26} iconType="circle" wrapperStyle={{ fontSize: 12, color: "hsl(var(--muted-foreground))" }} />
+                  <Line type="monotone" dataKey="max" name="Максимум" stroke="hsl(var(--accent))" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
+                  <Line type="monotone" dataKey="min" name="Минимум" stroke="hsl(var(--success))" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
                 </LineChart>
               </ResponsiveContainer>
             </div>

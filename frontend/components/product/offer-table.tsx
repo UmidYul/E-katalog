@@ -37,13 +37,13 @@ export function OfferTable({ offersByStore }: { offersByStore: OffersByStore[] }
   }, [offersByStore, sortBy]);
 
   return (
-    <Card>
+    <Card className="rounded-xl border-border shadow-sm">
       <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <CardTitle>Сравнение цен по магазинам</CardTitle>
+        <CardTitle className="font-heading text-xl font-bold">Сравнение цен по магазинам</CardTitle>
         <div className="flex items-center gap-2">
           <Select value={sortBy} onValueChange={(value) => setSortBy(value as "best_value" | "price" | "seller_rating" | "delivery")}>
             <div className="w-[220px]">
-              <SelectTrigger>
+              <SelectTrigger className="rounded-lg">
                 <SelectValue />
               </SelectTrigger>
             </div>
@@ -66,14 +66,14 @@ export function OfferTable({ offersByStore }: { offersByStore: OffersByStore[] }
       </CardHeader>
       <CardContent className="space-y-3">
         {sortedStores.map((storeBlock) => (
-          <div key={storeBlock.store_id} className="space-y-2 rounded-2xl border border-border p-3">
+          <div key={storeBlock.store_id} className="space-y-2 rounded-xl border border-border p-3">
             <div className="flex items-center justify-between">
               <p className="font-medium">{storeBlock.store}</p>
-              <Badge>{formatPrice(storeBlock.minimal_price)}</Badge>
+              <Badge className="bg-accent/10 text-accent">{formatPrice(storeBlock.minimal_price)}</Badge>
             </div>
             <div className="space-y-2">
               {storeBlock.offers.map((offer) => (
-                <div key={offer.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border px-3 py-3">
+                <div key={offer.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-3 py-3">
                   <div>
                     <p className="font-medium">{offer.seller_name}</p>
                     <p className="text-xs text-muted-foreground">Обновлено: {formatScrapedAt(offer.scraped_at)}</p>
@@ -83,12 +83,10 @@ export function OfferTable({ offersByStore }: { offersByStore: OffersByStore[] }
                       {offer.in_stock ? "В наличии" : "Нет в наличии"}
                     </Badge>
                     {offer.trust_score != null ? (
-                      <Badge className="border-primary/30 bg-primary/10 text-primary">
-                        Trust: {Math.round(Number(offer.trust_score) * 100)}%
-                      </Badge>
+                      <Badge className="border-primary/30 bg-primary/10 text-primary">Trust: {Math.round(Number(offer.trust_score) * 100)}%</Badge>
                     ) : null}
                     {offer.delivery_days !== null && offer.delivery_days !== undefined ? <Badge>{offer.delivery_days} дн.</Badge> : null}
-                    <span className="text-base font-semibold text-primary">{formatPrice(offer.price_amount, offer.currency)}</span>
+                    <span className="text-base font-semibold text-foreground">{formatPrice(offer.price_amount, offer.currency)}</span>
                     <a
                       href={offer.link}
                       target="_blank"
