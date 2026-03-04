@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import secrets
 from datetime import datetime
 from typing import Any
@@ -8,6 +7,7 @@ from typing import Any
 from sqlalchemy import text
 
 from app.celery_app import celery_app
+from app.core.asyncio_runner import run_async_task
 from app.core.logging import logger
 from app.db.session import AsyncSessionLocal
 from shared.utils.time import UTC
@@ -19,7 +19,7 @@ def _now_iso() -> str:
 
 @celery_app.task(bind=True)
 def generate_b2b_subscription_invoices(self, limit: int = 500) -> dict[str, Any]:
-    return asyncio.run(_generate_b2b_subscription_invoices(limit=limit))
+    return run_async_task(_generate_b2b_subscription_invoices(limit=limit))
 
 
 async def _generate_b2b_subscription_invoices(*, limit: int = 500) -> dict[str, Any]:
@@ -131,7 +131,7 @@ async def _generate_b2b_subscription_invoices(*, limit: int = 500) -> dict[str, 
 
 @celery_app.task(bind=True)
 def generate_b2b_acts_for_paid_invoices(self, limit: int = 1000) -> dict[str, Any]:
-    return asyncio.run(_generate_b2b_acts_for_paid_invoices(limit=limit))
+    return run_async_task(_generate_b2b_acts_for_paid_invoices(limit=limit))
 
 
 async def _generate_b2b_acts_for_paid_invoices(*, limit: int = 1000) -> dict[str, Any]:
@@ -184,7 +184,7 @@ async def _generate_b2b_acts_for_paid_invoices(*, limit: int = 1000) -> dict[str
 
 @celery_app.task(bind=True)
 def scan_b2b_click_fraud_flags(self, limit: int = 5000) -> dict[str, Any]:
-    return asyncio.run(_scan_b2b_click_fraud_flags(limit=limit))
+    return run_async_task(_scan_b2b_click_fraud_flags(limit=limit))
 
 
 async def _scan_b2b_click_fraud_flags(*, limit: int = 5000) -> dict[str, Any]:
@@ -235,7 +235,7 @@ async def _scan_b2b_click_fraud_flags(*, limit: int = 5000) -> dict[str, Any]:
 
 @celery_app.task(bind=True)
 def validate_b2b_feed_health(self, stale_hours: int = 12, limit: int = 2000) -> dict[str, Any]:
-    return asyncio.run(_validate_b2b_feed_health(stale_hours=stale_hours, limit=limit))
+    return run_async_task(_validate_b2b_feed_health(stale_hours=stale_hours, limit=limit))
 
 
 async def _validate_b2b_feed_health(*, stale_hours: int = 12, limit: int = 2000) -> dict[str, Any]:

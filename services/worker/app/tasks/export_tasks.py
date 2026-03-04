@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import csv
 import json
 from datetime import datetime
@@ -10,18 +9,19 @@ from pathlib import Path
 from sqlalchemy import text
 
 from app.celery_app import celery_app
+from app.core.asyncio_runner import run_async_task
 from app.core.logging import logger
 from app.db.session import AsyncSessionLocal
 
 
 @celery_app.task(bind=True)
 def export_json(self, output: str = "/srv/data/exports/offers.json", limit: int = 10000) -> dict:
-    return asyncio.run(_export_json(output, limit))
+    return run_async_task(_export_json(output, limit))
 
 
 @celery_app.task(bind=True)
 def export_csv(self, output: str = "/srv/data/exports/offers.csv", limit: int = 10000) -> dict:
-    return asyncio.run(_export_csv(output, limit))
+    return run_async_task(_export_csv(output, limit))
 
 
 async def _fetch_rows(limit: int) -> list[dict]:

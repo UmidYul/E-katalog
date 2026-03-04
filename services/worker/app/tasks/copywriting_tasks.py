@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime
 from shared.utils.time import UTC
 
 from sqlalchemy import select, text
 
 from app.celery_app import celery_app
+from app.core.asyncio_runner import run_async_task
 from app.core.config import settings
 from app.core.logging import logger
 from app.db.session import AsyncSessionLocal
@@ -25,7 +25,7 @@ from app.platform.services.ai_copywriting import generate_product_copy
 def generate_product_copy_batch(self, limit: int | None = None) -> dict:
     requested_limit = int(limit or settings.ai_product_copy_batch_limit)
     requested_limit = max(1, min(requested_limit, 5000))
-    return asyncio.run(_run(requested_limit))
+    return run_async_task(_run(requested_limit))
 
 
 async def _fetch_candidate_ids(session, limit: int) -> list[int]:

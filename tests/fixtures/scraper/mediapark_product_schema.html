@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+  <head>
+    <meta property="og:title" content="Fallback Title | Mediapark" />
+    <meta property="og:image" content="/img/og-fallback.jpg" />
+    <script type="application/ld+json">{"@type":"BreadcrumbList","itemListElement":[]}</script>
+    <script type="application/ld+json">not-valid-json</script>
+    <script type="application/ld+json">
+      [
+        {"@type":"Organization","name":"Mediapark"},
+        {
+          "@type":"Product",
+          "name":"Samsung Galaxy S24",
+          "description":"Flagship smartphone",
+          "image":["/img/s24-1.jpg","https://cdn.example.com/s24-2.jpg","/img/s24-1.jpg"],
+          "offers":{"price":"12 345 678","availability":"https://schema.org/InStock"}
+        }
+      ]
+    </script>
+  </head>
+  <body>
+    <a href="/products/view/samsung-galaxy-s24">s24</a>
+    <a href="https://mediapark.uz/products/view/iphone-15-pro">iphone</a>
+    <a href="/products/not-view/invalid">invalid</a>
+    <script>
+      const links = "https:\/\/mediapark.uz\/products\/view\/poco-f6";
+      const bad = "https://mediapark.uz/products/view/with-query?x=1";
+    </script>
+  </body>
+</html>

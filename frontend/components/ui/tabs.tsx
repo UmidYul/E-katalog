@@ -35,7 +35,7 @@ export function TabsTrigger({ value, children, className }: { value: string; chi
       onClick={() => ctx.setValue(value)}
       className={cn(
         "rounded-xl px-3 py-1.5 text-sm font-medium transition-colors",
-        active ? "bg-background text-foreground shadow-soft" : "text-muted-foreground hover:text-foreground",
+        active ? "bg-card text-foreground shadow-soft" : "text-muted-foreground hover:text-foreground",
         className
       )}
     >

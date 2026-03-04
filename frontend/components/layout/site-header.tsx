@@ -83,8 +83,8 @@ export function SiteHeader() {
   };
 
   return (
-    <header className="sticky top-0 z-50 border-b border-border bg-card shadow-sm">
-      <div className="bg-primary text-primary-foreground">
+    <header className="sticky top-0 z-50 border-b border-border bg-card">
+      <div className="bg-card text-muted-foreground">
         <div className="mx-auto flex max-w-7xl items-center justify-center px-4 py-2 text-sm">
           <div className="flex items-center gap-6">
             <span className="flex items-center gap-1.5">
@@ -114,7 +114,7 @@ export function SiteHeader() {
 
           <div className="relative hidden max-w-2xl flex-1 lg:block">
             <form className="relative" onSubmit={onSearchSubmit}>
-              <div className={cn("flex items-center rounded-lg border-2 bg-secondary transition-colors", searchFocused ? "border-accent" : "border-border")}>
+              <div className={cn("flex items-center rounded-lg border bg-card transition-colors", searchFocused ? "border-accent" : "border-border")}>
                 <Search className="pointer-events-none ml-3 h-4 w-4 text-muted-foreground" />
                 <Input
                   value={query}
@@ -131,7 +131,7 @@ export function SiteHeader() {
               </div>
             </form>
             {searchFocused && filteredSuggestions.length > 0 ? (
-              <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-lg border border-border bg-card shadow-lg">
+              <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
                 {filteredSuggestions.map((suggestion) => (
                   <button
                     key={suggestion}
@@ -178,7 +178,7 @@ export function SiteHeader() {
         </div>
       </div>
 
-      <nav className="border-t border-border bg-card">
+      <nav className="bg-card">
         <div className="mx-auto max-w-7xl px-4">
           <ul className="scrollbar-hide flex items-center gap-1 overflow-x-auto py-2">
             {staticLinks.map((link) => (
@@ -219,7 +219,7 @@ export function SiteHeader() {
       </nav>
 
       {mobileMenuOpen ? (
-        <div className="border-t border-border bg-card md:hidden">
+        <div className="bg-card md:hidden">
           <div className="mx-auto max-w-7xl space-y-3 px-4 py-4">
             <form className="relative" onSubmit={onSearchSubmit}>
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -240,7 +240,7 @@ export function SiteHeader() {
               </Link>
             </div>
             {topCategories.length ? (
-              <div className="border-t border-border pt-2">
+              <div className="pt-2">
                 {topCategories.map((category) => (
                   <Link key={category.id} href={`/category/${category.slug}`} className="block rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-secondary hover:text-foreground">
                     {category.name}

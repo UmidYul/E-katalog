@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     ai_product_copy_enabled: bool = False
     ai_product_copy_min_compare_confidence: float = 0.70
     ai_product_copy_batch_limit: int = 300
+    embedding_model_name: str = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+    embedding_dimension: int = 768
     embedding_batch_limit: int = 400
     embedding_ann_maintenance_reindex_enabled: bool = False
     quality_report_enabled: bool = True
@@ -107,6 +109,7 @@ class Settings(BaseSettings):
     price_alerts_webhook_url: str | None = None
     price_alerts_webhook_secret: str = ""
     price_alerts_webhook_timeout_seconds: float = 10.0
+    worker_metrics_port: int = 9108
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000
@@ -172,6 +175,16 @@ class Settings(BaseSettings):
     sentry_traces_sample_rate: float = 0.10
     sentry_profiles_sample_rate: float = 0.0
     sentry_send_default_pii: bool = False
+    sentry_ignored_errors: list[str] = Field(
+        default_factory=lambda: [
+            "cancellederror",
+            "clientdisconnect",
+            "connectionreseterror",
+            "brokenpipeerror",
+            "upstream blocked requests",
+            "rate limit exceeded",
+        ]
+    )
     slo_api_5xx_target_ratio: float = 0.005
     slo_api_latency_p95_target_seconds: float = 0.5
     slo_api_latency_p99_target_seconds: float = 1.0

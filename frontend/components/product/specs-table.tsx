@@ -6,7 +6,7 @@ export function SpecsTable({ specs }: { specs: Record<string, string | number | 
   const rows = Object.entries(normalizeSpecsMap(specs)).sort(([left], [right]) => left.localeCompare(right));
 
   return (
-    <Card className="rounded-xl border-border shadow-sm">
+    <Card className="rounded-xl border-border">
       <CardHeader>
         <CardTitle className="font-heading text-xl font-bold">Нормализованные характеристики</CardTitle>
       </CardHeader>

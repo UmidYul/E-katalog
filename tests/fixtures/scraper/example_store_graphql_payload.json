@@ -1,0 +1,31 @@
+{
+  "data": {
+    "makeSearch": {
+      "items": [
+        {
+          "catalogCard": {
+            "productId": 12345,
+            "title": "GraphQL Phone 8/256 Blue",
+            "minSellPrice": 1299000,
+            "minFullPrice": 1499000,
+            "photos": [
+              {"link": {"high": "https://cdn.example.com/graphql-1.jpg"}},
+              {"link": {"high": "https://cdn.example.com/graphql-2.jpg"}}
+            ],
+            "characteristicValues": [
+              {"title": "Storage", "value": "256 GB"},
+              {"title": "Color", "value": "Blue"}
+            ],
+            "buyingOptions": {"deliveryOptions": {"stockType": "available"}}
+          }
+        },
+        {
+          "catalogCard": {
+            "title": "broken",
+            "minSellPrice": 10
+          }
+        }
+      ]
+    }
+  }
+}

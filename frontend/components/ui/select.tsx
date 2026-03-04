@@ -13,7 +13,7 @@ export function SelectTrigger({ children, className }: { children: ReactNode; cl
   return (
     <SelectPrimitive.Trigger
       className={cn(
-        "flex h-10 w-full items-center justify-between rounded-xl border border-input bg-background/95 px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60",
+        "flex h-10 w-full items-center justify-between rounded-xl border border-input bg-card px-3 text-sm ring-offset-background focus:outline-none focus:border-ring focus:ring-2 focus:ring-ring/15 disabled:cursor-not-allowed disabled:opacity-60",
         className
       )}
     >

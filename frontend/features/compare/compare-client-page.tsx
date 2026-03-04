@@ -525,7 +525,7 @@ export function CompareClientPage() {
       </div>
 
       <Card className="overflow-hidden">
-        <CardContent className="max-h-[70vh] overflow-auto p-0">
+        <CardContent className="p-0">
           {compareQuery.isLoading ? (
             <div className="p-4 text-sm text-muted-foreground">Загружаем матрицу сравнения...</div>
           ) : (

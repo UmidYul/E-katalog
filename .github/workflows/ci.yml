@@ -73,7 +73,11 @@ jobs:
           PYTHONPATH: services/scraper:.
         run: |
           python -m pytest -q --maxfail=1 --confcutdir=tests/unit \
-            tests/unit/test_alifshop_parser.py
+            tests/unit/test_alifshop_parser.py \
+            tests/unit/test_mediapark_parser.py \
+            tests/unit/test_texnomart_parser.py \
+            tests/unit/test_example_store_parser.py \
+            tests/unit/test_scraper_factory.py
 
       - name: Run worker integration tests
         env:

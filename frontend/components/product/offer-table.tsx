@@ -37,7 +37,7 @@ export function OfferTable({ offersByStore }: { offersByStore: OffersByStore[] }
   }, [offersByStore, sortBy]);
 
   return (
-    <Card className="rounded-xl border-border shadow-sm">
+    <Card className="rounded-xl border-border">
       <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <CardTitle className="font-heading text-xl font-bold">Сравнение цен по магазинам</CardTitle>
         <div className="flex items-center gap-2">

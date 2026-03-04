@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import asyncio
-
 from app.core.config import settings
 from app.core.errors import UpstreamRateLimitedError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +8,7 @@ from app.core.logging import logger
 from app.db.models import Shop
 from app.parsers.base import StoreParser
 from app.pipelines.product_service import ProductService
+from app.utils.domain_limiter import DomainLimiter
 
 
 class ScraperService:
@@ -17,15 +16,11 @@ class ScraperService:
         self,
         session: AsyncSession,
         parser: StoreParser,
-        *,
-        max_concurrency: int = 10,
-        inter_request_delay_seconds: float = 0.0,
     ) -> None:
         self._session = session
         self._parser = parser
         self._product_service = ProductService(session)
-        self._semaphore = asyncio.Semaphore(max_concurrency)
-        self._inter_request_delay_seconds = max(0.0, inter_request_delay_seconds)
+        self._domain_limiter = DomainLimiter()
 
     async def scrape_categories(self, category_urls: list[str]) -> None:
         shop = await self._product_service.get_or_create_shop(name=self._parser.shop_name, url=self._parser.shop_url)
@@ -36,7 +31,8 @@ class ScraperService:
             if product_limit and processed >= product_limit:
                 break
             try:
-                links = await self._parser.discover_product_links(category_url)
+                async with self._domain_limiter.acquire(category_url):
+                    links = await self._parser.discover_product_links(category_url)
             except UpstreamRateLimitedError as exc:
                 logger.warning(
                     "upstream_rate_limited_skip_category",
@@ -62,8 +58,6 @@ class ScraperService:
                     category_rate_limited = True
                     break
                 processed += 1
-                if self._inter_request_delay_seconds > 0:
-                    await asyncio.sleep(self._inter_request_delay_seconds)
                 if product_limit and processed >= product_limit:
                     break
             if category_rate_limited:
@@ -72,7 +66,7 @@ class ScraperService:
         await self._session.commit()
 
     async def _parse_and_upsert(self, product_url: str, shop: Shop) -> bool:
-        async with self._semaphore:
+        async with self._domain_limiter.acquire(product_url):
             try:
                 parsed = await self._parser.parse_product(product_url)
                 await self._product_service.upsert_offer(parsed=parsed, shop=shop)

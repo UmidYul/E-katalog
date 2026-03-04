@@ -66,7 +66,7 @@ export function ProductGallery({ images }: { images: string[] }) {
 
   return (
     <div className="space-y-3">
-      <div className="relative aspect-square overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      <div className="relative aspect-square overflow-hidden rounded-xl border border-border bg-card">
         {active ? (
           <Image
             src={active}

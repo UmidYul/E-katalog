@@ -98,7 +98,7 @@ export function PriceHistoryCard({ productId }: { productId: string }) {
   const isBackgroundLoading = history.isFetching && !isInitialLoading && Boolean(chart);
 
   return (
-    <Card className="rounded-xl border-border shadow-sm">
+    <Card className="rounded-xl border-border">
       <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <CardTitle className="font-heading text-xl font-bold">История цены</CardTitle>
         <div className="flex gap-2">
@@ -122,7 +122,7 @@ export function PriceHistoryCard({ productId }: { productId: string }) {
           <>
             <div className="relative h-64 overflow-hidden rounded-xl border border-border/80 bg-gradient-to-b from-background to-muted/20 px-2 py-3">
               {isBackgroundLoading ? (
-                <div className="absolute right-3 top-3 z-10 rounded-full border border-border bg-background/90 px-2 py-0.5 text-[11px] text-muted-foreground shadow-sm">
+                <div className="absolute right-3 top-3 z-10 rounded-full border border-border bg-card px-2 py-0.5 text-[11px] text-muted-foreground">
                   Обновляем...
                 </div>
               ) : null}

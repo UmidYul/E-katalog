@@ -18,6 +18,7 @@ from sqlalchemy import text
 
 from app.platform.services.pipeline_offsets import ensure_offsets_table
 from app.platform.services.canonical_index import sync_canonical_key_index_batch
+from app.core.asyncio_runner import run_async_task
 from app.core.config import settings
 from app.core.logging import logger
 from app.db.session import AsyncSessionLocal, engine
@@ -321,7 +322,7 @@ async def _send_quality_alert_webhook(payload: dict[str, Any]) -> bool:
 
 @celery_app.task(bind=True)
 def send_test_quality_alert(self) -> dict[str, Any]:
-    return asyncio.run(_send_test_quality_alert())
+    return run_async_task(_send_test_quality_alert())
 
 
 async def _send_test_quality_alert() -> dict[str, Any]:
@@ -366,7 +367,7 @@ async def _send_test_quality_alert() -> dict[str, Any]:
     max_retries=5,
 )
 def generate_catalog_quality_report(self) -> dict:
-    return asyncio.run(_generate_catalog_quality_report())
+    return run_async_task(_generate_catalog_quality_report())
 
 
 async def _generate_catalog_quality_report() -> dict:
@@ -795,7 +796,7 @@ async def _load_price_alert_candidates(session, *, limit: int) -> list[dict[str,
                     a.target_price,
                     a.last_seen_price,
                     a.last_notified_at,
-                    cp.title as product_title,
+                    cp.normalized_title as product_title,
                     cp.uuid as product_uuid,
                     cur.current_min_price,
                     au.telegram as telegram_contact,
@@ -1006,7 +1007,7 @@ async def _deliver_price_alert_notifications(*, limit: int) -> dict[str, Any]:
 @celery_app.task(bind=True)
 def deliver_price_alert_notifications(self, limit: int | None = None) -> dict[str, Any]:
     effective_limit = int(limit) if isinstance(limit, int) and limit > 0 else int(settings.price_alerts_scan_limit)
-    return asyncio.run(_deliver_price_alert_notifications(limit=effective_limit))
+    return run_async_task(_deliver_price_alert_notifications(limit=effective_limit))
 
 
 @celery_app.task(bind=True)
@@ -1318,7 +1319,7 @@ async def _evaluate_admin_alert_events() -> dict[str, Any]:
 
 @celery_app.task(bind=True)
 def evaluate_admin_alert_events(self) -> dict[str, Any]:
-    return asyncio.run(_evaluate_admin_alert_events())
+    return run_async_task(_evaluate_admin_alert_events())
 
 
 @celery_app.task(bind=True)
@@ -1470,7 +1471,7 @@ def deactivate_no_offer_products(self, limit: int | None = None, min_age_hours: 
         if isinstance(min_age_hours, int) and min_age_hours > 0
         else int(settings.quality_report_auto_deactivate_no_offer_hours)
     )
-    return asyncio.run(
+    return run_async_task(
         _deactivate_no_offer_products(
             limit=effective_limit,
             min_age_hours=effective_min_age_hours,
@@ -1578,7 +1579,7 @@ def cleanup_auth_sessions(self, max_age_days: int | None = None, scan_limit: int
         if isinstance(scan_limit, int) and scan_limit > 0
         else int(settings.auth_session_cleanup_scan_limit)
     )
-    return asyncio.run(
+    return run_async_task(
         _cleanup_auth_sessions_redis(
             max_age_days=effective_max_age_days,
             scan_limit=effective_scan_limit,
@@ -1747,7 +1748,7 @@ def cleanup_auth_token_tables(
         if isinstance(revoked_session_retention_days, int) and revoked_session_retention_days > 0
         else int(settings.auth_session_revoked_retention_days)
     )
-    return asyncio.run(
+    return run_async_task(
         _cleanup_auth_token_tables(
             reset_used_retention_days=effective_reset_used_retention_days,
             email_confirmation_used_retention_days=effective_email_confirmation_used_retention_days,
@@ -1834,7 +1835,7 @@ def cleanup_auth_ephemeral_keys(self, scan_limit: int | None = None) -> dict[str
         if isinstance(scan_limit, int) and scan_limit > 0
         else int(settings.auth_ephemeral_cleanup_scan_limit)
     )
-    return asyncio.run(
+    return run_async_task(
         _cleanup_auth_ephemeral_keys_redis(
             scan_limit=effective_scan_limit,
         )
@@ -1958,7 +1959,7 @@ def cleanup_auth_legacy_redis_keys(
         if isinstance(scan_limit, int) and scan_limit > 0
         else int(settings.auth_legacy_redis_cleanup_scan_limit)
     )
-    return asyncio.run(
+    return run_async_task(
         _cleanup_auth_legacy_redis_keys(
             grace_days=effective_grace_days,
             scan_limit=effective_scan_limit,
@@ -1978,7 +1979,7 @@ def refresh_canonical_key_index(
     reset_offset: bool = False,
     followup: bool = True,
 ) -> dict[str, Any]:
-    result = asyncio.run(_refresh_canonical_key_index(limit=limit, reset_offset=reset_offset))
+    result = run_async_task(_refresh_canonical_key_index(limit=limit, reset_offset=reset_offset))
     if followup and bool(result.get("has_more")):
         self.apply_async(kwargs={"limit": int(result.get("limit") or 100000), "reset_offset": False, "followup": True})
     return result
@@ -2012,7 +2013,7 @@ def enqueue_refresh_canonical_key_index(self) -> str:
 
 @celery_app.task(bind=True)
 def refresh_embedding_ann_indexes(self, force_reindex: bool = False) -> dict[str, Any]:
-    return asyncio.run(_refresh_embedding_ann_indexes(force_reindex=force_reindex))
+    return run_async_task(_refresh_embedding_ann_indexes(force_reindex=force_reindex))
 
 
 async def _refresh_embedding_ann_indexes(*, force_reindex: bool = False) -> dict[str, Any]:
@@ -2095,7 +2096,7 @@ def compact_canonical_match_snapshots(
     snapshot_date: str | None = None,
     limit: int = 100000,
 ) -> dict[str, Any]:
-    return asyncio.run(_compact_canonical_match_snapshots(snapshot_date=snapshot_date, limit=limit))
+    return run_async_task(_compact_canonical_match_snapshots(snapshot_date=snapshot_date, limit=limit))
 
 
 async def _compact_canonical_match_snapshots(*, snapshot_date: str | None = None, limit: int = 100000) -> dict[str, Any]:
@@ -2326,7 +2327,7 @@ def refresh_offer_trust_scores(
         if isinstance(stock_window_days, int) and stock_window_days > 0
         else int(settings.offer_trust_score_stock_window_days)
     )
-    return asyncio.run(
+    return run_async_task(
         _refresh_offer_trust_scores(
             limit=effective_limit,
             freshness_hours=effective_freshness_hours,
@@ -2342,7 +2343,7 @@ def enqueue_refresh_offer_trust_scores(self) -> str:
 
 @celery_app.task(bind=True)
 def cleanup_stale_offers(self, days: int = 14) -> dict:
-    return asyncio.run(_cleanup(days))
+    return run_async_task(_cleanup(days))
 
 
 async def _cleanup(days: int) -> dict:
@@ -2370,7 +2371,7 @@ def rotate_price_history_partitions(self) -> dict:
 
 @celery_app.task(bind=True)
 def cleanup_empty_canonicals(self, limit: int = 1000) -> dict:
-    return asyncio.run(_cleanup_empty_canonicals(limit))
+    return run_async_task(_cleanup_empty_canonicals(limit))
 
 
 async def _cleanup_empty_canonicals(limit: int) -> dict:
@@ -2460,7 +2461,7 @@ async def _prepare_full_catalog_rebuild() -> dict:
 
 @celery_app.task(bind=True)
 def enqueue_full_catalog_rebuild(self) -> dict:
-    prepared = asyncio.run(_prepare_full_catalog_rebuild())
+    prepared = run_async_task(_prepare_full_catalog_rebuild())
     workflow = chain(
         celery_app.signature("app.tasks.normalize_tasks.normalize_full_catalog", kwargs={"chunk_size": 1000}),
         celery_app.signature("app.tasks.dedupe_tasks.find_duplicate_candidates_task"),

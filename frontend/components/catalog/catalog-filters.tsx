@@ -26,15 +26,18 @@ const PRICE_MAX = 100_000_000;
 const DEFAULT_SORT: FilterState["sort"] = "popular";
 const numberFormatter = new Intl.NumberFormat("en-US");
 
-const normalizePriceRange = (next: number[]): [number, number] => [
-  Math.min(next[0] ?? PRICE_MIN, next[1] ?? PRICE_MAX),
-  Math.max(next[0] ?? PRICE_MIN, next[1] ?? PRICE_MAX),
-];
+const clampPrice = (value: number, upperBound: number) => Math.min(Math.max(Math.round(value), PRICE_MIN), upperBound);
 
-const countActiveFilters = (value: FilterState): number => {
+const normalizePriceRange = (next: number[], upperBound: number): [number, number] => {
+  const from = clampPrice(next[0] ?? PRICE_MIN, upperBound);
+  const to = clampPrice(next[1] ?? upperBound, upperBound);
+  return [Math.min(from, to), Math.max(from, to)];
+};
+
+const countActiveFilters = (value: FilterState, priceMaxBound: number): number => {
   const attrCount = Object.values(value.attrs ?? {}).reduce((acc, values) => acc + values.length, 0);
   const hasMinPrice = value.minPrice !== undefined && value.minPrice > PRICE_MIN;
-  const hasMaxPrice = value.maxPrice !== undefined && value.maxPrice < PRICE_MAX;
+  const hasMaxPrice = value.maxPrice !== undefined && value.maxPrice < priceMaxBound;
 
   return (
     (value.q?.trim() ? 1 : 0) +
@@ -54,6 +57,7 @@ export function CatalogFilters({
   stores,
   sellers,
   dynamicAttributes,
+  priceMaxBound,
   value,
   onChange,
 }: {
@@ -61,23 +65,27 @@ export function CatalogFilters({
   stores?: Array<{ id: string; name: string }>;
   sellers?: Array<{ id: string; name: string }>;
   dynamicAttributes?: Array<{ key: string; label: string; values: Array<{ value: string; label: string; count?: number }> }>;
+  priceMaxBound?: number;
   value: FilterState;
   onChange: (v: FilterState) => void;
 }) {
+  const effectivePriceMax = Math.max(PRICE_MIN + 1, Math.round(priceMaxBound ?? PRICE_MAX));
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [priceRange, setPriceRange] = useState<[number, number]>([value.minPrice ?? PRICE_MIN, value.maxPrice ?? PRICE_MAX]);
-  const activeFilterCount = useMemo(() => countActiveFilters(value), [value]);
+  const [priceRange, setPriceRange] = useState<[number, number]>(
+    normalizePriceRange([value.minPrice ?? PRICE_MIN, value.maxPrice ?? effectivePriceMax], effectivePriceMax)
+  );
+  const activeFilterCount = useMemo(() => countActiveFilters(value, effectivePriceMax), [effectivePriceMax, value]);
   const hasActiveFilters = activeFilterCount > 0;
 
   useEffect(() => {
-    setPriceRange([value.minPrice ?? PRICE_MIN, value.maxPrice ?? PRICE_MAX]);
-  }, [value.maxPrice, value.minPrice]);
+    setPriceRange(normalizePriceRange([value.minPrice ?? PRICE_MIN, value.maxPrice ?? effectivePriceMax], effectivePriceMax));
+  }, [effectivePriceMax, value.maxPrice, value.minPrice]);
 
   const priceLabel = useMemo(() => {
     const [from, to] = priceRange;
-    if (from <= PRICE_MIN && to >= PRICE_MAX) return "Любая цена";
+    if (from <= PRICE_MIN && to >= effectivePriceMax) return "Любая цена";
     return `${numberFormatter.format(from)} - ${numberFormatter.format(to)} UZS`;
-  }, [priceRange]);
+  }, [effectivePriceMax, priceRange]);
 
   const resetFilters = () => {
     onChange({
@@ -116,22 +124,22 @@ export function CatalogFilters({
         </Select>
       </div>
 
-      <div className="space-y-2 rounded-xl border border-border bg-secondary/40 p-3">
+      <div className="space-y-2 rounded-xl border border-border bg-card p-3">
         <label className="text-sm font-medium">Диапазон цен</label>
         <Slider
           value={priceRange}
           min={PRICE_MIN}
-          max={PRICE_MAX}
+          max={effectivePriceMax}
           onValueChange={(next) => {
-            setPriceRange(normalizePriceRange(next));
+            setPriceRange(normalizePriceRange(next, effectivePriceMax));
           }}
           onValueCommit={(next) => {
-            const normalized = normalizePriceRange(next);
+            const normalized = normalizePriceRange(next, effectivePriceMax);
             setPriceRange(normalized);
             onChange({
               ...value,
               minPrice: normalized[0] > PRICE_MIN ? normalized[0] : undefined,
-              maxPrice: normalized[1] < PRICE_MAX ? normalized[1] : undefined,
+              maxPrice: normalized[1] < effectivePriceMax ? normalized[1] : undefined,
             });
           }}
         />
@@ -259,8 +267,8 @@ export function CatalogFilters({
   return (
     <>
       <aside className="hidden self-start lg:sticky lg:top-20 lg:block">
-        <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-          <div className="flex items-center justify-between gap-2 border-b border-border p-4">
+        <div className="overflow-hidden rounded-xl">
+          <div className="flex items-center justify-between gap-2 px-2 pb-2">
             <div>
               <p className="font-heading text-base font-bold">Фильтры</p>
               <p className="text-xs text-muted-foreground">{hasActiveFilters ? `Активных: ${activeFilterCount}` : "Активных фильтров нет"}</p>
@@ -269,7 +277,7 @@ export function CatalogFilters({
               Сбросить
             </Button>
           </div>
-          <div className="max-h-[calc(100vh-6.5rem)] overflow-y-auto p-4">{panel}</div>
+          <div className="max-h-[calc(100vh-6.5rem)] overflow-y-auto px-2 pb-2">{panel}</div>
         </div>
       </aside>
       <div className="lg:hidden">

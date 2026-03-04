@@ -62,7 +62,7 @@ const config: Config = {
         "2xl": "1.25rem"
       },
       boxShadow: {
-        soft: "0 18px 34px -22px rgba(7, 18, 38, 0.42)"
+        soft: "0 6px 18px -14px hsl(var(--primary) / 0.24)"
       },
       fontFamily: {
         sans: ["var(--font-body)", "Source Sans 3", "Segoe UI", "system-ui", "sans-serif"],

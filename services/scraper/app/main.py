@@ -7,10 +7,24 @@ from app.core.config import settings
 from app.core.logging import configure_logging, logger
 from app.tasks.scrape_tasks import _run_marketplace_scrape
 from app.utils.shutdown import ShutdownSignal
+from shared.observability.sentry import init_sentry
 
 
 async def run() -> None:
     configure_logging(settings.log_level)
+    init_sentry(
+        enabled=bool(settings.sentry_enabled),
+        dsn=settings.sentry_dsn,
+        environment=str(settings.environment),
+        release=str(settings.sentry_release or ""),
+        traces_sample_rate=float(settings.sentry_traces_sample_rate),
+        profiles_sample_rate=float(settings.sentry_profiles_sample_rate),
+        send_default_pii=bool(settings.sentry_send_default_pii),
+        service="scraper",
+        ignored_errors=list(settings.sentry_ignored_errors),
+        logger=logger,
+        integrations=[],
+    )
     shutdown = ShutdownSignal()
     shutdown.install()
 

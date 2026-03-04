@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+  <head>
+    <script type="application/ld+json">
+      {
+        "@type":"ItemList",
+        "itemListElement":[
+          {
+            "item":{
+              "url":"/product/phone-x-100001",
+              "name":"Phone X 8/256",
+              "image":"https://cdn.example.com/phone-x.jpg",
+              "offers":{"price":"999999"}
+            }
+          },
+          {
+            "item":{
+              "url":"/product/broken-item",
+              "name":"Broken Item"
+            }
+          }
+        ]
+      }
+    </script>
+  </head>
+  <body>
+    <a href="/ru/product/1234567">product-id</a>
+    <a href="/ru/product/detail/7654321">product-detail</a>
+    <a href="/product/super-phone-987654">slug-product</a>
+    <a href="https://example.uz/ru/product/1234567">dup-absolute</a>
+    <script>
+      const p1 = "https:\/\/example.uz\/ru\/product\/1112223";
+      const p2 = "\/product\/mega-device-555444";
+      const skip = "\/ru\/cart\/1";
+    </script>
+  </body>
+</html>

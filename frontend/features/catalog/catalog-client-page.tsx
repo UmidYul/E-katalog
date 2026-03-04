@@ -44,10 +44,10 @@ const toQueryString = (filters: FilterState & { cursor?: string; page?: number }
   return params.toString();
 };
 
-const getActiveFilterCount = (filters: FilterState) => {
+const getActiveFilterCount = (filters: FilterState, priceMaxBound: number = PRICE_MAX) => {
   const attrCount = Object.values(filters.attrs ?? {}).reduce((acc, values) => acc + values.length, 0);
   const hasMinPrice = filters.minPrice !== undefined && filters.minPrice > PRICE_MIN;
-  const hasMaxPrice = filters.maxPrice !== undefined && filters.maxPrice < PRICE_MAX;
+  const hasMaxPrice = filters.maxPrice !== undefined && filters.maxPrice < priceMaxBound;
 
   return (
     (filters.q?.trim() ? 1 : 0) +
@@ -60,6 +60,13 @@ const getActiveFilterCount = (filters: FilterState) => {
     (filters.maxDeliveryDays !== undefined ? 1 : 0) +
     attrCount
   );
+};
+
+const getProductTopPrice = (item?: { min_price?: number | null; max_price?: number | null }) => {
+  if (!item) return undefined;
+  const candidates = [item.max_price, item.min_price].filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0);
+  if (!candidates.length) return undefined;
+  return Math.max(...candidates);
 };
 
 export function CatalogClientPage({
@@ -89,18 +96,32 @@ export function CatalogClientPage({
     return params.toString();
   }, [categoryId, presetBrandId, searchParams]);
 
-  const filters: FilterState = {
-    q: fromUrl.q ?? presetQuery,
-    sort: fromUrl.sort,
-    minPrice: fromUrl.min_price,
-    maxPrice: fromUrl.max_price,
-    maxDeliveryDays: fromUrl.max_delivery_days,
-    brands: mergeUnique([...(fromUrl.brand_id ?? []), ...(presetBrandId ? [presetBrandId] : [])]),
-    stores: fromUrl.store_id ?? [],
-    sellers: fromUrl.seller_id ?? [],
-    attrs: fromUrl.attrs,
-  };
-  const activeFilterCount = useMemo(() => getActiveFilterCount(filters), [filters]);
+  const filters = useMemo<FilterState>(
+    () => ({
+      q: fromUrl.q ?? presetQuery,
+      sort: fromUrl.sort,
+      minPrice: fromUrl.min_price,
+      maxPrice: fromUrl.max_price,
+      maxDeliveryDays: fromUrl.max_delivery_days,
+      brands: mergeUnique([...(fromUrl.brand_id ?? []), ...(presetBrandId ? [presetBrandId] : [])]),
+      stores: fromUrl.store_id ?? [],
+      sellers: fromUrl.seller_id ?? [],
+      attrs: fromUrl.attrs,
+    }),
+    [
+      fromUrl.attrs,
+      fromUrl.brand_id,
+      fromUrl.max_delivery_days,
+      fromUrl.max_price,
+      fromUrl.min_price,
+      fromUrl.q,
+      fromUrl.seller_id,
+      fromUrl.sort,
+      fromUrl.store_id,
+      presetBrandId,
+      presetQuery,
+    ]
+  );
 
   useEffect(() => {
     setCursorByPage({ 1: undefined });
@@ -131,9 +152,32 @@ export function CatalogClientPage({
     [categoryId, debounced, fromUrl.cursor, presetBrandId]
   );
 
+  const priceBoundsQueryPayload = useMemo(
+    () => ({
+      q: debounced.q,
+      sort: "price_desc" as const,
+      max_delivery_days: debounced.maxDeliveryDays,
+      brand_id: mergeUnique([...(debounced.brands ?? []), ...(presetBrandId ? [presetBrandId] : [])]),
+      store_id: debounced.stores,
+      seller_id: debounced.sellers,
+      attrs: debounced.attrs,
+      category_id: categoryId,
+      limit: 1,
+    }),
+    [categoryId, debounced, presetBrandId]
+  );
+
   const products = useCatalogProducts(queryPayload);
+  const priceBoundsProbe = useCatalogProducts(priceBoundsQueryPayload);
   const brands = useBrands();
   const dynamicFilters = useDynamicFilters(categoryId);
+  const priceMaxBound = useMemo(() => {
+    const probeMax = getProductTopPrice(priceBoundsProbe.data?.items?.[0]);
+    const pageMax = Math.max(...(products.data?.items ?? []).map((item) => getProductTopPrice(item) ?? 0), 0);
+    const upperBound = probeMax ?? pageMax;
+    return upperBound > PRICE_MIN ? Math.max(PRICE_MIN + 1, Math.ceil(upperBound)) : PRICE_MAX;
+  }, [priceBoundsProbe.data?.items, products.data?.items]);
+  const activeFilterCount = useMemo(() => getActiveFilterCount(filters, priceMaxBound), [filters, priceMaxBound]);
   const hasNextPage = Boolean(products.data?.next_cursor);
   const canGoPrevPage = currentPage > 1 && (currentPage === 2 || Boolean(cursorByPage[currentPage - 1]));
   const showPagination = (products.data?.items?.length ?? 0) > 0 || currentPage > 1;
@@ -206,9 +250,9 @@ export function CatalogClientPage({
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 px-4 py-6">
-      <section className="rounded-xl border border-border bg-card p-6 shadow-sm">
+      <section className="space-y-2 px-1">
         <h1 className="font-heading text-2xl font-bold text-foreground md:text-3xl">{pageTitle ?? "Каталог"}</h1>
-        <p className="mt-2 text-sm text-muted-foreground">Сравнивайте цены и предложения по проверенным магазинам.</p>
+        <p className="text-sm text-muted-foreground">Сравнивайте цены и предложения по проверенным магазинам.</p>
       </section>
 
       <div className="grid gap-6 lg:grid-cols-[300px_minmax(0,1fr)] lg:items-start">
@@ -217,12 +261,13 @@ export function CatalogClientPage({
           stores={dynamicFilters.data?.stores}
           sellers={dynamicFilters.data?.sellers}
           dynamicAttributes={dynamicFilters.data?.attributes}
+          priceMaxBound={priceMaxBound}
           value={filters}
           onChange={onFiltersChange}
         />
 
         <div className="space-y-4">
-          <div className="space-y-3 rounded-xl border border-border bg-card p-4 shadow-sm">
+          <div className="space-y-3 px-1 py-1">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge>{products.data?.items.length ?? 0} на этой странице</Badge>
@@ -248,7 +293,7 @@ export function CatalogClientPage({
           <CatalogGrid loading={products.isLoading} items={products.data?.items ?? []} />
 
           {showPagination ? (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-3 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3 px-1 py-2">
               <p className="text-sm text-muted-foreground">Страница {currentPage}</p>
               <div className="flex flex-wrap items-center gap-2">
                 <Button variant="outline" size="sm" disabled={!canGoPrevPage || products.isFetching} onClick={() => goToPage(currentPage - 1)}>

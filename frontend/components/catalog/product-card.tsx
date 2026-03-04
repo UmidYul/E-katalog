@@ -39,8 +39,8 @@ export function ProductCard({
 
   return (
     <motion.article layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
-      <div className="group overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-all hover:-translate-y-1 hover:shadow-md">
-        <div className="relative aspect-[4/3] bg-secondary/70 p-2">
+      <div className="group overflow-hidden rounded-xl border border-border/90 bg-card transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_10px_20px_hsl(var(--primary)/0.08)]">
+        <div className="relative aspect-[4/3] bg-card p-2">
           <Link href={productHref} className="absolute inset-0 block" aria-label={product.normalized_title}>
             <Image
               src={product.image_url ?? "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&w=1200&q=80"}

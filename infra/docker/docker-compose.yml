@@ -44,9 +44,46 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-    command: ["celery", "-A", "app.celery_app:celery_app", "worker", "-Q", "scrape.high,scrape.default,normalize,dedupe,embedding,reindex,maintenance,export", "--concurrency=8", "--loglevel=INFO"]
+    environment:
+      PROMETHEUS_MULTIPROC_DIR: ${PROMETHEUS_MULTIPROC_DIR:-/tmp/prometheus-multiproc}
+    volumes:
+      - prometheus_multiproc:/tmp/prometheus-multiproc
+    command: ["sh", "-c", "mkdir -p ${PROMETHEUS_MULTIPROC_DIR:-/tmp/prometheus-multiproc} && rm -f ${PROMETHEUS_MULTIPROC_DIR:-/tmp/prometheus-multiproc}/* && celery -A app.celery_app:celery_app worker -Q normalize,dedupe,embedding,reindex,maintenance,export --concurrency=8 --loglevel=INFO"]
 
   beat:
+    build:
+      context: ../..
+      dockerfile: services/worker/Dockerfile
+    env_file:
+      - ../../.env
+    environment:
+      PROMETHEUS_MULTIPROC_DIR: ${PROMETHEUS_MULTIPROC_DIR:-/tmp/prometheus-multiproc}
+    depends_on:
+      redis:
+        condition: service_started
+    volumes:
+      - prometheus_multiproc:/tmp/prometheus-multiproc
+    command: ["sh", "-c", "mkdir -p ${PROMETHEUS_MULTIPROC_DIR:-/tmp/prometheus-multiproc} && celery -A app.celery_app:celery_app beat --loglevel=INFO"]
+
+  worker-metrics:
+    build:
+      context: ../..
+      dockerfile: services/worker/Dockerfile
+    env_file:
+      - ../../.env
+    environment:
+      PROMETHEUS_MULTIPROC_DIR: ${PROMETHEUS_MULTIPROC_DIR:-/tmp/prometheus-multiproc}
+      WORKER_METRICS_PORT: ${WORKER_METRICS_PORT:-9108}
+    depends_on:
+      worker:
+        condition: service_started
+    volumes:
+      - prometheus_multiproc:/tmp/prometheus-multiproc
+    ports:
+      - "9108:9108"
+    command: ["python", "-m", "app.metrics_server"]
+
+  flower:
     build:
       context: ../..
       dockerfile: services/worker/Dockerfile
@@ -55,7 +92,11 @@ services:
     depends_on:
       redis:
         condition: service_started
-    command: ["celery", "-A", "app.celery_app:celery_app", "beat", "--loglevel=INFO"]
+      worker:
+        condition: service_started
+    ports:
+      - "5555:5555"
+    command: ["celery", "-A", "app.celery_app:celery_app", "flower", "--port=5555"]
 
   scraper:
     build:
@@ -68,6 +109,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+    restart: unless-stopped
+    command: ["celery", "-A", "app.tasks.celery_app:celery_app", "worker", "-Q", "scrape.high,scrape.default", "--concurrency=4", "--loglevel=INFO"]
 
   frontend:
     build:
@@ -97,3 +140,4 @@ services:
 
 volumes:
   postgres_data:
+  prometheus_multiproc:

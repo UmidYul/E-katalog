@@ -16,7 +16,7 @@ export function SheetContent({ children, className }: { children: ReactNode; cla
       <Dialog.Overlay className="fixed inset-0 z-40 bg-black/35 backdrop-blur-[1px]" />
       <Dialog.Content
         className={cn(
-          "fixed right-0 top-0 z-50 h-full w-[86vw] max-w-sm border-l border-border bg-background p-5 shadow-soft outline-none",
+          "fixed right-0 top-0 z-50 h-full w-[86vw] max-w-sm border-l border-border bg-card p-5 shadow-soft outline-none",
           className
         )}
       >

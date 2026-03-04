@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 export default function StatusPage() {
   return (
     <main className="mx-auto max-w-7xl px-4 py-10">
-      <article className="mx-auto max-w-3xl rounded-xl border border-border bg-card p-6 shadow-sm md:p-8">
+      <article className="mx-auto max-w-3xl rounded-xl border border-border bg-card p-6 md:p-8">
         <span className="inline-flex rounded-full bg-accent/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.1em] text-accent">
           Platform Operations
         </span>
@@ -20,16 +20,16 @@ export default function StatusPage() {
         </p>
 
         <div className="mt-6 space-y-3">
-          <div className="rounded-lg border border-border bg-background/60 p-3 text-sm">
+          <div className="rounded-lg border border-border bg-card p-3 text-sm">
             API health: <code className="rounded bg-muted px-1.5 py-0.5 text-xs">/api/v1/health</code>
           </div>
-          <div className="rounded-lg border border-border bg-background/60 p-3 text-sm">
+          <div className="rounded-lg border border-border bg-card p-3 text-sm">
             API readiness: <code className="rounded bg-muted px-1.5 py-0.5 text-xs">/api/v1/ready</code>
           </div>
-          <div className="rounded-lg border border-border bg-background/60 p-3 text-sm">
+          <div className="rounded-lg border border-border bg-card p-3 text-sm">
             API liveness: <code className="rounded bg-muted px-1.5 py-0.5 text-xs">/api/v1/live</code>
           </div>
-          <div className="rounded-lg border border-border bg-background/60 p-3 text-sm">
+          <div className="rounded-lg border border-border bg-card p-3 text-sm">
             Metrics: <code className="rounded bg-muted px-1.5 py-0.5 text-xs">/api/v1/metrics</code>
           </div>
         </div>

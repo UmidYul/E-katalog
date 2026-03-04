@@ -22,6 +22,14 @@ class Settings(BaseSettings):
     http_ca_bundle: str | None = None
     request_concurrency: int = 20
     scrape_inter_request_delay_seconds: float = 0.7
+    legacy_write_enabled: bool = True
+    scrape_delay_jitter_ratio: float = 0.2
+    scrape_default_domain_concurrency: int = 2
+    scrape_default_domain_delay_seconds: float = 2.0
+    scrape_texnomart_concurrency: int = 3
+    scrape_texnomart_delay_seconds: float = 1.5
+    scrape_mediapark_concurrency: int = 5
+    scrape_mediapark_delay_seconds: float = 1.0
     scrape_product_limit: int = 0
     max_retries: int = 5
     task_retry_backoff_max_seconds: int = 600
@@ -37,6 +45,22 @@ class Settings(BaseSettings):
     ai_request_max_delay_seconds: float = 20.0
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
+    sentry_enabled: bool = False
+    sentry_dsn: str | None = None
+    sentry_release: str = ""
+    sentry_traces_sample_rate: float = 0.10
+    sentry_profiles_sample_rate: float = 0.0
+    sentry_send_default_pii: bool = False
+    sentry_ignored_errors: list[str] = Field(
+        default_factory=lambda: [
+            "cancellederror",
+            "clientdisconnect",
+            "connectionreseterror",
+            "brokenpipeerror",
+            "upstream blocked requests",
+            "rate limit exceeded",
+        ]
+    )
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000
@@ -51,6 +75,8 @@ class Settings(BaseSettings):
         ]
     )
     proxies: list[str] = Field(default_factory=list)
+    proxy_texnomart: str = ""
+    proxy_mediapark: str = ""
 
     scraper_provider: Literal["mediapark", "texnomart", "alifshop", "example"] = "texnomart"
 
@@ -90,6 +116,36 @@ class Settings(BaseSettings):
         if env_name == "local" and (not secret or secret == "change-me-cursor-secret"):
             self.cursor_secret = "dev-local-cursor-secret"
         return self
+
+    @staticmethod
+    def _parse_proxy_env(raw_value: str | None) -> list[str]:
+        if not raw_value:
+            return []
+        value = str(raw_value).strip()
+        if not value:
+            return []
+        normalized = value.replace("\n", ",").replace(";", ",")
+        return [item.strip() for item in normalized.split(",") if item.strip()]
+
+    def proxies_for_host(self, host: str | None) -> list[str]:
+        hostname = str(host or "").strip().lower()
+        if not hostname:
+            return []
+        if hostname.endswith("texnomart.uz"):
+            return self._parse_proxy_env(self.proxy_texnomart)
+        if hostname.endswith("mediapark.uz"):
+            return self._parse_proxy_env(self.proxy_mediapark)
+        return []
+
+    def scrape_limits_for_host(self, host: str | None) -> tuple[int, float]:
+        hostname = str(host or "").strip().lower()
+        if hostname.endswith("texnomart.uz"):
+            return max(1, int(self.scrape_texnomart_concurrency)), max(0.0, float(self.scrape_texnomart_delay_seconds))
+        if hostname.endswith("mediapark.uz"):
+            return max(1, int(self.scrape_mediapark_concurrency)), max(0.0, float(self.scrape_mediapark_delay_seconds))
+        default_concurrency = int(self.scrape_default_domain_concurrency or self.request_concurrency)
+        default_delay = float(self.scrape_default_domain_delay_seconds or self.scrape_inter_request_delay_seconds)
+        return max(1, default_concurrency), max(0.0, default_delay)
 
 
 @lru_cache(maxsize=1)

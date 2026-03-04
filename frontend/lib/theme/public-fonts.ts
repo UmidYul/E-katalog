@@ -1,11 +1,12 @@
-import { Inter, Montserrat } from "next/font/google";
+type PublicFontVariable = {
+  variable: string;
+};
 
-export const publicInter = Inter({
-  subsets: ["latin", "cyrillic"],
-  variable: "--font-inter"
-});
+// Keep public layouts independent from build-time Google Fonts downloads.
+export const publicInter: PublicFontVariable = {
+  variable: "font-inter-fallback"
+};
 
-export const publicMontserrat = Montserrat({
-  subsets: ["latin", "cyrillic"],
-  variable: "--font-montserrat"
-});
+export const publicMontserrat: PublicFontVariable = {
+  variable: "font-montserrat-fallback"
+};

@@ -239,10 +239,10 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
       <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
         <ProductGallery images={galleryImages} />
 
-        <section className="space-y-4 rounded-xl border border-border bg-card p-5 shadow-sm">
+        <section className="space-y-4 rounded-xl border border-border bg-card p-5">
           <h1 className="font-heading text-2xl font-bold">{product.data.title}</h1>
           <p className="text-sm text-muted-foreground">Проверенные предложения по магазинам и обновляемая история цен в одном месте.</p>
-          <div className="grid gap-2 rounded-xl border border-border/80 bg-background/50 p-3 text-sm">
+          <div className="grid gap-2 rounded-xl border border-border bg-card p-3 text-sm">
             <p>
               <span className="text-muted-foreground">Категория:</span> {product.data.category}
             </p>
@@ -258,13 +258,13 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
           </div>
 
           {product.data.short_description ? (
-            <div className="rounded-xl border border-border/70 bg-background/40 p-3">
+            <div className="rounded-xl border border-border bg-card p-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Краткое описание</p>
               <p className="mt-1 text-sm">{product.data.short_description}</p>
             </div>
           ) : null}
 
-          <div className="rounded-xl border border-border/70 bg-background/40 p-3">
+          <div className="rounded-xl border border-border bg-card p-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Что нового</p>
             {product.data.whats_new?.length ? (
               <ul className="mt-2 list-disc space-y-1 pl-4 text-sm">
@@ -301,7 +301,7 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
         </section>
       </div>
 
-      <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+      <section className="rounded-xl border border-border bg-card p-5">
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <BellRing className="h-4 w-4 text-accent" />
           <h2 className="font-heading text-lg font-bold">Отслеживание цены</h2>
@@ -317,15 +317,15 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
         ) : (
           <div className="space-y-4">
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-xl border border-border/80 bg-background/60 p-3">
+              <div className="rounded-xl border border-border bg-card p-3">
                 <p className="text-xs text-muted-foreground">Текущая цена</p>
                 <p className="text-sm font-semibold">{currentMinPrice != null ? formatPrice(currentMinPrice) : "Нет данных"}</p>
               </div>
-              <div className="rounded-xl border border-border/80 bg-background/60 p-3">
+              <div className="rounded-xl border border-border bg-card p-3">
                 <p className="text-xs text-muted-foreground">Базовая цена</p>
                 <p className="text-sm font-semibold">{alertMeta?.baseline_price != null ? formatPrice(alertMeta.baseline_price) : "Не задана"}</p>
               </div>
-              <div className="rounded-xl border border-border/80 bg-background/60 p-3">
+              <div className="rounded-xl border border-border bg-card p-3">
                 <p className="text-xs text-muted-foreground">Целевая цена</p>
                 <p className="text-sm font-semibold">{alertMeta?.target_price != null ? formatPrice(alertMeta.target_price) : "Не задана"}</p>
               </div>
@@ -354,7 +354,7 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
       </section>
 
       <Tabs defaultValue="offers" className="space-y-4">
-        <TabsList className="flex w-full flex-wrap gap-1 rounded-xl bg-secondary p-1">
+        <TabsList className="flex w-full flex-wrap gap-1 rounded-xl border border-border bg-card p-1">
           <TabsTrigger value="offers">Предложения</TabsTrigger>
           <TabsTrigger value="history">История цены</TabsTrigger>
           <TabsTrigger value="specs">Характеристики</TabsTrigger>

@@ -115,6 +115,14 @@
   --scrollbar-thumb-hover: hsl(var(--primary) / 0.55);
 }
 
+.font-inter-fallback {
+  --font-inter: "Inter";
+}
+
+.font-montserrat-fallback {
+  --font-montserrat: "Montserrat";
+}
+
 @layer base {
   * {
     @apply border-border;
@@ -154,14 +162,8 @@
 
   body {
     font-family: var(--font-body), "Source Sans 3", "Segoe UI", sans-serif;
-    background-image: radial-gradient(circle at 8% -12%, hsl(var(--primary) / 0.16), transparent 34%),
-      radial-gradient(circle at 88% 6%, hsl(var(--accent) / 0.14), transparent 30%);
-    background-attachment: fixed;
-  }
-
-  .dark body {
-    background-image: radial-gradient(circle at 8% -12%, hsl(var(--primary) / 0.2), transparent 34%),
-      radial-gradient(circle at 88% 6%, hsl(var(--accent) / 0.14), transparent 30%);
+    min-height: 100vh;
+    background: hsl(var(--background));
   }
 
   h1,
@@ -171,10 +173,6 @@
   .font-heading {
     font-family: var(--font-heading), "Manrope", "Segoe UI", sans-serif;
     letter-spacing: -0.02em;
-  }
-
-  body {
-    min-height: 100vh;
   }
 
   .public-theme {

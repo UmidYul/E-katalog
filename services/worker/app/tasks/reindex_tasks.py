@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime
+from time import perf_counter
 from shared.utils.time import UTC
 
 from sqlalchemy import text
 
+from app.core.asyncio_runner import run_async_task
 from app.core.logging import logger
+from app.core.metrics import add_products_processed, observe_stage_duration
 from app.db.session import AsyncSessionLocal
 from app.platform.services.pipeline_offsets import ensure_offsets_table, get_offset, set_offset
 from app.celery_app import celery_app
@@ -21,7 +23,17 @@ from app.celery_app import celery_app
     max_retries=7,
 )
 def reindex_product_search_batch(self, limit: int = 2000) -> dict:
-    return asyncio.run(_run(limit))
+    started = perf_counter()
+    status = "ok"
+    try:
+        result = run_async_task(_run(limit))
+        add_products_processed(stage="reindex", count=int(result.get("reindexed_limit", 0)))
+        return result
+    except Exception:  # noqa: BLE001
+        status = "error"
+        raise
+    finally:
+        observe_stage_duration(stage="reindex", seconds=perf_counter() - started, status=status)
 
 
 async def _run(limit: int) -> dict:

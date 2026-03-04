@@ -1,0 +1,7 @@
+[
+  {"payload": {"price": "0"}},
+  {"payload": {"minSellPrice": "1 111 000"}},
+  {"payload": {"sellPrice": "1 222 000"}},
+  {"payload": {"fullPrice": "1 333 000"}},
+  {"payload": {"price": "1 444 000"}}
+]

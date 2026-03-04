@@ -1,17 +1,19 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import re
 from datetime import datetime
+from time import perf_counter
 from shared.utils.time import UTC
 from typing import Any
 from urllib.parse import unquote
 
 from sqlalchemy import func, select, text
 
+from app.core.asyncio_runner import run_async_task
 from app.core.config import settings
 from app.core.logging import logger
+from app.core.metrics import add_products_processed, observe_stage_duration
 from app.db.session import AsyncSessionLocal
 from app.platform.models import (
     CatalogAIEnrichmentJob,
@@ -101,7 +103,7 @@ _COLOR_HINTS: tuple[tuple[str, str], ...] = (
     max_retries=7,
 )
 def normalize_product_batch(self, limit: int = 500, reset_offset: bool = False) -> dict:
-    return asyncio.run(_normalize_product_batch(limit, reset_offset=reset_offset))
+    return run_async_task(_normalize_product_batch(limit, reset_offset=reset_offset))
 
 
 def _normalize_image_text(value: str | None) -> str:
@@ -706,7 +708,17 @@ def enqueue_dirty_products(self) -> int:
 
 @celery_app.task(bind=True)
 def normalize_full_catalog(self, chunk_size: int = 500) -> dict:
-    return asyncio.run(_normalize_full_catalog(chunk_size))
+    started = perf_counter()
+    status = "ok"
+    try:
+        result = run_async_task(_normalize_full_catalog(chunk_size))
+        add_products_processed(stage="normalize", count=int(result.get("processed", 0)))
+        return result
+    except Exception:  # noqa: BLE001
+        status = "error"
+        raise
+    finally:
+        observe_stage_duration(stage="normalize", seconds=perf_counter() - started, status=status)
 
 
 async def _normalize_full_catalog(chunk_size: int) -> dict:

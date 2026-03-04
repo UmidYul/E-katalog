@@ -27,8 +27,8 @@ export function Slider({
       <SliderPrimitive.Track className="relative h-2 w-full grow overflow-hidden rounded-full bg-secondary/90">
         <SliderPrimitive.Range className="absolute h-full bg-primary" />
       </SliderPrimitive.Track>
-      <SliderPrimitive.Thumb className="block h-4 w-4 rounded-full border border-primary bg-background shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
-      <SliderPrimitive.Thumb className="block h-4 w-4 rounded-full border border-primary bg-background shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+      <SliderPrimitive.Thumb className="block h-4 w-4 rounded-full border border-primary bg-card shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/15" />
+      <SliderPrimitive.Thumb className="block h-4 w-4 rounded-full border border-primary bg-card shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/15" />
     </SliderPrimitive.Root>
   );
 }

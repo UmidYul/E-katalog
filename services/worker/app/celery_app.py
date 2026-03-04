@@ -3,6 +3,29 @@ from celery.schedules import crontab
 from kombu import Exchange, Queue
 
 from app.core.config import settings
+from app.core.logging import configure_logging, logger
+from shared.observability.sentry import init_sentry
+
+configure_logging(settings.log_level)
+try:
+    from sentry_sdk.integrations.celery import CeleryIntegration
+    from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+
+    init_sentry(
+        enabled=bool(settings.sentry_enabled),
+        dsn=settings.sentry_dsn,
+        environment=str(settings.environment),
+        release=str(settings.sentry_release or ""),
+        traces_sample_rate=float(settings.sentry_traces_sample_rate),
+        profiles_sample_rate=float(settings.sentry_profiles_sample_rate),
+        send_default_pii=bool(settings.sentry_send_default_pii),
+        service="worker",
+        ignored_errors=list(settings.sentry_ignored_errors),
+        logger=logger,
+        integrations=[CeleryIntegration(), SqlalchemyIntegration()],
+    )
+except Exception as exc:  # noqa: BLE001
+    logger.warning("sentry_init_failed", service="worker", error=str(exc))
 
 celery_app = Celery(
     "scraper_worker",
@@ -51,9 +74,9 @@ celery_app.conf.update(
     task_routes={
         "app.tasks.scrape_tasks.scrape_priority_category": {"queue": "scrape.high", "routing_key": "scrape.high"},
         "app.tasks.scrape_tasks.scrape_store_category": {"queue": "scrape.default", "routing_key": "scrape.default"},
-        "app.tasks.scrape_tasks.enqueue_full_crawl": {"queue": "scrape.high", "routing_key": "scrape.high"},
+        "app.tasks.scrape_tasks.enqueue_full_crawl": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.scrape_tasks.enqueue_ingested_products_pipeline": {"queue": "normalize", "routing_key": "normalize"},
-        "app.tasks.scrape_tasks.retry_failed_items": {"queue": "scrape.default", "routing_key": "scrape.default"},
+        "app.tasks.scrape_tasks.retry_failed_items": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.normalize_tasks.normalize_product_batch": {"queue": "normalize", "routing_key": "normalize"},
         "app.tasks.normalize_tasks.enqueue_dirty_products": {"queue": "normalize", "routing_key": "normalize"},
         "app.tasks.copywriting_tasks.generate_product_copy_batch": {"queue": "normalize", "routing_key": "normalize"},
@@ -107,12 +130,12 @@ celery_app.conf.update(
         "scrape-every-6h": {
             "task": "app.tasks.scrape_tasks.enqueue_full_crawl",
             "schedule": crontab(minute=0, hour="*/6"),
-            "options": {"queue": "scrape.high", "routing_key": "scrape.high"},
+            "options": {"queue": "maintenance", "routing_key": "maintenance"},
         },
         "retry-failed-crawl-items-every-10m": {
             "task": "app.tasks.scrape_tasks.retry_failed_items",
             "schedule": crontab(minute="*/10"),
-            "options": {"queue": "scrape.default", "routing_key": "scrape.default"},
+            "options": {"queue": "maintenance", "routing_key": "maintenance"},
         },
         "normalize-dirty-products-every-15m": {
             "task": "app.tasks.normalize_tasks.enqueue_dirty_products",

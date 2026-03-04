@@ -7,6 +7,7 @@ from typing import Any
 
 from app.core.config import settings
 from app.core.logging import logger
+from shared.observability.sentry import init_sentry as init_sentry_common
 
 
 class _HttpMetrics:
@@ -154,26 +155,23 @@ def route_label_from_scope(scope: dict[str, Any]) -> str:
 
 
 def init_sentry() -> None:
-    if not settings.sentry_enabled:
-        return
-    if not settings.sentry_dsn:
-        logger.warning("sentry_disabled_missing_dsn")
-        return
     try:
-        import sentry_sdk
         from sentry_sdk.integrations.celery import CeleryIntegration
         from sentry_sdk.integrations.fastapi import FastApiIntegration
         from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 
-        sentry_sdk.init(
+        init_sentry_common(
+            enabled=bool(settings.sentry_enabled),
             dsn=settings.sentry_dsn,
-            environment=settings.environment,
-            release=settings.sentry_release or None,
-            traces_sample_rate=max(0.0, min(1.0, float(settings.sentry_traces_sample_rate))),
-            profiles_sample_rate=max(0.0, min(1.0, float(settings.sentry_profiles_sample_rate))),
+            environment=str(settings.environment),
+            release=str(settings.sentry_release or ""),
+            traces_sample_rate=float(settings.sentry_traces_sample_rate),
+            profiles_sample_rate=float(settings.sentry_profiles_sample_rate),
             send_default_pii=bool(settings.sentry_send_default_pii),
+            service="api",
+            ignored_errors=list(settings.sentry_ignored_errors),
+            logger=logger,
             integrations=[FastApiIntegration(), SqlalchemyIntegration(), CeleryIntegration()],
         )
-        logger.info("sentry_initialized", environment=settings.environment, traces_sample_rate=settings.sentry_traces_sample_rate)
     except Exception as exc:  # noqa: BLE001
         logger.warning("sentry_init_failed", error=str(exc))

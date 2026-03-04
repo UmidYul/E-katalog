@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime
+from time import perf_counter
 from shared.utils.time import UTC
 
 from app.core.logging import logger
+from app.core.asyncio_runner import run_async_task
+from app.core.metrics import add_products_processed, observe_stage_duration
 from app.db.session import AsyncSessionLocal
 from app.platform.services.dedupe import find_duplicate_candidates, merge_high_confidence_duplicates
 from app.celery_app import celery_app
@@ -19,7 +21,17 @@ from app.celery_app import celery_app
     max_retries=7,
 )
 def find_duplicate_candidates_task(self, limit: int = 1000) -> dict:
-    return asyncio.run(_run(limit))
+    started = perf_counter()
+    status = "ok"
+    try:
+        result = run_async_task(_run(limit))
+        add_products_processed(stage="dedupe", count=int(result.get("created", 0)) + int(result.get("merged", 0)))
+        return result
+    except Exception:  # noqa: BLE001
+        status = "error"
+        raise
+    finally:
+        observe_stage_duration(stage="dedupe", seconds=perf_counter() - started, status=status)
 
 
 async def _run(limit: int) -> dict:

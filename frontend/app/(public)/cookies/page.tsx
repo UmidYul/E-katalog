@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 export default function CookiesPage() {
   return (
     <main className="mx-auto max-w-7xl px-4 py-10">
-      <article className="mx-auto max-w-3xl rounded-xl border border-border bg-card p-6 shadow-sm md:p-8">
+      <article className="mx-auto max-w-3xl rounded-xl border border-border bg-card p-6 md:p-8">
         <span className="inline-flex rounded-full bg-accent/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.1em] text-accent">
           Legal
         </span>

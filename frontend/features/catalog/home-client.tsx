@@ -18,6 +18,7 @@ import {
   Tv,
   Watch,
 } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 
 import { useBrands, useCatalogProducts, useCategories } from "@/features/catalog/use-catalog-queries";
@@ -41,7 +42,7 @@ const heroSlides: HeroSlide[] = [
     description: "Актуальные предложения, история цен и удобный выбор — за пару кликов.",
     cta: "Перейти в каталог",
     href: "/catalog",
-    bgClass: "from-[#0F1B2D] to-[#1E3A5F]",
+    bgClass: "from-primary to-primary/85",
   },
   {
     title: "Подберите ноутбук и смартфон выгоднее",
@@ -49,7 +50,7 @@ const heroSlides: HeroSlide[] = [
     description: "Смотрите разброс цен по продавцам и выбирайте оптимальное предложение.",
     cta: "Смотреть подборки",
     href: "/catalog?sort=popular",
-    bgClass: "from-[#1E3A5F] to-[#0F1B2D]",
+    bgClass: "from-primary/90 to-primary",
   },
   {
     title: "Умные фильтры для быстрого выбора",
@@ -57,13 +58,13 @@ const heroSlides: HeroSlide[] = [
     description: "Фильтруйте по цене, бренду и характеристикам без потери актуальности.",
     cta: "Открыть фильтры",
     href: "/catalog",
-    bgClass: "from-[#0F1B2D] to-[#2D1B0F]",
+    bgClass: "from-primary to-accent/60",
   },
 ];
 
 const sideHeroCards = [
-  { title: "Избранное и алерты", subtitle: "Отслеживайте падение цены", href: "/favorites", bgClass: "from-[#1a2744] to-[#0F1B2D]" },
-  { title: "Сравнение 1 к 1", subtitle: "Выберите лучший вариант", href: "/compare", bgClass: "from-[#2D1B0F] to-[#1a1200]" },
+  { title: "Избранное и алерты", subtitle: "Отслеживайте падение цены", href: "/favorites", bgClass: "from-primary/90 to-primary" },
+  { title: "Сравнение 1 к 1", subtitle: "Выберите лучший вариант", href: "/compare", bgClass: "from-accent/70 to-primary" },
 ];
 
 const categoryIcons = [Smartphone, Laptop, Tv, Headphones, Camera, Home, Watch, Smartphone];
@@ -144,7 +145,7 @@ function HeroBanner() {
   return (
     <section className="mx-auto max-w-7xl px-4 py-6">
       <div className="flex gap-4">
-        <div className="relative flex-1 overflow-hidden rounded-xl">
+        <div className="relative flex-1 overflow-hidden rounded-xl border border-border/40">
           <div className="flex transition-transform duration-500 ease-out" style={{ transform: `translateX(-${currentSlide * 100}%)` }}>
             {heroSlides.map((slide) => (
               <div key={slide.title} className={`flex min-w-full flex-col justify-center bg-gradient-to-br ${slide.bgClass} px-8 py-16 md:px-14 md:py-20`}>
@@ -198,7 +199,7 @@ function HeroBanner() {
             <Link
               key={card.title}
               href={card.href}
-              className={`flex flex-1 flex-col justify-end rounded-xl bg-gradient-to-br ${card.bgClass} p-5 transition-all hover:scale-[1.01] hover:shadow-lg`}
+              className={`flex flex-1 flex-col justify-end rounded-xl border border-border/40 bg-gradient-to-br ${card.bgClass} p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_10px_20px_hsl(var(--primary)/0.08)]`}
             >
               <h2 className="font-heading text-lg font-bold text-primary-foreground">{card.title}</h2>
               <p className="mt-1 text-sm text-primary-foreground/75">{card.subtitle}</p>
@@ -214,16 +215,27 @@ function ProductCard({ item }: { item: ProductListItem }) {
   const slug = `${item.id}-${slugify(item.normalized_title)}`;
   const hasOldPrice = typeof item.max_price === "number" && typeof item.min_price === "number" && item.max_price > item.min_price;
   const reviews = Math.max(24, Math.round((item.score ?? 0) * 120));
+  const image = isImageUrl(item.image_url) ? item.image_url : null;
 
   return (
     <Link
       href={`/product/${slug}`}
-      className="group flex min-w-[220px] shrink-0 flex-col rounded-xl border border-border bg-card shadow-sm transition-all hover:-translate-y-1 hover:shadow-md"
+      className="group flex min-w-[220px] shrink-0 flex-col rounded-xl border border-border bg-card shadow-[0_2px_10px_hsl(var(--primary)/0.05)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_10px_20px_hsl(var(--primary)/0.08)]"
     >
-      <div className="relative aspect-square overflow-hidden rounded-t-xl bg-secondary p-4">
-        <div className="flex h-full items-center justify-center">
-          <div className="h-24 w-24 rounded-lg bg-muted sm:h-28 sm:w-28" />
-        </div>
+      <div className="relative aspect-square overflow-hidden rounded-t-xl bg-card p-4">
+        {image ? (
+          <Image
+            src={image}
+            alt={item.normalized_title}
+            fill
+            className="object-contain p-2 transition-transform duration-300 group-hover:scale-[1.03]"
+            sizes="(max-width: 768px) 85vw, 220px"
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center">
+            <div className="h-24 w-24 rounded-lg bg-muted sm:h-28 sm:w-28" />
+          </div>
+        )}
       </div>
       <div className="flex flex-1 flex-col p-3">
         <h3 className="mb-2 line-clamp-2 text-sm font-medium leading-relaxed text-foreground">{item.normalized_title}</h3>
@@ -315,6 +327,13 @@ const slugify = (value: string) =>
     .trim()
     .replace(/\s+/g, "-");
 
+const isImageUrl = (value: unknown): value is string => {
+  if (typeof value !== "string") return false;
+  const normalized = value.trim();
+  if (!normalized) return false;
+  return /^https?:\/\//i.test(normalized) || normalized.startsWith("/");
+};
+
 export function HomeClient() {
   const categories = useCategories();
   const brands = useBrands();
@@ -339,7 +358,7 @@ export function HomeClient() {
               <Link
                 key={category.id}
                 href={`/category/${category.slug}`}
-                className="group flex flex-col items-center gap-3 rounded-xl border border-border bg-card p-5 text-center shadow-sm transition-all hover:-translate-y-1 hover:border-accent/30 hover:shadow-md"
+                className="group flex flex-col items-center gap-3 rounded-xl border border-border bg-card p-5 text-center shadow-[0_2px_10px_hsl(var(--primary)/0.05)] transition-all duration-200 hover:-translate-y-0.5 hover:border-accent/30 hover:shadow-[0_10px_20px_hsl(var(--primary)/0.08)]"
               >
                 <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-secondary transition-colors group-hover:bg-accent/10">
                   <Icon className="h-7 w-7 text-accent" />
@@ -364,7 +383,7 @@ export function HomeClient() {
             <Link
               key={brand.id}
               href={`/category/brand-${slugify(brand.name)}`}
-              className="flex min-w-[100px] shrink-0 items-center justify-center rounded-xl border border-border bg-card px-4 py-5 text-sm font-semibold text-muted-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:border-accent/40 hover:text-accent hover:shadow-md"
+              className="flex min-w-[100px] shrink-0 items-center justify-center rounded-xl border border-border bg-card px-4 py-5 text-sm font-semibold text-muted-foreground shadow-[0_2px_10px_hsl(var(--primary)/0.05)] transition-all duration-200 hover:-translate-y-0.5 hover:border-accent/40 hover:text-accent hover:shadow-[0_10px_20px_hsl(var(--primary)/0.08)]"
             >
               {brand.name}
             </Link>
@@ -376,7 +395,11 @@ export function HomeClient() {
         <h2 className="mb-6 font-heading text-2xl font-bold text-foreground md:text-3xl">Акции</h2>
         <div className="grid gap-4 md:grid-cols-3">
           {promotions.map((promotion) => (
-            <Link key={promotion.title} href={promotion.href} className="rounded-xl border border-border bg-card p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
+            <Link
+              key={promotion.title}
+              href={promotion.href}
+              className="rounded-xl border border-border bg-card p-5 shadow-[0_2px_10px_hsl(var(--primary)/0.05)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_10px_20px_hsl(var(--primary)/0.08)]"
+            >
               <span className="mb-3 inline-block rounded-md bg-accent/10 px-2 py-0.5 text-xs font-semibold text-accent">{promotion.badge}</span>
               <h3 className="font-heading text-lg font-bold text-foreground">{promotion.title}</h3>
               <p className="mt-2 text-sm text-muted-foreground">{promotion.description}</p>
@@ -392,9 +415,9 @@ export function HomeClient() {
             <Link
               key={article.title}
               href={article.href}
-              className="group flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-all hover:-translate-y-1 hover:shadow-md"
+              className="group flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-[0_2px_10px_hsl(var(--primary)/0.05)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_10px_20px_hsl(var(--primary)/0.08)]"
             >
-              <div className="aspect-[16/10] bg-secondary" />
+              <div className="aspect-[16/10] bg-card" />
               <div className="flex flex-1 flex-col p-4">
                 <span className="mb-2 inline-block w-fit rounded-md bg-accent/10 px-2 py-0.5 text-xs font-semibold text-accent">{article.category}</span>
                 <h3 className="mb-2 font-heading text-base font-bold leading-relaxed text-foreground transition-colors group-hover:text-accent">{article.title}</h3>
@@ -412,7 +435,7 @@ export function HomeClient() {
       <section className="mx-auto max-w-7xl px-4 py-10">
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           {advantages.map((item) => (
-            <div key={item.title} className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card p-5 text-center shadow-sm">
+            <div key={item.title} className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card p-5 text-center shadow-[0_2px_10px_hsl(var(--primary)/0.05)]">
               <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-accent/10">
                 <item.icon className="h-6 w-6 text-accent" />
               </div>
@@ -430,7 +453,7 @@ export function HomeClient() {
             <Link
               key={item.tag}
               href={item.href}
-              className="rounded-full border border-border bg-card px-4 py-2 text-sm text-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:border-accent/40 hover:text-accent hover:shadow-md"
+              className="rounded-full border border-border bg-card px-4 py-2 text-sm text-foreground shadow-[0_2px_10px_hsl(var(--primary)/0.05)] transition-all duration-200 hover:-translate-y-0.5 hover:border-accent/40 hover:text-accent hover:shadow-[0_10px_20px_hsl(var(--primary)/0.08)]"
             >
               {item.tag}
             </Link>
@@ -446,9 +469,9 @@ export function HomeClient() {
               <Link
                 key={product.id}
                 href={`/product/${product.slug}`}
-                className="group flex flex-col rounded-xl border border-border bg-card shadow-sm transition-all hover:-translate-y-1 hover:shadow-md"
+                className="group flex flex-col rounded-xl border border-border bg-card shadow-[0_2px_10px_hsl(var(--primary)/0.05)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_10px_20px_hsl(var(--primary)/0.08)]"
               >
-                <div className="aspect-square rounded-t-xl bg-secondary p-4">
+                <div className="aspect-square rounded-t-xl bg-card p-4">
                   <div className="flex h-full items-center justify-center">
                     <div className="h-16 w-16 rounded-lg bg-muted" />
                   </div>
