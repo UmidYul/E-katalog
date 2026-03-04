@@ -791,6 +791,9 @@ async def admin_list_seller_product_moderation(
     del current_user
     redis = get_redis()
     await enforce_rate_limit(request, redis, bucket="admin-sellers-read", limit=240)
+    has_status = bool(str(status or "").strip())
+    has_q = bool(str(q or "").strip())
+    q_like = f"%{str(q or '').strip()}%" if has_q else None
     rows = (
         await db.execute(
             text(
@@ -808,9 +811,9 @@ async def admin_list_seller_product_moderation(
                     s.shop_name
                 from seller_products p
                 join seller_shops s on s.id = p.shop_id
-                where (:status is null or p.status = :status)
+                where (:has_status = false or p.status = cast(:status as text))
                   and (
-                    :q is null
+                    :has_q = false
                     or lower(p.title) like lower(cast(:q_like as text))
                     or lower(coalesce(p.sku, '')) like lower(cast(:q_like as text))
                     or lower(s.shop_name) like lower(cast(:q_like as text))
@@ -821,9 +824,10 @@ async def admin_list_seller_product_moderation(
                 """
             ),
             {
+                "has_status": has_status,
                 "status": status,
-                "q": q,
-                "q_like": f"%{q.strip()}%" if q else None,
+                "has_q": has_q,
+                "q_like": q_like,
                 "limit": limit,
                 "offset": offset,
             },
@@ -837,9 +841,9 @@ async def admin_list_seller_product_moderation(
                     select count(*)::int
                     from seller_products p
                     join seller_shops s on s.id = p.shop_id
-                    where (:status is null or p.status = :status)
+                    where (:has_status = false or p.status = cast(:status as text))
                       and (
-                        :q is null
+                        :has_q = false
                         or lower(p.title) like lower(cast(:q_like as text))
                         or lower(coalesce(p.sku, '')) like lower(cast(:q_like as text))
                         or lower(s.shop_name) like lower(cast(:q_like as text))
@@ -847,9 +851,10 @@ async def admin_list_seller_product_moderation(
                     """
                 ),
                 {
+                    "has_status": has_status,
                     "status": status,
-                    "q": q,
-                    "q_like": f"%{q.strip()}%" if q else None,
+                    "has_q": has_q,
+                    "q_like": q_like,
                 },
             )
         ).scalar_one()
@@ -994,8 +999,8 @@ async def admin_list_seller_finance(
                 from seller_shops s
                 left join b2b_wallet_accounts w on w.org_id = (select o.id from b2b_organizations o where o.uuid = s.org_uuid)
                 left join b2b_wallet_transactions t on t.wallet_account_id = w.id
-                group by s.uuid, s.shop_name, s.status, w.balance, w.credit_limit
-                order by s.updated_at desc
+                group by s.id, s.uuid, s.shop_name, s.status, s.updated_at, w.balance, w.credit_limit
+                order by s.updated_at desc, s.id desc
                 limit :limit
                 offset :offset
                 """

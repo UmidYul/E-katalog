@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db_session, get_redis
 from app.api.idempotency import execute_idempotent_json
+from app.api.v1.routers.auth import _send_auth_email
 from app.core.config import settings
 from app.core.rate_limit import enforce_rate_limit
 from app.repositories.b2b import B2BRepository
@@ -14,15 +17,18 @@ from app.schemas.seller import (
     SellerApplicationOut,
     SellerApplicationStatusLookupOut,
 )
+from app.services.email_templates import build_partner_lead_submission_email
 from app.services.seller_onboarding_service import (
     canonicalize_partner_lead_status,
     extract_request_ip,
     map_seller_application_payload_to_partner_lead,
+    public_url,
     seller_panel_urls,
 )
 
 
 router = APIRouter(tags=["seller-public"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("/applications/seller", response_model=SellerApplicationOut)
@@ -41,6 +47,25 @@ async def create_seller_application(
             submitted_ip=extract_request_ip(request),
             submitted_user_agent=str(request.headers.get("user-agent") or "")[:512],
         )
+        status_url = public_url(
+            f"/partners/status?lead={created['id']}&token={created['tracking_token']}",
+            app_base_url=str(settings.next_public_app_url or "http://localhost"),
+        )
+        subject, text_value, html_value = build_partner_lead_submission_email(
+            contact_name=str(created.get("contact_name") or ""),
+            company_name=str(created.get("company_name") or ""),
+            lead_id=str(created.get("id") or ""),
+            status_url=status_url,
+            support_email=str(settings.admin_email or "").strip() or None,
+        )
+        sent, error_message = await _send_auth_email(
+            recipient=str(created.get("email") or "").strip().lower(),
+            subject=subject,
+            text_value=text_value,
+            html_value=html_value,
+        )
+        if not sent and error_message:
+            logger.warning("seller_application_email_send_failed: %s", error_message)
         return SellerApplicationOut(
             id=str(created["id"]),
             status=canonicalize_partner_lead_status(created.get("status")),

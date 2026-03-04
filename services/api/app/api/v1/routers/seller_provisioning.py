@@ -54,6 +54,15 @@ def _slugify(value: str, *, fallback: str) -> str:
     return normalized[:120]
 
 
+def _unique_shop_slug(*, company_name: str, org_uuid: str | None) -> str:
+    base = _slugify(str(company_name or ""), fallback="seller-shop")
+    org_token = str(org_uuid or "").strip().lower().split("-", 1)[0]
+    if not org_token:
+        return base
+    max_base_len = max(1, 120 - 1 - len(org_token))
+    return f"{base[:max_base_len]}-{org_token}"
+
+
 async def _ensure_seller_user(
     *,
     redis: Redis,
@@ -177,9 +186,9 @@ async def apply_partner_lead_status_actions(
                 {
                     "org_uuid": org_uuid,
                     "owner_user_uuid": user_uuid,
-                    "slug": _slugify(
-                        str(updated.get("company_name") or ""),
-                        fallback=f"seller-{org_uuid.split('-')[0] if org_uuid else secrets.token_hex(3)}",
+                    "slug": _unique_shop_slug(
+                        company_name=str(updated.get("company_name") or ""),
+                        org_uuid=org_uuid,
                     ),
                     "shop_name": str(updated.get("company_name") or "Seller Shop")[:255],
                     "website_url": updated.get("website_url"),

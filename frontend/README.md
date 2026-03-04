@@ -31,7 +31,7 @@ App runs on `http://localhost:3000`.
 NEXT_PUBLIC_APP_URL=http://localhost
 NEXT_PUBLIC_API_ORIGIN=
 NEXT_PUBLIC_API_PREFIX=/api/v1
-NEXT_PUBLIC_SITE_NAME=ZincMarket
+NEXT_PUBLIC_SITE_NAME=Doxx
 API_INTERNAL_ORIGIN=http://api:8000
 ```
 

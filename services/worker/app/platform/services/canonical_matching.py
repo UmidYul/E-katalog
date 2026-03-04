@@ -611,8 +611,8 @@ class EmbeddingService:
         self.backend = HashingEmbedder()
         self.backend_name = "hashing"
         try:
-            self.backend = SentenceTransformerEmbedder()
-            self.backend_name = "sentence_transformers"
+            self.backend = FastEmbedder()
+            self.backend_name = "fastembed"
         except Exception:
             self.backend = HashingEmbedder()
             self.backend_name = "hashing"

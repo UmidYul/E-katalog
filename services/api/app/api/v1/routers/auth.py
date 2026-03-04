@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import html
 import io
+import logging
 import secrets
 import smtplib
 from datetime import datetime, timedelta
@@ -49,8 +50,16 @@ from app.repositories.auth_storage import (
     pg_upsert_session_token,
     pg_upsert_user_from_redis_mapping,
 )
+from app.services.email_templates import (
+    build_auth_email_confirmation_email,
+    build_auth_new_login_email,
+    build_auth_password_changed_email,
+    build_auth_password_reset_email,
+    render_text_as_html_email,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+logger = logging.getLogger(__name__)
 
 ACCESS_COOKIE = "access_token"
 REFRESH_COOKIE = "refresh_token"
@@ -59,6 +68,7 @@ ACCESS_TTL_SECONDS = 60 * 15
 REFRESH_TTL_SECONDS = 60 * 60 * 24 * 30
 TWOFA_CHALLENGE_TTL_SECONDS = 60 * 5
 OAUTH_STATE_TTL_SECONDS = 60 * 10
+NEW_LOGIN_ALERT_TTL_SECONDS = 60 * 60 * 24 * 30
 SUPPORTED_OAUTH_PROVIDERS = ("google", "facebook")
 PASSWORD_HASHER = PasswordHasher()
 LEGACY_SHA256_HEX = "0123456789abcdef"
@@ -228,7 +238,13 @@ def _build_email_confirmation_link(token: str) -> str:
     return f"{base}/auth/confirm-email?token={quote(token, safe='')}"
 
 
-async def _send_auth_email(*, recipient: str, subject: str, text_value: str) -> tuple[bool, str | None]:
+async def _send_auth_email(
+    *,
+    recipient: str,
+    subject: str,
+    text_value: str,
+    html_value: str | None = None,
+) -> tuple[bool, str | None]:
     if not settings.auth_email_delivery_enabled:
         return False, "auth email delivery disabled"
 
@@ -244,6 +260,8 @@ async def _send_auth_email(*, recipient: str, subject: str, text_value: str) -> 
     msg["To"] = recipient
     msg["Subject"] = subject
     msg.set_content(text_value)
+    html_content = str(html_value or "").strip() or render_text_as_html_email(subject=subject, text_value=text_value)
+    msg.add_alternative(html_content, subtype="html")
 
     smtp_port = int(settings.auth_smtp_port)
     smtp_username = str(settings.auth_smtp_username or "").strip()
@@ -266,6 +284,129 @@ async def _send_auth_email(*, recipient: str, subject: str, text_value: str) -> 
     except Exception as exc:
         return False, str(exc)
     return True, None
+
+
+def _frontend_base_url() -> str:
+    return str(settings.next_public_app_url or "http://localhost").strip().rstrip("/")
+
+
+def _frontend_login_url() -> str:
+    return f"{_frontend_base_url()}/login"
+
+
+def _auth_user_display_name(user: dict | None) -> str:
+    payload = user or {}
+    candidate = str(payload.get("full_name") or payload.get("display_name") or "").strip()
+    if candidate:
+        return candidate
+    email_value = str(payload.get("email") or "").strip()
+    if email_value and "@" in email_value:
+        return email_value.split("@", 1)[0]
+    return "there"
+
+
+def _new_login_notice_key(*, user_id: int, ip_address: str, device: str, location: str) -> str:
+    fingerprint = f"{str(ip_address).strip().lower()}|{str(device).strip().lower()}|{str(location).strip().lower()}"
+    digest = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:24]
+    return f"auth:email:new-login:{int(user_id)}:{digest}"
+
+
+async def _safe_send_auth_email(*, recipient: str, subject: str, text_value: str, html_value: str | None = None) -> None:
+    sent, error_message = await _send_auth_email(
+        recipient=recipient,
+        subject=subject,
+        text_value=text_value,
+        html_value=html_value,
+    )
+    if not sent and error_message:
+        logger.warning("auth_email_send_failed recipient=%s subject=%s error=%s", recipient, subject, error_message)
+
+
+async def _send_email_confirmation_notice(
+    *,
+    redis: Redis,
+    db: AsyncSession,
+    user: dict,
+    ttl_seconds: int,
+) -> str:
+    confirmation_token = _issue_token()
+    if _auth_reads_from_postgres():
+        await pg_create_email_confirmation_token(
+            db,
+            user_id=int(user["id"]),
+            raw_token=confirmation_token,
+            expires_at=datetime.now(UTC) + timedelta(seconds=ttl_seconds),
+        )
+        await db.commit()
+    else:
+        await redis.setex(_email_confirmation_key(confirmation_token), ttl_seconds, str(int(user["id"])))
+
+    confirmation_link = _build_email_confirmation_link(confirmation_token)
+    subject, text_value, html_value = build_auth_email_confirmation_email(
+        full_name=_auth_user_display_name(user),
+        confirmation_link=confirmation_link,
+        expires_in_seconds=ttl_seconds,
+    )
+    await _safe_send_auth_email(
+        recipient=str(user.get("email") or "").strip().lower(),
+        subject=subject,
+        text_value=text_value,
+        html_value=html_value,
+    )
+    return confirmation_token
+
+
+async def _send_password_changed_notice(*, user: dict, request: Request) -> None:
+    subject, text_value, html_value = build_auth_password_changed_email(
+        full_name=_auth_user_display_name(user),
+        happened_at=_now_iso(),
+        ip_address=_extract_client_ip(request),
+        device=_extract_device(request),
+        location=_extract_location(request),
+        login_link=_frontend_login_url(),
+    )
+    await _safe_send_auth_email(
+        recipient=str(user.get("email") or "").strip().lower(),
+        subject=subject,
+        text_value=text_value,
+        html_value=html_value,
+    )
+
+
+async def _maybe_send_new_login_notice(
+    *,
+    redis: Redis,
+    user: dict,
+    request: Request,
+) -> None:
+    user_id = int(user["id"])
+    ip_address = _extract_client_ip(request)
+    device = _extract_device(request)
+    location = _extract_location(request)
+    dedupe_key = _new_login_notice_key(
+        user_id=user_id,
+        ip_address=ip_address,
+        device=device,
+        location=location,
+    )
+    is_new_login = await redis.set(dedupe_key, "1", ex=NEW_LOGIN_ALERT_TTL_SECONDS, nx=True)
+    if not is_new_login:
+        return
+
+    subject, text_value, html_value = build_auth_new_login_email(
+        full_name=_auth_user_display_name(user),
+        happened_at=_now_iso(),
+        ip_address=ip_address,
+        device=device,
+        location=location,
+        login_link=_frontend_login_url(),
+    )
+    await _safe_send_auth_email(
+        recipient=str(user.get("email") or "").strip().lower(),
+        subject=subject,
+        text_value=text_value,
+        html_value=html_value,
+    )
 
 
 def _normalize_uuid(value: str | None) -> str | None:
@@ -1156,6 +1297,13 @@ async def register(
             full_name=payload.full_name,
             password_hash=_hash_password(payload.password),
         )
+        if not bool(user.get("email_confirmed")):
+            await _send_email_confirmation_notice(
+                redis=redis,
+                db=db,
+                user=user,
+                ttl_seconds=max(300, int(settings.auth_email_confirmation_ttl_seconds)),
+            )
         await _set_auth_cookies(response, user_id=int(user["id"]), redis=redis, request=request, db=db)
         return AuthUserResponse(
             id=str(user["uuid"]),
@@ -1214,6 +1362,7 @@ async def login(
 
     await _clear_failed_login_attempts(redis, email=normalized_email, client_ip=client_ip)
     await _set_auth_cookies(response, user_id=int(user["id"]), redis=redis, request=request, db=db)
+    await _maybe_send_new_login_notice(redis=redis, user=user, request=request)
     return AuthUserResponse(
         id=str(user["uuid"]),
         email=user["email"],
@@ -1355,6 +1504,7 @@ async def change_password(
         revoked = 0
         if payload.revoke_other_sessions:
             revoked = await _revoke_all_sessions_except(redis, user_id=user_id, keep_session_id=current.get("session_id"), db=db)
+        await _send_password_changed_notice(user=user, request=request)
         return {"ok": True, "revoked_sessions": revoked}
 
     return await execute_idempotent_json(request, redis, scope=f"auth.change_password:{user_id}", handler=_op)
@@ -1385,14 +1535,16 @@ async def request_password_reset(
                     expires_at=datetime.now(UTC) + timedelta(seconds=ttl_seconds),
                 )
                 await db.commit()
-                await _send_auth_email(
+                subject, text_value, html_value = build_auth_password_reset_email(
+                    full_name=_auth_user_display_name(user),
+                    reset_link=_build_password_reset_link(issued_token),
+                    expires_in_seconds=ttl_seconds,
+                )
+                await _safe_send_auth_email(
                     recipient=normalized_email,
-                    subject="Password reset request",
-                    text_value=(
-                        "You requested a password reset.\n\n"
-                        f"Reset link: {_build_password_reset_link(issued_token)}\n\n"
-                        "If you did not request this, ignore this email."
-                    ),
+                    subject=subject,
+                    text_value=text_value,
+                    html_value=html_value,
                 )
                 if settings.environment == "local" or settings.auth_password_reset_debug_return_token:
                     debug_token = issued_token
@@ -1437,6 +1589,9 @@ async def confirm_password_reset(
         )
         revoked = await _revoke_all_sessions_except(redis, user_id=target_user_id, keep_session_id=None, db=db)
         await db.commit()
+        target_user = await _load_user(redis, target_user_id, db)
+        if target_user is not None:
+            await _send_password_changed_notice(user=target_user, request=request)
         _clear_auth_cookies(response)
         return {"ok": True, "revoked_sessions": revoked}
 
@@ -1462,26 +1617,11 @@ async def request_email_confirmation(
         if bool(user.get("email_confirmed")):
             return EmailConfirmationRequestResponse(ok=True, expires_in=ttl_seconds)
 
-        confirmation_token = _issue_token()
-        if _auth_reads_from_postgres():
-            await pg_create_email_confirmation_token(
-                db,
-                user_id=int(user["id"]),
-                raw_token=confirmation_token,
-                expires_at=datetime.now(UTC) + timedelta(seconds=ttl_seconds),
-            )
-            await db.commit()
-        else:
-            await redis.setex(_email_confirmation_key(confirmation_token), ttl_seconds, str(user_id))
-
-        await _send_auth_email(
-            recipient=str(user.get("email") or "").strip().lower(),
-            subject="Confirm your email",
-            text_value=(
-                "Please confirm your email address.\n\n"
-                f"Confirmation link: {_build_email_confirmation_link(confirmation_token)}\n\n"
-                "If this wasn't you, ignore this email."
-            ),
+        confirmation_token = await _send_email_confirmation_notice(
+            redis=redis,
+            db=db,
+            user=user,
+            ttl_seconds=ttl_seconds,
         )
 
         debug_token: str | None = None
@@ -1731,6 +1871,7 @@ async def verify_twofa(
         await _clear_failed_login_attempts(redis, email=str(user["email"]), client_ip=client_ip)
         await redis.delete(_challenge_key(payload.challenge_token.strip()))
         await _set_auth_cookies(response, user_id=user_id, redis=redis, request=request, db=db)
+        await _maybe_send_new_login_notice(redis=redis, user=user, request=request)
         return AuthUserResponse(
             id=str(user["uuid"]),
             email=user["email"],
@@ -2089,6 +2230,7 @@ async def oauth_callback(
 
     redirect = RedirectResponse(url=_frontend_redirect_url(next_path), status_code=status.HTTP_302_FOUND)
     await _set_auth_cookies(redirect, user_id=int(user["id"]), redis=redis, request=request, db=db)
+    await _maybe_send_new_login_notice(redis=redis, user=user, request=request)
     return redirect
 
 
