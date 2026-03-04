@@ -986,7 +986,7 @@ export function RecentlyViewedClient() {
   };
 
   return (
-    <div className="container space-y-4 py-6">
+    <div className="mx-auto max-w-7xl space-y-4 px-4 py-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-heading text-2xl font-extrabold">Недавно просмотренные</h1>
         <Button variant="ghost" onClick={clearAll} disabled={items.length === 0}>
