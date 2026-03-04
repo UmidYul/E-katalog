@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db_session, get_redis
 from app.api.idempotency import execute_idempotent_json
+from app.api.v1.routers.auth import _send_auth_email
 from app.api.v1.routers.b2b_common import ensure_b2b_enabled
 from app.core.config import settings
 from app.core.rate_limit import enforce_rate_limit
 from app.repositories.b2b import B2BRepository
 from app.schemas.b2b import B2BPartnerLeadCreateIn, B2BPartnerLeadOut, B2BPartnerLeadStatusOut
+from app.services.email_templates import build_partner_lead_submission_email
 from app.services.seller_onboarding_service import (
     extract_request_ip,
     maybe_log_legacy_b2b_seller_warning,
@@ -20,6 +24,7 @@ from app.services.seller_onboarding_service import (
 
 
 router = APIRouter(prefix="/b2b/partners", tags=["b2b-partners"])
+logger = logging.getLogger(__name__)
 UUID_REF_PATTERN = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
 
 
@@ -47,6 +52,21 @@ async def create_b2b_partner_lead(
             f"/partners/status?lead={created['id']}&token={created['tracking_token']}",
             app_base_url=str(settings.next_public_app_url or "http://localhost"),
         )
+        subject, text_value, html_value = build_partner_lead_submission_email(
+            contact_name=str(created.get("contact_name") or ""),
+            company_name=str(created.get("company_name") or ""),
+            lead_id=str(created.get("id") or ""),
+            status_url=str(created["status_url"]),
+            support_email=str(settings.admin_email or "").strip() or None,
+        )
+        sent, error_message = await _send_auth_email(
+            recipient=str(created.get("email") or "").strip().lower(),
+            subject=subject,
+            text_value=text_value,
+            html_value=html_value,
+        )
+        if not sent and error_message:
+            logger.warning("b2b_partner_lead_email_send_failed: %s", error_message)
         return B2BPartnerLeadOut(**created)
 
     return await execute_idempotent_json(
