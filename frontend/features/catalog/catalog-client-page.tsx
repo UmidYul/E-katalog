@@ -1,12 +1,13 @@
 "use client";
 
+import { AnimatePresence, motion } from "framer-motion";
+import { X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { CatalogFilters, type FilterState } from "@/components/catalog/catalog-filters";
 import { CatalogGrid } from "@/components/catalog/catalog-grid";
 import { ErrorState } from "@/components/common/error-state";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useCatalogFiltersFromUrl } from "@/features/catalog/use-catalog-filters";
 import { useBrands, useCatalogProducts, useDynamicFilters } from "@/features/catalog/use-catalog-queries";
@@ -249,13 +250,18 @@ export function CatalogClientPage({
   }
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6 px-4 py-6">
-      <section className="space-y-2 px-1">
+    <div className="mx-auto max-w-7xl space-y-6 px-4 py-8">
+      <motion.section
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
+        className="space-y-1 px-1"
+      >
         <h1 className="font-heading text-2xl font-bold text-foreground md:text-3xl">{pageTitle ?? "Каталог"}</h1>
         <p className="text-sm text-muted-foreground">Сравнивайте цены и предложения по проверенным магазинам.</p>
-      </section>
+      </motion.section>
 
-      <div className="grid gap-6 lg:grid-cols-[300px_minmax(0,1fr)] lg:items-start">
+      <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)] lg:items-start">
         <CatalogFilters
           brands={brands.data ?? []}
           stores={dynamicFilters.data?.stores}
@@ -270,24 +276,49 @@ export function CatalogClientPage({
           <div className="space-y-3 px-1 py-1">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-2">
-                <Badge>{products.data?.items.length ?? 0} на этой странице</Badge>
-                <Badge>Страница {currentPage}</Badge>
-                {activeFilterCount ? <Badge className="bg-accent/10 text-accent">{activeFilterCount} активных фильтров</Badge> : null}
-                {products.isFetching && !products.isLoading ? <p className="text-xs text-muted-foreground">Обновляем результаты...</p> : null}
+                <span className="rounded-md bg-secondary px-2.5 py-1 text-xs font-medium text-foreground">
+                  {products.data?.items.length ?? 0} товаров
+                </span>
+                <span className="rounded-md bg-secondary px-2.5 py-1 text-xs font-medium text-foreground">
+                  Стр. {currentPage}
+                </span>
+                {activeFilterCount ? (
+                  <span className="rounded-md bg-accent/10 px-2.5 py-1 text-xs font-bold text-accent">
+                    {activeFilterCount} фильтров
+                  </span>
+                ) : null}
+                {products.isFetching && !products.isLoading ? (
+                  <p className="text-xs text-muted-foreground">Обновляем...</p>
+                ) : null}
               </div>
-              {activeFilterCount ? (
-                <Button variant="ghost" size="sm" disabled={products.isFetching} onClick={clearFilters}>
-                  Сбросить фильтры
-                </Button>
-              ) : null}
+              <AnimatePresence>
+                {activeFilterCount > 0 && (
+                  <motion.div initial={{ opacity: 0, scale: 0.85 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.85 }}>
+                    <Button variant="ghost" size="sm" disabled={products.isFetching} onClick={clearFilters} className="gap-1.5 text-xs">
+                      <X className="h-3 w-3" />
+                      Сбросить фильтры
+                    </Button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
-            {activeFilterChips.length ? (
-              <div className="flex flex-wrap gap-2">
+
+            {activeFilterChips.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex flex-wrap gap-2"
+              >
                 {activeFilterChips.map((chip) => (
-                  <Badge key={chip}>{chip}</Badge>
+                  <span
+                    key={chip}
+                    className="rounded-full border border-accent/20 bg-accent/5 px-3 py-1 text-xs font-medium text-accent"
+                  >
+                    {chip}
+                  </span>
                 ))}
-              </div>
-            ) : null}
+              </motion.div>
+            )}
           </div>
 
           <CatalogGrid loading={products.isLoading} items={products.data?.items ?? []} />
@@ -296,15 +327,32 @@ export function CatalogClientPage({
             <div className="flex flex-wrap items-center justify-between gap-3 px-1 py-2">
               <p className="text-sm text-muted-foreground">Страница {currentPage}</p>
               <div className="flex flex-wrap items-center gap-2">
-                <Button variant="outline" size="sm" disabled={!canGoPrevPage || products.isFetching} onClick={() => goToPage(currentPage - 1)}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!canGoPrevPage || products.isFetching}
+                  onClick={() => goToPage(currentPage - 1)}
+                >
                   Назад
                 </Button>
                 {pageButtons.map((page) => (
-                  <Button key={page} variant={page === currentPage ? "default" : "outline"} size="sm" disabled={products.isFetching} onClick={() => goToPage(page)}>
+                  <Button
+                    key={page}
+                    variant={page === currentPage ? "default" : "outline"}
+                    size="sm"
+                    disabled={products.isFetching}
+                    onClick={() => goToPage(page)}
+                    className={page === currentPage ? "bg-accent text-white hover:bg-accent/90" : ""}
+                  >
                     {page}
                   </Button>
                 ))}
-                <Button variant="outline" size="sm" disabled={!hasNextPage || products.isFetching} onClick={() => goToPage(currentPage + 1)}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!hasNextPage || products.isFetching}
+                  onClick={() => goToPage(currentPage + 1)}
+                >
                   Вперёд
                 </Button>
               </div>

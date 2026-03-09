@@ -5,6 +5,7 @@ import { Suspense } from "react";
 import { env } from "@/config/env";
 import { CatalogClientPage } from "@/features/catalog/catalog-client-page";
 import { serverGet } from "@/lib/api/server";
+import { buildCategoryFaq, buildCategorySeoParagraphs, toFaqJsonLd } from "@/lib/seo/content";
 
 type Category = { id: string; slug: string; name: string };
 type Brand = { id: string; name: string; products_count?: number };
@@ -44,7 +45,7 @@ const resolveVirtualCategory = (slug: string, categories: Category[], brands: Br
       categoryId: undefined,
       brandId: brand?.id,
       presetQuery: brand ? undefined : fallbackQuery,
-      title: `Бренд: ${brandLabel}`,
+      title: `Бренд: ${brandLabel}`
     };
   }
 
@@ -58,7 +59,7 @@ const resolveVirtualCategory = (slug: string, categories: Category[], brands: Br
     categoryId: baseCategory.id,
     brandId: brand?.id,
     presetQuery: brand ? undefined : fallbackQuery,
-    title: `${baseCategory.name} - ${brandLabel}`,
+    title: `${baseCategory.name} - ${brandLabel}`
   };
 };
 
@@ -67,7 +68,7 @@ async function loadCategoryIndex(): Promise<{ categories: Category[]; brands: Br
     const [categories, brands] = await Promise.all([serverGet<Category[]>("/categories"), serverGet<Brand[]>("/brands")]);
     return {
       categories: Array.isArray(categories) ? categories : [],
-      brands: Array.isArray(brands) ? brands : [],
+      brands: Array.isArray(brands) ? brands : []
     };
   } catch {
     return { categories: [], brands: [] };
@@ -80,25 +81,57 @@ export async function generateMetadata({ params }: { params: { slug: string } })
 
   const category = categories.find((item) => item.slug === params.slug);
   if (category) {
+    const title = `${category.name}: цены и предложения`;
+    const description = `Сравнение цен, магазинов и характеристик по категории ${category.name}. Выберите лучшее предложение.`;
     return {
-      title: `${category.name} - цены и предложения`,
-      description: `Сравнение цен и магазинов по категории ${category.name}. Выберите лучший вариант покупки.`,
+      title,
+      description,
+      keywords: [category.name, "цены", "сравнение", "каталог"],
       alternates: { canonical },
+      openGraph: {
+        title: `${title} | ${env.siteName}`,
+        description,
+        url: canonical,
+        type: "website"
+      },
+      twitter: {
+        card: "summary_large_image",
+        title: `${title} | ${env.siteName}`,
+        description
+      }
     };
   }
 
   const virtual = resolveVirtualCategory(params.slug, categories, brands);
   if (virtual) {
+    const title = `${virtual.title}: цены и предложения`;
+    const description = `Сравнение цен и магазинов по подборке ${virtual.title}.`;
     return {
-      title: `${virtual.title} - цены и предложения`,
-      description: `Сравнение цен и магазинов по подборке ${virtual.title}.`,
+      title,
+      description,
       alternates: { canonical },
+      openGraph: {
+        title: `${title} | ${env.siteName}`,
+        description,
+        url: canonical,
+        type: "website"
+      },
+      twitter: {
+        card: "summary_large_image",
+        title: `${title} | ${env.siteName}`,
+        description
+      }
     };
   }
 
   return {
     title: `Категория: ${params.slug}`,
+    description: "Страница категории каталога товаров.",
     alternates: { canonical },
+    robots: {
+      index: false,
+      follow: true
+    }
   };
 }
 
@@ -110,10 +143,26 @@ export default async function CategoryPage({ params }: { params: { slug: string 
 
   const category = categories.find((item) => item.slug === params.slug);
   if (category) {
+    const faq = buildCategoryFaq(category.name);
+    const seoParagraphs = buildCategorySeoParagraphs(category.name);
+
     return (
-      <Suspense fallback={<div className="mx-auto max-w-7xl px-4 py-8 text-sm text-muted-foreground">Загрузка каталога...</div>}>
-        <CatalogClientPage categoryId={category.id} pageTitle={category.name} />
-      </Suspense>
+      <>
+        <Suspense fallback={<div className="mx-auto max-w-7xl px-4 py-8 text-sm text-muted-foreground">Загрузка каталога...</div>}>
+          <CatalogClientPage categoryId={category.id} pageTitle={category.name} />
+        </Suspense>
+        <section className="mx-auto max-w-7xl space-y-2 px-4 pb-8 text-sm text-muted-foreground">
+          {seoParagraphs.map((paragraph) => (
+            <p key={paragraph}>{paragraph}</p>
+          ))}
+        </section>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(toFaqJsonLd(faq))
+          }}
+        />
+      </>
     );
   }
 
@@ -122,9 +171,25 @@ export default async function CategoryPage({ params }: { params: { slug: string 
     notFound();
   }
 
+  const faq = buildCategoryFaq(virtual.title);
+  const seoParagraphs = buildCategorySeoParagraphs(virtual.title);
+
   return (
-    <Suspense fallback={<div className="mx-auto max-w-7xl px-4 py-8 text-sm text-muted-foreground">Загрузка каталога...</div>}>
-      <CatalogClientPage categoryId={virtual.categoryId} presetBrandId={virtual.brandId} presetQuery={virtual.presetQuery} pageTitle={virtual.title} />
-    </Suspense>
+    <>
+      <Suspense fallback={<div className="mx-auto max-w-7xl px-4 py-8 text-sm text-muted-foreground">Загрузка каталога...</div>}>
+        <CatalogClientPage categoryId={virtual.categoryId} presetBrandId={virtual.brandId} presetQuery={virtual.presetQuery} pageTitle={virtual.title} />
+      </Suspense>
+      <section className="mx-auto max-w-7xl space-y-2 px-4 pb-8 text-sm text-muted-foreground">
+        {seoParagraphs.map((paragraph) => (
+          <p key={paragraph}>{paragraph}</p>
+        ))}
+      </section>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(toFaqJsonLd(faq))
+        }}
+      />
+    </>
   );
 }

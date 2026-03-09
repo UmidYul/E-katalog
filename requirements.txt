@@ -9,6 +9,7 @@ httpx==0.28.1
 selectolax==0.3.27
 playwright==1.50.0
 celery[redis]==5.4.0
+flower==2.0.1
 redis==5.2.1
 pgvector==0.3.6
 tenacity==9.0.0

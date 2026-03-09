@@ -1,45 +1,101 @@
+﻿"use client";
+
 import Link from "next/link";
 import { Send, Youtube } from "lucide-react";
 
 const footerLinks = {
-  Каталог: [
+  "О сервисе": [
+    { href: "/", label: "О Doxx" },
+    { href: "/contacts", label: "Контакты" },
+    { href: "/status", label: "Статус сервиса" },
+    { href: "/become-seller", label: "Стать продавцом" },
+  ],
+  "Каталог": [
     { href: "/catalog", label: "Все товары" },
     { href: "/compare", label: "Сравнение" },
     { href: "/favorites", label: "Избранное" },
+    { href: "/recently-viewed", label: "История" },
   ],
-  Аккаунт: [
+  "Аккаунт": [
     { href: "/profile", label: "Профиль" },
-    { href: "/recently-viewed", label: "Недавно просмотренные" },
-    { href: "/login", label: "Вход" },
+    { href: "/login", label: "Войти" },
+    { href: "/register", label: "Регистрация" },
   ],
-  Сервис: [
-    { href: "/become-seller", label: "Стать продавцом" },
-    { href: "/status", label: "Статус сервиса" },
-    { href: "/contacts", label: "Контакты" },
-  ],
-  Правовая: [
-    { href: "/privacy", label: "Privacy Policy" },
-    { href: "/terms", label: "Terms of Service" },
-    { href: "/cookies", label: "Cookie Policy" },
+  "Правовая": [
+    { href: "/privacy", label: "Конфиденциальность" },
+    { href: "/terms", label: "Условия" },
+    { href: "/cookies", label: "Cookies" },
   ],
 };
-
-const paymentMethods = ["Visa", "Mastercard", "МИР", "SBP"];
 
 export function SiteFooter() {
   const year = new Date().getUTCFullYear();
 
   return (
-    <footer className="bg-primary text-primary-foreground">
-      <div className="mx-auto max-w-7xl px-4 py-12">
-        <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+    <footer style={{ backgroundColor: "#0D1117", color: "#9BA3B5" }}>
+      <div className="mx-auto max-w-[1280px] px-4 py-16">
+        {/* Top: logo + tagline */}
+        <div className="mb-12 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <Link href="/" className="inline-flex items-center gap-2.5" aria-label="Doxx">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent shadow-sm">
+                <span className="font-heading text-lg font-bold text-white">D</span>
+              </div>
+              <span className="font-heading text-xl font-bold text-white">Doxx</span>
+            </Link>
+            <p className="mt-3 max-w-xs text-sm leading-relaxed" style={{ color: "#5A6478" }}>
+              Агрегатор цен на технику — сравнивайте предложения магазинов в реальном времени.
+            </p>
+          </div>
+
+          {/* Social links */}
+          <div className="flex items-center gap-2">
+            <a
+              href="#"
+              className="flex h-9 w-9 items-center justify-center rounded-md transition-colors"
+              style={{ backgroundColor: "rgba(255,255,255,0.06)", color: "#9BA3B5" }}
+              aria-label="VK"
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#2563EB"; (e.currentTarget as HTMLElement).style.color = "#fff"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#9BA3B5"; }}
+            >
+              <span className="text-xs font-bold">VK</span>
+            </a>
+            <a
+              href="#"
+              className="flex h-9 w-9 items-center justify-center rounded-md transition-colors"
+              style={{ backgroundColor: "rgba(255,255,255,0.06)", color: "#9BA3B5" }}
+              aria-label="Telegram"
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#2563EB"; (e.currentTarget as HTMLElement).style.color = "#fff"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#9BA3B5"; }}
+            >
+              <Send className="h-4 w-4" />
+            </a>
+            <a
+              href="#"
+              className="flex h-9 w-9 items-center justify-center rounded-md transition-colors"
+              style={{ backgroundColor: "rgba(255,255,255,0.06)", color: "#9BA3B5" }}
+              aria-label="YouTube"
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#2563EB"; (e.currentTarget as HTMLElement).style.color = "#fff"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#9BA3B5"; }}
+            >
+              <Youtube className="h-4 w-4" />
+            </a>
+          </div>
+        </div>
+
+        {/* Links grid */}
+        <div className="grid grid-cols-2 gap-8 sm:grid-cols-4">
           {Object.entries(footerLinks).map(([title, links]) => (
             <div key={title}>
-              <h3 className="mb-4 font-heading text-sm font-bold">{title}</h3>
-              <ul className="flex flex-col gap-2">
+              <h3 className="mb-4 text-sm font-semibold text-white">{title}</h3>
+              <ul className="flex flex-col gap-2.5">
                 {links.map((link) => (
                   <li key={link.href}>
-                    <Link href={link.href} className="text-sm text-primary-foreground/65 transition-colors hover:text-accent">
+                    <Link
+                      href={link.href}
+                      className="text-sm transition-colors hover:text-white"
+                      style={{ color: "#5A6478" }}
+                    >
                       {link.label}
                     </Link>
                   </li>
@@ -49,47 +105,25 @@ export function SiteFooter() {
           ))}
         </div>
 
-        <hr className="my-8 border-primary-foreground/10" />
-
-        <div className="flex flex-col items-center justify-between gap-4 sm:flex-row">
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-primary-foreground/65">Мы в соцсетях:</span>
-            <div className="flex gap-2">
-              <a
-                href="#"
-                className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-foreground/10 text-primary-foreground/75 transition-colors hover:bg-accent hover:text-accent-foreground"
-                aria-label="VK"
-              >
-                <span className="text-xs font-bold">VK</span>
-              </a>
-              <a
-                href="#"
-                className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-foreground/10 text-primary-foreground/75 transition-colors hover:bg-accent hover:text-accent-foreground"
-                aria-label="Telegram"
-              >
-                <Send className="h-4 w-4" />
-              </a>
-              <a
-                href="#"
-                className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-foreground/10 text-primary-foreground/75 transition-colors hover:bg-accent hover:text-accent-foreground"
-                aria-label="YouTube"
-              >
-                <Youtube className="h-4 w-4" />
-              </a>
-            </div>
-          </div>
-
+        {/* Bottom bar */}
+        <div
+          className="mt-12 flex flex-col items-center justify-between gap-4 border-t pt-8 sm:flex-row"
+          style={{ borderColor: "rgba(255,255,255,0.08)" }}
+        >
+          <p className="text-xs" style={{ color: "#5A6478" }}>
+            © {year} Doxx. Все права защищены.
+          </p>
           <div className="flex items-center gap-2">
-            {paymentMethods.map((method) => (
-              <span key={method} className="rounded-md border border-primary-foreground/20 px-2.5 py-1 text-xs font-medium text-primary-foreground/70">
+            {["Visa", "Mastercard", "МИР", "SBP"].map((method) => (
+              <span
+                key={method}
+                className="rounded px-2.5 py-1 text-xs font-medium"
+                style={{ border: "1px solid rgba(255,255,255,0.12)", color: "#5A6478" }}
+              >
                 {method}
               </span>
             ))}
           </div>
-        </div>
-
-        <div className="mt-6 text-center text-xs text-primary-foreground/45">
-          © {year} Doxx. Все права защищены.
         </div>
       </div>
     </footer>

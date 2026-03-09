@@ -187,7 +187,7 @@ export function ProductReviewsPanel({ productId }: { productId: string }) {
               {createReview.isPending ? "Отправляем..." : "Отправить отзыв"}
             </Button>
           </div>
-          {status ? <p className="text-xs text-primary">{status}</p> : null}
+          {status ? <p className="text-xs text-accent">{status}</p> : null}
           {reviewsQuery.isError ? <p className="text-xs text-destructive">Не удалось загрузить отзывы.</p> : null}
         </CardContent>
       </Card>
@@ -209,7 +209,7 @@ export function ProductReviewsPanel({ productId }: { productId: string }) {
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-semibold">{review.author}</p>
                     <div className="flex items-center gap-1">{renderStars(review.rating)}</div>
-                    {review.is_verified_purchase ? <Badge className="border-primary/40 bg-primary/15 text-primary">Покупка подтверждена</Badge> : null}
+                    {review.is_verified_purchase ? <Badge className="border-accent/30 bg-accent/10 text-accent">Покупка подтверждена</Badge> : null}
                     <Badge className={statusBadgeClass(review.status)}>{review.status}</Badge>
                   </div>
                   <p className="text-xs text-muted-foreground">{formatDateTime(review.created_at)}</p>
@@ -382,7 +382,7 @@ export function ProductQuestionsPanel({ productId }: { productId: string }) {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-2">
-            <MessageCircleQuestion className="h-4 w-4 text-primary" /> Вопросы и ответы
+            <MessageCircleQuestion className="h-4 w-4 text-accent" /> Вопросы и ответы
           </CardTitle>
           <Badge>{questions.length} вопросов</Badge>
         </CardHeader>
@@ -401,7 +401,7 @@ export function ProductQuestionsPanel({ productId }: { productId: string }) {
               {createQuestion.isPending ? "Отправляем..." : "Отправить вопрос"}
             </Button>
           </div>
-          {status ? <p className="text-xs text-primary">{status}</p> : null}
+          {status ? <p className="text-xs text-accent">{status}</p> : null}
           {questionsQuery.isError ? <p className="text-xs text-destructive">Не удалось загрузить вопросы.</p> : null}
         </CardContent>
       </Card>
@@ -446,7 +446,7 @@ export function ProductQuestionsPanel({ productId }: { productId: string }) {
                         <div key={answer.id} className="rounded-xl border border-border bg-card px-3 py-2">
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="text-xs font-semibold">{answer.author}</p>
-                            {answer.is_official ? <Badge className="h-5 bg-primary text-primary-foreground">Официальный</Badge> : null}
+                            {answer.is_official ? <Badge className="h-5 bg-accent text-white">Официальный</Badge> : null}
                             {answer.is_pinned ? <Badge className="h-5 border-warning/40 bg-warning/15 text-warning">Закреплён</Badge> : null}
                             <Badge className={statusBadgeClass(answer.status)}>{answer.status}</Badge>
                             <p className="text-xs text-muted-foreground">{formatDateTime(answer.created_at)}</p>

@@ -27,6 +27,7 @@ _FASTEMBED_MODEL_ALIASES = (
 _BACKEND_NAME = "hashing"
 _BACKEND_MODEL: TextEmbedding | None = None
 _BACKEND_MODEL_NAME = "hashing"
+_BACKEND_INITIALIZED = False
 
 
 def _target_dim(dim: int | None) -> int:
@@ -48,13 +49,30 @@ def _candidate_models() -> list[str]:
     return models
 
 
-if TextEmbedding is not None:
+def _fastembed_enabled() -> bool:
+    raw = getattr(settings, "embedding_use_fastembed", False)
+    if isinstance(raw, bool):
+        return raw
+    value = str(raw or "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _ensure_backend_initialized() -> None:
+    global _BACKEND_INITIALIZED, _BACKEND_MODEL, _BACKEND_NAME, _BACKEND_MODEL_NAME
+    if _BACKEND_INITIALIZED:
+        return
+    _BACKEND_INITIALIZED = True
+    if TextEmbedding is None or not _fastembed_enabled():
+        _BACKEND_MODEL = None
+        _BACKEND_NAME = "hashing"
+        _BACKEND_MODEL_NAME = "hashing"
+        return
     for model_name in _candidate_models():
         try:
             _BACKEND_MODEL = TextEmbedding(model_name=model_name)
             _BACKEND_NAME = "fastembed"
             _BACKEND_MODEL_NAME = model_name
-            break
+            return
         except Exception:  # noqa: BLE001
             _BACKEND_MODEL = None
             _BACKEND_NAME = "hashing"
@@ -83,6 +101,7 @@ def _resize_vector(vector: list[float], dim: int) -> list[float]:
 
 
 def _embed_with_backend(rows: list[str], dim: int) -> list[list[float]] | None:
+    _ensure_backend_initialized()
     if _BACKEND_MODEL is None:
         return None
     try:

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from time import perf_counter
 from typing import Any
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
+from celery.result import allow_join_result
+import httpx
 from sqlalchemy import text
 
 from app.celery_app import celery_app
@@ -18,6 +22,153 @@ from shared.utils.time import UTC
 
 _SCRAPE_REMOTE_TASK_NAME = "app.tasks.scrape_tasks.run_scrape_targets"
 _SCRAPE_REMOTE_TIMEOUT_SECONDS = 60 * 60 * 4
+_IMMEDIATE_REINDEX_TASK_NAME = "app.tasks.reindex_tasks.reindex_product_search_batch"
+
+_SOURCE_DISCOVERY_MIN_ACTIVE_PER_STORE = 8
+_SOURCE_DISCOVERY_MAX_PER_STORE = 40
+_DISCOVERY_TIMEOUT_SECONDS = 20.0
+
+_PROVIDER_FALLBACK_SOURCES: dict[str, list[str]] = {
+    "mediapark": [
+        "https://mediapark.uz/products/category/smartfony-po-brendu-660/smartfony-samsung-210",
+        "https://mediapark.uz/products/category/smartfony-po-brendu-660/smartfony-apple-iphone-211",
+    ],
+    "texnomart": [
+        "https://texnomart.uz/katalog/smartfony-apple/",
+        "https://texnomart.uz/katalog/smartfon-samsung/",
+        "https://texnomart.uz/katalog/smartfony/",
+        "https://texnomart.uz/katalog/noutbuki/",
+        "https://texnomart.uz/katalog/planshety/",
+    ],
+}
+
+
+def _normalize_source_url(base_url: str, href: str) -> str | None:
+    raw = str(href or "").strip()
+    if not raw:
+        return None
+    if raw.startswith("#") or raw.startswith("javascript:") or raw.startswith("mailto:"):
+        return None
+    absolute = urljoin(base_url, raw)
+    parts = urlsplit(absolute)
+    scheme = (parts.scheme or "").lower()
+    if scheme not in {"http", "https"}:
+        return None
+    if not parts.netloc:
+        return None
+    cleaned_path = re.sub(r"/{2,}", "/", parts.path or "/")
+    normalized = urlunsplit((scheme, parts.netloc.lower(), cleaned_path or "/", "", ""))
+    return normalized
+
+
+async def _discover_sources_for_store(*, provider: str, base_url: str) -> list[str]:
+    patterns_by_provider: dict[str, tuple[str, ...]] = {
+        "mediapark": (r'href=["\']([^"\']*?/products/category/[^"\']+)["\']',),
+        "texnomart": (r'href=["\']([^"\']*?/katalog/[^"\']+)["\']',),
+    }
+    patterns = patterns_by_provider.get(provider, ())
+    if not patterns:
+        return []
+
+    timeout = httpx.Timeout(_DISCOVERY_TIMEOUT_SECONDS)
+    html_chunks: list[str] = []
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            response = await client.get(base_url)
+            response.raise_for_status()
+            html_chunks.append(response.text)
+            for fallback_url in _PROVIDER_FALLBACK_SOURCES.get(provider, []):
+                try:
+                    fallback_response = await client.get(fallback_url)
+                    fallback_response.raise_for_status()
+                except Exception:  # noqa: BLE001
+                    continue
+                html_chunks.append(fallback_response.text)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("source_discovery_failed", provider=provider, base_url=base_url, error=str(exc))
+        return []
+
+    discovered: list[str] = []
+    seen: set[str] = set()
+    for html in html_chunks:
+        for pattern in patterns:
+            for href in re.findall(pattern, html, flags=re.IGNORECASE):
+                normalized = _normalize_source_url(base_url, href)
+                if not normalized or normalized in seen:
+                    continue
+                seen.add(normalized)
+                discovered.append(normalized)
+                if len(discovered) >= _SOURCE_DISCOVERY_MAX_PER_STORE:
+                    return discovered
+    return discovered
+
+
+async def _ensure_scrape_sources(session) -> None:
+    rows = (
+        await session.execute(
+            text(
+                """
+                select
+                    s.id as store_id,
+                    lower(s.provider) as provider,
+                    s.base_url as base_url,
+                    count(*) filter (where ss.is_active = true)::int as active_sources
+                from catalog_stores s
+                left join catalog_scrape_sources ss on ss.store_id = s.id
+                where s.is_active = true
+                  and lower(s.provider) in ('mediapark', 'texnomart')
+                group by s.id, s.provider, s.base_url
+                order by s.id asc
+                """
+            )
+        )
+    ).mappings().all()
+
+    inserted_total = 0
+    for row in rows:
+        provider = str(row.get("provider") or "").strip().lower()
+        store_id = int(row["store_id"])
+        active_sources = int(row.get("active_sources") or 0)
+        if active_sources >= _SOURCE_DISCOVERY_MIN_ACTIVE_PER_STORE:
+            continue
+
+        base_url = str(row.get("base_url") or "").strip()
+        if not base_url:
+            if provider == "mediapark":
+                base_url = "https://mediapark.uz"
+            elif provider == "texnomart":
+                base_url = "https://texnomart.uz"
+
+        candidates = await _discover_sources_for_store(provider=provider, base_url=base_url) if base_url else []
+        for fallback_url in _PROVIDER_FALLBACK_SOURCES.get(provider, []):
+            normalized = _normalize_source_url(base_url or fallback_url, fallback_url)
+            if normalized and normalized not in candidates:
+                candidates.append(normalized)
+
+        for idx, source_url in enumerate(candidates):
+            if idx >= _SOURCE_DISCOVERY_MAX_PER_STORE:
+                break
+            result = (
+                await session.execute(
+                    text(
+                        """
+                        insert into catalog_scrape_sources (store_id, url, source_type, is_active, priority)
+                        values (:store_id, :url, 'category', true, :priority)
+                        on conflict (store_id, url) do nothing
+                        returning id
+                        """
+                    ),
+                    {"store_id": store_id, "url": source_url, "priority": idx + 1},
+                )
+            ).first()
+            if result is not None:
+                inserted_total += 1
+
+    if inserted_total:
+        await session.commit()
+        logger.info("scrape_sources_synced", inserted=inserted_total)
+    else:
+        await session.rollback()
 
 
 async def _load_scrape_targets(session) -> list[dict[str, Any]]:
@@ -242,18 +393,67 @@ def _run_remote_scrape(targets: list[dict[str, Any]]) -> dict[str, Any]:
         queue="scrape.high",
         routing_key="scrape.high",
     )
-    payload = async_result.get(timeout=_SCRAPE_REMOTE_TIMEOUT_SECONDS, propagate=True)
+    with allow_join_result():
+        payload = async_result.get(timeout=_SCRAPE_REMOTE_TIMEOUT_SECONDS, propagate=True)
     if isinstance(payload, dict):
         return payload
     return {"status": "ok", "stores": []}
 
 
 async def _enqueue_full_crawl() -> dict[str, Any]:
+    lock_key = 904231
+    lock_acquired = False
+    lock_session = AsyncSessionLocal()
     async with AsyncSessionLocal() as session:
-        targets = await _load_scrape_targets(session)
-        if not targets:
-            return {"status": "no_targets", "stores": 0, "urls": 0, "at": datetime.now(UTC).isoformat()}
-        jobs_by_store = await _open_crawl_jobs(session, targets=targets)
+        lock_row = (
+            await lock_session.execute(
+                text(
+                    """
+                    select pg_try_advisory_lock(:lock_key) as locked
+                    """
+                ),
+                {"lock_key": lock_key},
+            )
+        ).mappings().one()
+        lock_acquired = bool(lock_row.get("locked"))
+        if not lock_acquired:
+            await lock_session.close()
+            return {
+                "status": "already_running",
+                "stores": 0,
+                "urls": 0,
+                "at": datetime.now(UTC).isoformat(),
+            }
+        try:
+            running_row = (
+                await session.execute(
+                    text(
+                        """
+                        select count(*)::int as total
+                        from catalog_crawl_jobs
+                        where status = 'running'
+                        """
+                    )
+                )
+            ).mappings().one()
+            if int(running_row.get("total") or 0) > 0:
+                return {
+                    "status": "already_running",
+                    "stores": 0,
+                    "urls": 0,
+                    "at": datetime.now(UTC).isoformat(),
+                }
+
+            await _ensure_scrape_sources(session)
+            targets = await _load_scrape_targets(session)
+            if not targets:
+                return {"status": "no_targets", "stores": 0, "urls": 0, "at": datetime.now(UTC).isoformat()}
+            jobs_by_store = await _open_crawl_jobs(session, targets=targets)
+        finally:
+            if lock_acquired:
+                await lock_session.execute(text("select pg_advisory_unlock(:lock_key)"), {"lock_key": lock_key})
+                await lock_session.commit()
+            await lock_session.close()
 
     try:
         scrape_result = _run_remote_scrape(targets)
@@ -266,6 +466,12 @@ async def _enqueue_full_crawl() -> dict[str, Any]:
         crawl_stats = await _finalize_crawl_jobs(session, jobs_by_store=jobs_by_store, scrape_result=scrape_result)
 
     workflow_id = run_product_pipeline()
+    immediate_reindex_task_id = celery_app.send_task(
+        _IMMEDIATE_REINDEX_TASK_NAME,
+        kwargs={"limit": 20000},
+        queue="reindex",
+        routing_key="reindex",
+    ).id
     total_urls = sum(len(target.get("category_urls", [])) for target in targets)
     add_parse_errors(count=int(scrape_result.get("failed_urls") or 0))
     logger.info(
@@ -273,6 +479,7 @@ async def _enqueue_full_crawl() -> dict[str, Any]:
         stores=len(targets),
         urls=total_urls,
         workflow_id=workflow_id,
+        immediate_reindex_task_id=immediate_reindex_task_id,
         **crawl_stats,
     )
     return {
@@ -280,6 +487,7 @@ async def _enqueue_full_crawl() -> dict[str, Any]:
         "stores": len(targets),
         "urls": total_urls,
         "workflow_id": workflow_id,
+        "immediate_reindex_task_id": immediate_reindex_task_id,
         "crawl_jobs": crawl_stats,
         "scrape_result": scrape_result,
         "at": datetime.now(UTC).isoformat(),

@@ -1,5 +1,6 @@
 "use client";
 
+import { motion } from "framer-motion";
 import { useQueries } from "@tanstack/react-query";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -261,7 +262,7 @@ export function FavoritesWatchlistClient() {
                       <div key={item.id} className="rounded-xl border border-border/80 bg-background/70 p-3">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div>
-                            <Link href={`/product/${productSlug}`} className="line-clamp-1 text-sm font-semibold text-primary hover:underline">
+                            <Link href={`/product/${productSlug}`} className="line-clamp-1 text-sm font-semibold text-accent hover:underline">
                               {item.data.title}
                             </Link>
                             <p className="text-xs text-muted-foreground">
@@ -317,7 +318,7 @@ export function FavoritesWatchlistClient() {
                 <Card key={id}>
                   <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
                     <div className="space-y-1">
-                      <Link href={`/product/${productSlug}`} className="text-sm font-semibold text-primary hover:underline">
+                      <Link href={`/product/${productSlug}`} className="text-sm font-semibold text-accent hover:underline">
                         {data.title}
                       </Link>
                       <p className="text-xs text-muted-foreground">

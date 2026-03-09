@@ -80,14 +80,16 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   };
 
   add("", { changeFrequency: "daily", priority: 1 });
-  add("/catalog", { changeFrequency: "daily", priority: 0.9 });
-  add("/compare", { changeFrequency: "weekly", priority: 0.4 });
-  add("/become-seller", { changeFrequency: "weekly", priority: 0.7 });
+  add("/catalog", { changeFrequency: "daily", priority: 0.95 });
+  add("/compare", { changeFrequency: "weekly", priority: 0.5 });
+  add("/become-seller", { changeFrequency: "weekly", priority: 0.65 });
+  add("/for-shops", { changeFrequency: "weekly", priority: 0.65 });
+  add("/contacts", { changeFrequency: "monthly", priority: 0.35 });
+  add("/terms", { changeFrequency: "yearly", priority: 0.2 });
+  add("/privacy", { changeFrequency: "yearly", priority: 0.2 });
+  add("/cookies", { changeFrequency: "yearly", priority: 0.2 });
 
-  const [categories, brands] = await Promise.all([
-    fetchApi<Category[]>("/categories"),
-    fetchApi<Brand[]>("/brands?limit=200")
-  ]);
+  const [categories, brands] = await Promise.all([fetchApi<Category[]>("/categories"), fetchApi<Brand[]>("/brands?limit=200")]);
 
   for (const category of categories ?? []) {
     const slug = String(category?.slug || "").trim();
@@ -100,7 +102,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     if (!Number.isFinite(count) || count <= 0) continue;
     const slug = slugify(String(brand?.name || ""));
     if (!slug) continue;
-    add(`/category/brand-${slug}`, { changeFrequency: "daily", priority: 0.8 });
+    add(`/category/brand-${slug}`, { changeFrequency: "daily", priority: 0.82 });
   }
 
   let cursor: string | null = null;
@@ -133,4 +135,3 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   return Array.from(entries.values());
 }
-

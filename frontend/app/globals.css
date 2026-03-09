@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -60,56 +62,86 @@
 }
 
 .public-theme {
-  --background: 214 33% 97%;
-  --foreground: 216 50% 12%;
+  /* ── Electric Blue palette (2026) ── */
+  --background: 0 0% 100%;
+  /* #FFFFFF */
+  --surface: 220 20% 96%;
+  /* #F2F4F8 */
+  --foreground: 215 55% 7%;
+  /* #0D1117 */
   --card: 0 0% 100%;
-  --card-foreground: 216 50% 12%;
-  --primary: 216 50% 12%;
+  --card-foreground: 215 55% 7%;
+
+  --primary: 221 83% 53%;
+  /* #2563EB  electric blue */
   --primary-foreground: 0 0% 100%;
-  --secondary: 216 33% 94%;
-  --secondary-foreground: 216 50% 12%;
-  --muted: 216 33% 94%;
-  --muted-foreground: 213 16% 42%;
-  --border: 212 33% 89%;
-  --input: 212 33% 89%;
-  --ring: 25 100% 50%;
-  --accent: 25 100% 50%;
+  --accent: 221 83% 53%;
+  /* same as primary */
+  --accent-hover: 224 71% 47%;
+  /* #1D4ED8 */
   --accent-foreground: 0 0% 100%;
-  --success: 160 84% 36%;
+
+  --secondary: 220 33% 98%;
+  /* #F8F9FC */
+  --secondary-foreground: 215 55% 7%;
+  --muted: 220 20% 96%;
+  /* #F2F4F8 */
+  --muted-foreground: 222 16% 42%;
+  /* #5A6478 */
+
+  --border: 225 25% 92%;
+  /* #E4E7EF */
+  --input: 225 25% 92%;
+  --ring: 221 83% 53%;
+
+  --success: 142 72% 36%;
+  /* #16A34A */
   --success-foreground: 0 0% 100%;
-  --warning: 39 92% 50%;
-  --warning-foreground: 216 50% 12%;
-  --destructive: 0 84% 60%;
+  --warning: 32 95% 44%;
+  /* #D97706 */
+  --warning-foreground: 215 55% 7%;
+  --danger: 0 72% 51%;
+  /* #DC2626 */
+  --danger-foreground: 0 0% 100%;
+  --destructive: 0 72% 51%;
   --destructive-foreground: 0 0% 100%;
+
+  --scrollbar-size: 6px;
   --scrollbar-track: hsl(var(--muted) / 0.7);
-  --scrollbar-thumb: hsl(var(--primary) / 0.35);
-  --scrollbar-thumb-hover: hsl(var(--primary) / 0.55);
-  --font-body: var(--font-inter), "Inter", "Segoe UI", sans-serif;
-  --font-heading: var(--font-montserrat), "Montserrat", "Segoe UI", sans-serif;
+  --scrollbar-thumb: hsl(var(--primary) / 0.25);
+  --scrollbar-thumb-hover: hsl(var(--primary) / 0.45);
+
+  --font-body: "Inter", "Segoe UI", sans-serif;
+  --font-heading: "Inter", "Segoe UI", sans-serif;
 }
 
 .dark .public-theme {
-  --background: 217 33% 10%;
-  --foreground: 213 35% 93%;
-  --card: 217 31% 14%;
-  --card-foreground: 213 35% 93%;
-  --primary: 212 37% 92%;
-  --primary-foreground: 216 50% 12%;
-  --secondary: 218 25% 20%;
-  --secondary-foreground: 213 35% 93%;
-  --muted: 218 25% 20%;
-  --muted-foreground: 215 20% 73%;
-  --border: 217 20% 28%;
-  --input: 217 20% 28%;
-  --ring: 25 100% 58%;
-  --accent: 25 100% 58%;
-  --accent-foreground: 216 50% 12%;
-  --success: 153 62% 48%;
-  --success-foreground: 216 50% 12%;
-  --warning: 39 95% 58%;
-  --warning-foreground: 216 50% 12%;
-  --destructive: 0 80% 65%;
-  --destructive-foreground: 216 50% 12%;
+  --background: 215 28% 9%;
+  --surface: 215 25% 13%;
+  --foreground: 210 40% 96%;
+  --card: 215 25% 12%;
+  --card-foreground: 210 40% 96%;
+  --primary: 221 83% 60%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 221 83% 60%;
+  --accent-hover: 224 71% 55%;
+  --accent-foreground: 0 0% 100%;
+  --secondary: 215 22% 17%;
+  --secondary-foreground: 210 40% 96%;
+  --muted: 215 22% 17%;
+  --muted-foreground: 220 14% 65%;
+  /* #9BA3B5 */
+  --border: 217 20% 24%;
+  --input: 217 20% 24%;
+  --ring: 221 83% 60%;
+  --success: 142 65% 42%;
+  --success-foreground: 215 28% 9%;
+  --warning: 32 92% 52%;
+  --warning-foreground: 215 28% 9%;
+  --danger: 0 72% 58%;
+  --danger-foreground: 0 0% 100%;
+  --destructive: 0 72% 58%;
+  --destructive-foreground: 0 0% 100%;
   --scrollbar-track: hsl(var(--muted) / 0.75);
   --scrollbar-thumb: hsl(var(--primary) / 0.35);
   --scrollbar-thumb-hover: hsl(var(--primary) / 0.55);
@@ -186,8 +218,9 @@
   .public-theme h3,
   .public-theme h4,
   .public-theme .font-heading {
-    font-family: var(--font-heading), "Montserrat", "Segoe UI", sans-serif;
+    font-family: "Inter", "Segoe UI", sans-serif;
     letter-spacing: -0.02em;
+    line-height: 1.2;
   }
 }
 
@@ -204,14 +237,25 @@
   0% {
     background-position: -200% 0;
   }
+
   100% {
     background-position: 200% 0;
   }
 }
 
 .skeleton-shimmer {
-  background: linear-gradient(90deg, #edf0f5 25%, #dde3ec 50%, #edf0f5 75%);
+  background: linear-gradient(90deg, hsl(220 20% 94%) 25%, hsl(220 20% 88%) 50%, hsl(220 20% 94%) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s ease-in-out infinite;
 }
 
+/* Marquee auto-scroll utility */
+.animate-marquee-scroll {
+  animation: marquee-scroll 30s linear infinite;
+}
+
+/* Focus visible ring in accent color */
+.public-theme *:focus-visible {
+  outline: 2px solid hsl(var(--accent));
+  outline-offset: 2px;
+}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { motion } from "framer-motion";
 import { Copy, Download, History, LogOut, Mail, Save, ShieldCheck, Sparkles, Trash2, UserRound } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -509,37 +510,38 @@ export function ProfileClient() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6 px-4 py-6">
-      <Card className="relative overflow-hidden border-primary/25">
-        <div className="pointer-events-none absolute -top-16 right-0 h-40 w-40 rounded-full bg-primary/20 blur-3xl" />
-        <div className="pointer-events-none absolute bottom-0 left-0 h-24 w-24 rounded-full bg-emerald-400/20 blur-2xl" />
-        <CardContent className="relative p-6">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <Avatar name={me.data.full_name} className="h-14 w-14 text-base" />
-              <div className="space-y-1">
-                <p className="text-xl font-semibold">{profileForm.display_name || me.data.full_name}</p>
-                <p className="text-sm text-muted-foreground">{me.data.email}</p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge className="bg-primary text-primary-foreground">Аккаунт {formatShortAccountId(me.data.id)}</Badge>
-                  <Badge>{favoritesCount} в избранном</Badge>
-                  <Badge>{recentCount} недавних просмотров</Badge>
+    <div className="mx-auto max-w-7xl space-y-6 px-4 py-8">
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
+        <Card className="relative overflow-hidden border-accent/20">
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-accent/5 to-transparent" />
+          <CardContent className="relative p-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="flex items-center gap-4">
+                <Avatar name={me.data.full_name} className="h-16 w-16 text-lg" />
+                <div className="space-y-1.5">
+                  <p className="text-xl font-bold text-foreground">{profileForm.display_name || me.data.full_name}</p>
+                  <p className="text-sm text-muted-foreground">{me.data.email}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge className="bg-accent/10 text-accent">Аккаунт {formatShortAccountId(me.data.id)}</Badge>
+                    <Badge>{favoritesCount} в избранном</Badge>
+                    <Badge>{recentCount} недавних просмотров</Badge>
+                  </div>
                 </div>
               </div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" className="gap-2" onClick={exportAccountSnapshot}>
+                  <Download className="h-4 w-4" /> Экспорт данных
+                </Button>
+                <Button variant="outline" className="gap-2" onClick={() => logout.mutate()} disabled={logout.isPending}>
+                  <LogOut className="h-4 w-4" /> {logout.isPending ? "Выходим..." : "Выйти"}
+                </Button>
+              </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" className="gap-2" onClick={exportAccountSnapshot}>
-                <Download className="h-4 w-4" /> Экспорт данных
-              </Button>
-              <Button variant="outline" className="gap-2" onClick={() => logout.mutate()} disabled={logout.isPending}>
-                <LogOut className="h-4 w-4" /> {logout.isPending ? "Выходим..." : "Выйти"}
-              </Button>
-            </div>
-          </div>
-          {status ? <p className="mt-4 text-sm text-primary">{status}</p> : null}
-          {copyStatus ? <p className="mt-1 text-sm text-primary">{copyStatus}</p> : null}
-        </CardContent>
-      </Card>
+            {status ? <p className="mt-4 text-sm text-accent">{status}</p> : null}
+            {copyStatus ? <p className="mt-1 text-sm text-accent">{copyStatus}</p> : null}
+          </CardContent>
+        </Card>
+      </motion.div>
 
       <div className="grid gap-6 xl:grid-cols-2">
         <div className="space-y-6">
@@ -552,7 +554,12 @@ export function ProfileClient() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="h-2 overflow-hidden rounded-full bg-secondary">
-                <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${completionScore}%` }} />
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${completionScore}%` }}
+                  transition={{ duration: 0.8, ease: "easeOut" }}
+                  className="h-full rounded-full bg-accent"
+                />
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-1">

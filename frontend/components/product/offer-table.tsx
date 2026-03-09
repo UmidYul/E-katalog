@@ -83,7 +83,7 @@ export function OfferTable({ offersByStore }: { offersByStore: OffersByStore[] }
                       {offer.in_stock ? "В наличии" : "Нет в наличии"}
                     </Badge>
                     {offer.trust_score != null ? (
-                      <Badge className="border-primary/30 bg-primary/10 text-primary">Trust: {Math.round(Number(offer.trust_score) * 100)}%</Badge>
+                      <Badge className="border-accent/30 bg-accent/10 text-accent">Trust: {Math.round(Number(offer.trust_score) * 100)}%</Badge>
                     ) : null}
                     {offer.delivery_days !== null && offer.delivery_days !== undefined ? <Badge>{offer.delivery_days} дн.</Badge> : null}
                     <span className="text-base font-semibold text-foreground">{formatPrice(offer.price_amount, offer.currency)}</span>

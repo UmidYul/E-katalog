@@ -5,6 +5,7 @@ import { ThemeProvider } from "next-themes";
 import { ReactNode, useEffect, useState } from "react";
 
 import { useUserPriceAlerts } from "@/features/user/use-price-alerts";
+import { Toaster } from "@/components/ui/toaster";
 import { useCompareStore } from "@/store/compare.store";
 import { usePriceAlertsStore } from "@/store/priceAlerts.store";
 import { useProfileStore } from "@/store/profile.store";
@@ -57,6 +58,7 @@ export function Providers({ children }: { children: ReactNode }) {
         <PersistStoresHydrator />
         <PriceAlertsServerHydrator />
         {children}
+        <Toaster />
       </QueryClientProvider>
     </ThemeProvider>
   );

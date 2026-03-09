@@ -1,6 +1,7 @@
 "use client";
 
-import { BellRing, Heart } from "lucide-react";
+import { motion } from "framer-motion";
+import { BellRing, Heart, Scale } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
@@ -233,56 +234,50 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
   };
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6 px-4 py-6">
+    <div className="mx-auto max-w-7xl space-y-8 px-4 py-8">
       <Breadcrumbs items={[{ href: "/", label: "Главная" }, { href: "/catalog", label: "Каталог" }, { href: `/product/${slug}`, label: product.data.title }]} />
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
+      <div className="grid gap-8 lg:grid-cols-2">
         <ProductGallery images={galleryImages} />
 
-        <section className="space-y-4 rounded-xl border border-border bg-card p-5">
-          <h1 className="font-heading text-2xl font-bold">{product.data.title}</h1>
-          <p className="text-sm text-muted-foreground">Проверенные предложения по магазинам и обновляемая история цен в одном месте.</p>
-          <div className="grid gap-2 rounded-xl border border-border bg-card p-3 text-sm">
-            <p>
-              <span className="text-muted-foreground">Категория:</span> {product.data.category}
-            </p>
-            {product.data.brand ? (
-              <p>
-                <span className="text-muted-foreground">Бренд:</span> {product.data.brand}
-              </p>
-            ) : null}
-            <p>
-              <span className="text-muted-foreground">Минимальная цена:</span>{" "}
-              <span className="font-semibold text-accent">{currentMinPrice != null ? formatPrice(currentMinPrice) : "Нет данных"}</span>
-            </p>
-          </div>
-
-          {product.data.short_description ? (
-            <div className="rounded-xl border border-border bg-card p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Краткое описание</p>
-              <p className="mt-1 text-sm">{product.data.short_description}</p>
-            </div>
-          ) : null}
-
-          <div className="rounded-xl border border-border bg-card p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Что нового</p>
-            {product.data.whats_new?.length ? (
-              <ul className="mt-2 list-disc space-y-1 pl-4 text-sm">
-                {product.data.whats_new.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            ) : (
-              <p className="mt-1 text-sm text-muted-foreground">Данные об обновлениях этой модели пока отсутствуют.</p>
+        <motion.section
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.1 }}
+          className="space-y-5 lg:sticky lg:top-20 lg:self-start"
+        >
+          {/* Category & brand badges */}
+          <div className="flex flex-wrap gap-2">
+            {product.data.category && (
+              <span className="rounded-md bg-secondary px-2.5 py-1 text-xs font-medium text-muted-foreground">{product.data.category}</span>
+            )}
+            {product.data.brand && (
+              <span className="rounded-md bg-accent/10 px-2.5 py-1 text-xs font-bold text-accent">{product.data.brand}</span>
             )}
           </div>
 
+          <h1 className="font-heading text-2xl font-bold leading-snug text-foreground md:text-3xl">{product.data.title}</h1>
+
+          {/* Price */}
+          <div className="rounded-2xl border border-border bg-card p-4">
+            <p className="text-xs text-muted-foreground">Минимальная цена</p>
+            <p className="mt-1 text-3xl font-bold text-accent">
+              {currentMinPrice != null ? formatPrice(currentMinPrice) : "Нет данных"}
+            </p>
+          </div>
+
+          {/* Action buttons */}
           <div className="flex flex-wrap gap-2">
-            <Button className="gap-2" onClick={handleFavoriteToggle}>
+            <Button
+              className="flex-1 gap-2"
+              variant={isFavorite ? "default" : "outline"}
+              onClick={handleFavoriteToggle}
+            >
               <Heart className={`h-4 w-4 ${isFavorite ? "fill-current" : ""}`} />
-              {isFavorite ? "В избранном" : "Добавить в избранное"}
+              {isFavorite ? "В избранном" : "В избранное"}
             </Button>
             <Button
+              className="flex-1 gap-2"
               variant={inCompare ? "default" : "outline"}
               onClick={() =>
                 toggleCompare({
@@ -295,13 +290,41 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
               disabled={compareDisabled}
               title={compareDisabled ? compareDisabledReason : undefined}
             >
-              {inCompare ? "Уже в сравнении" : "Добавить к сравнению"}
+              <Scale className="h-4 w-4" />
+              {inCompare ? "В сравнении" : "Сравнить"}
             </Button>
           </div>
-        </section>
+
+          {/* Short desc */}
+          {product.data.short_description && (
+            <p className="text-sm leading-relaxed text-muted-foreground">{product.data.short_description}</p>
+          )}
+
+          {/* What's new */}
+          {product.data.whats_new?.length ? (
+            <div className="rounded-2xl border border-border bg-card p-4">
+              <p className="mb-2 text-xs font-bold uppercase tracking-widest text-muted-foreground">Что нового</p>
+              <ul className="space-y-1.5 text-sm">
+                {product.data.whats_new.map((item) => (
+                  <li key={item} className="flex items-start gap-2">
+                    <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-accent" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </motion.section>
       </div>
 
-      <section className="rounded-xl border border-border bg-card p-5">
+      {/* Price tracking */}
+      <motion.section
+        initial={{ opacity: 0, y: 16 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true }}
+        transition={{ duration: 0.4 }}
+        className="rounded-2xl border border-border bg-card p-5"
+      >
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <BellRing className="h-4 w-4 text-accent" />
           <h2 className="font-heading text-lg font-bold">Отслеживание цены</h2>
@@ -310,29 +333,38 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
 
         {!me.data?.id ? (
           <p className="text-sm text-muted-foreground">
-            Чтобы включить отслеживание цены, <Link href="/login" className="font-semibold text-accent hover:underline">войдите в аккаунт</Link>.
+            Чтобы включить отслеживание цены,{" "}
+            <Link href="/login" className="font-semibold text-accent hover:underline">
+              войдите в аккаунт
+            </Link>
+            .
           </p>
         ) : !isFavorite ? (
-          <p className="text-sm text-muted-foreground">Добавьте товар в избранное, чтобы отслеживать снижение цены и достижение вашей цели.</p>
+          <p className="text-sm text-muted-foreground">
+            Добавьте товар в избранное, чтобы отслеживать снижение цены и достижение вашей цели.
+          </p>
         ) : (
           <div className="space-y-4">
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-xl border border-border bg-card p-3">
-                <p className="text-xs text-muted-foreground">Текущая цена</p>
-                <p className="text-sm font-semibold">{currentMinPrice != null ? formatPrice(currentMinPrice) : "Нет данных"}</p>
-              </div>
-              <div className="rounded-xl border border-border bg-card p-3">
-                <p className="text-xs text-muted-foreground">Базовая цена</p>
-                <p className="text-sm font-semibold">{alertMeta?.baseline_price != null ? formatPrice(alertMeta.baseline_price) : "Не задана"}</p>
-              </div>
-              <div className="rounded-xl border border-border bg-card p-3">
-                <p className="text-xs text-muted-foreground">Целевая цена</p>
-                <p className="text-sm font-semibold">{alertMeta?.target_price != null ? formatPrice(alertMeta.target_price) : "Не задана"}</p>
-              </div>
+              {[
+                { label: "Текущая цена", value: currentMinPrice != null ? formatPrice(currentMinPrice) : "Нет данных" },
+                { label: "Базовая цена", value: alertMeta?.baseline_price != null ? formatPrice(alertMeta.baseline_price) : "Не задана" },
+                { label: "Целевая цена", value: alertMeta?.target_price != null ? formatPrice(alertMeta.target_price) : "Не задана" },
+              ].map((stat) => (
+                <div key={stat.label} className="rounded-xl border border-border bg-background p-3">
+                  <p className="text-xs text-muted-foreground">{stat.label}</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">{stat.value}</p>
+                </div>
+              ))}
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant={alertMeta?.alerts_enabled ? "default" : "outline"} size="sm" onClick={handleToggleAlertsEnabled}>
+              <Button
+                variant={alertMeta?.alerts_enabled ? "default" : "outline"}
+                size="sm"
+                onClick={handleToggleAlertsEnabled}
+                className={alertMeta?.alerts_enabled ? "bg-accent text-white hover:bg-accent/90" : ""}
+              >
                 {alertMeta?.alerts_enabled ? "Алерты включены" : "Включить алерты"}
               </Button>
               <Button variant="outline" size="sm" onClick={handleResetBaseline}>
@@ -341,9 +373,13 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
             </div>
 
             <div className="flex flex-wrap items-end gap-2">
-              <div className="w-full max-w-xs space-y-1">
-                <label className="text-xs text-muted-foreground">Целевая цена (UZS)</label>
-                <Input value={targetPriceInput} onChange={(event) => setTargetPriceInput(event.target.value)} placeholder="Например: 12000000" />
+              <div className="w-full max-w-xs space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">Целевая цена (UZS)</label>
+                <Input
+                  value={targetPriceInput}
+                  onChange={(e) => setTargetPriceInput(e.target.value)}
+                  placeholder="Например: 12 000 000"
+                />
               </div>
               <Button size="sm" onClick={handleTargetSave}>
                 Сохранить цель
@@ -351,8 +387,9 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
             </div>
           </div>
         )}
-      </section>
+      </motion.section>
 
+      {/* Tabs */}
       <Tabs defaultValue="offers" className="space-y-4">
         <TabsList className="flex w-full flex-wrap gap-1 rounded-xl border border-border bg-card p-1">
           <TabsTrigger value="offers">Предложения</TabsTrigger>

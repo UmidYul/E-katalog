@@ -1,259 +1,384 @@
-"use client";
+﻿"use client";
 
-import {
-  GitCompareArrows,
-  Heart,
-  Menu,
-  RotateCcw,
-  Search,
-  Shield,
-  Truck,
-  User,
-  X,
-} from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+import { GitCompareArrows, Heart, LayoutGrid, LogOut, Menu, Search, Settings, User, X } from "lucide-react";
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ThemeToggle } from "@/components/common/theme-toggle";
-import { Input } from "@/components/ui/input";
-import { useAuthMe } from "@/features/auth/use-auth";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { useAuthMe, useLogout } from "@/features/auth/use-auth";
 import { useBrands, useCategories } from "@/features/catalog/use-catalog-queries";
 import { cn } from "@/lib/utils/cn";
 import { useCompareStore } from "@/store/compare.store";
 
-const staticLinks = [{ href: "/catalog", label: "Каталог" }];
+const RECENT_SEARCHES_KEY = "doxx_recent_searches";
+const MAX_RECENT = 5;
 
-const slugify = (value: string) =>
-  value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+function useRecentSearches() {
+  const [recent, setRecent] = useState<string[]>([]);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(RECENT_SEARCHES_KEY);
+      if (saved) setRecent(JSON.parse(saved) as string[]);
+    } catch { }
+  }, []);
+  const add = useCallback((term: string) => {
+    setRecent((prev) => {
+      const next = [term, ...prev.filter((t) => t !== term)].slice(0, MAX_RECENT);
+      try {
+        localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(next));
+      } catch { }
+      return next;
+    });
+  }, []);
+  return { recent, add };
+}
 
 export function SiteHeader() {
   const router = useRouter();
   const pathname = usePathname();
   const shouldLoadMe = pathname !== "/login" && pathname !== "/register";
   const me = useAuthMe(shouldLoadMe);
+  const logout = useLogout();
   const categories = useCategories();
   const brands = useBrands();
-  const compareCountFromStore = useCompareStore((state) => state.items.length);
+  const compareCount = useCompareStore((s) => s.items.length);
+  const { recent, add: addRecent } = useRecentSearches();
+
   const [query, setQuery] = useState("");
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [searchFocused, setSearchFocused] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+  const [debounced, setDebounced] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [highlightIdx, setHighlightIdx] = useState(-1);
+
+  useEffect(() => { setHydrated(true); }, []);
 
   useEffect(() => {
-    setHydrated(true);
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     setQuery(params.get("q") ?? "");
   }, [pathname]);
 
+  useEffect(() => {
+    const handler = () => setScrolled(window.scrollY > 8);
+    window.addEventListener("scroll", handler, { passive: true });
+    return () => window.removeEventListener("scroll", handler);
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(query), 300);
+    return () => clearTimeout(t);
+  }, [query]);
+
   const topCategories = useMemo(() => (hydrated ? (categories.data ?? []).slice(0, 8) : []), [categories.data, hydrated]);
   const topBrands = useMemo(() => (hydrated ? (brands.data ?? []).slice(0, 5) : []), [brands.data, hydrated]);
-  const compareCount = hydrated ? compareCountFromStore : 0;
+  const compareCountSafe = hydrated ? compareCount : 0;
   const isAuthenticated = hydrated && Boolean(me.data?.id);
   const isLoginPage = pathname === "/login";
-  const authLink = isAuthenticated
-    ? { href: "/profile", label: "Профиль" }
-    : isLoginPage
-      ? { href: "/register", label: "Регистрация" }
-      : { href: "/login", label: "Войти" };
 
   const suggestions = useMemo(() => {
-    const brandSuggestions = topBrands.map((brand) => brand.name);
-    const categorySuggestions = topCategories.map((category) => category.name);
-    return Array.from(new Set([...brandSuggestions, ...categorySuggestions])).slice(0, 7);
-  }, [topBrands, topCategories]);
+    if (!debounced.trim()) return [];
+    const term = debounced.toLowerCase();
+    const brandMatches = topBrands
+      .filter((b) => b.name.toLowerCase().includes(term))
+      .map((b) => ({ type: "brand" as const, label: b.name, href: `/catalog?q=${encodeURIComponent(b.name)}` }));
+    const catMatches = topCategories
+      .filter((c) => c.name.toLowerCase().includes(term))
+      .map((c) => ({ type: "category" as const, label: c.name, href: `/category/${c.slug}` }));
+    return [...brandMatches, ...catMatches].slice(0, 7);
+  }, [debounced, topBrands, topCategories]);
 
-  const filteredSuggestions =
-    query.trim().length > 0 ? suggestions.filter((item) => item.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 5) : [];
-
-  const onSearchSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const next = query.trim();
-    router.push(next ? `/catalog?q=${encodeURIComponent(next)}` : "/catalog");
-    setSearchFocused(false);
-    setMobileMenuOpen(false);
+  const onSearchSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    const term = query.trim();
+    if (term) addRecent(term);
+    router.push(term ? `/catalog?q=${encodeURIComponent(term)}` : "/catalog");
+    setSearchOpen(false);
+    setHighlightIdx(-1);
   };
 
-  return (
-    <header className="sticky top-0 z-50 border-b border-border bg-card">
-      <div className="bg-card text-muted-foreground">
-        <div className="mx-auto flex max-w-7xl items-center justify-center px-4 py-2 text-sm">
-          <div className="flex items-center gap-6">
-            <span className="flex items-center gap-1.5">
-              <Truck className="h-3.5 w-3.5" />
-              Проверенные магазины
-            </span>
-            <span className="hidden items-center gap-1.5 sm:flex">
-              <Shield className="h-3.5 w-3.5" />
-              Актуализация цен
-            </span>
-            <span className="hidden items-center gap-1.5 md:flex">
-              <RotateCcw className="h-3.5 w-3.5" />
-              Сравнение в реальном времени
-            </span>
-          </div>
-        </div>
-      </div>
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (!searchOpen) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); setHighlightIdx((i) => Math.min(i + 1, suggestions.length - 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setHighlightIdx((i) => Math.max(i - 1, -1)); }
+    else if (e.key === "Escape") { setSearchOpen(false); setHighlightIdx(-1); }
+    else if (e.key === "Enter" && highlightIdx >= 0) {
+      e.preventDefault();
+      const item = suggestions[highlightIdx];
+      if (item) { router.push(item.href); setSearchOpen(false); }
+    }
+  };
 
-      <div className="mx-auto max-w-7xl px-4 py-3">
-        <div className="flex items-center gap-4">
-          <Link href="/" className="flex shrink-0 items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent">
-              <span className="font-heading text-lg font-bold text-accent-foreground">D</span>
+  const handleBlur = () => {
+    setTimeout(() => {
+      if (!dropdownRef.current?.contains(document.activeElement)) {
+        setSearchOpen(false);
+        setHighlightIdx(-1);
+      }
+    }, 150);
+  };
+
+  const showDropdown = searchOpen && (suggestions.length > 0 || (!query.trim() && recent.length > 0));
+
+  return (
+    <header
+      className={cn(
+        "sticky top-0 z-50 transition-all duration-300",
+        scrolled ? "bg-white/80 backdrop-blur-md shadow-sm border-b border-border/60" : "bg-white border-b border-border"
+      )}
+    >
+      <div className="mx-auto flex max-w-[1280px] items-center gap-4 px-4 py-3">
+        {/* Logo */}
+        <Link href="/" className="flex shrink-0 items-center gap-2.5" aria-label="Doxx — главная">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent shadow-sm">
+            <span className="font-heading text-lg font-bold text-white">D</span>
+          </div>
+          <span className="hidden font-heading text-xl font-bold text-foreground lg:block">Doxx</span>
+        </Link>
+
+        {/* Search — center */}
+        <div className="relative hidden flex-1 max-w-2xl md:block" ref={dropdownRef}>
+          <form onSubmit={onSearchSubmit}>
+            <div
+              className={cn(
+                "flex items-center rounded-md border bg-white transition-all duration-200",
+                searchOpen ? "border-accent ring-2 ring-accent/20 shadow-sm" : "border-border hover:border-accent/50"
+              )}
+            >
+              <Search className="ml-3 h-4 w-4 shrink-0 text-muted-foreground" />
+              <input
+                ref={searchRef}
+                value={query}
+                onChange={(e) => { setQuery(e.target.value); setSearchOpen(true); setHighlightIdx(-1); }}
+                onFocus={() => setSearchOpen(true)}
+                onBlur={handleBlur}
+                onKeyDown={onKeyDown}
+                placeholder="Поиск товаров, брендов, категорий..."
+                className="flex-1 bg-transparent py-2.5 pl-2 pr-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                aria-label="Поиск"
+                aria-autocomplete="list"
+                aria-expanded={showDropdown}
+              />
+              {query && (
+                <button type="button" onClick={() => { setQuery(""); searchRef.current?.focus(); }} className="mr-1 rounded p-1 text-muted-foreground hover:text-foreground">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+              <button type="submit" className="mr-1.5 rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-accent/90">
+                Найти
+              </button>
             </div>
-            <span className="hidden font-heading text-xl font-bold text-foreground lg:block">Doxx</span>
+          </form>
+
+          <AnimatePresence>
+            {showDropdown && (
+              <motion.div
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 4 }}
+                transition={{ duration: 0.15 }}
+                className="absolute left-0 right-0 top-full z-50 mt-1.5 overflow-hidden rounded-lg border border-border bg-white shadow-lg"
+              >
+                {!query.trim() && recent.length > 0 && (
+                  <>
+                    <div className="px-4 py-2 text-xs font-semibold text-muted-foreground">Недавние запросы</div>
+                    {recent.map((term, i) => (
+                      <button key={term} type="button"
+                        onMouseDown={(e) => { e.preventDefault(); setQuery(term); addRecent(term); router.push(`/catalog?q=${encodeURIComponent(term)}`); setSearchOpen(false); }}
+                        className={cn("flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-foreground transition-colors hover:bg-muted", highlightIdx === i && "bg-muted")}
+                      >
+                        <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <span>{term}</span>
+                      </button>
+                    ))}
+                  </>
+                )}
+                {suggestions.length > 0 && (
+                  <>
+                    <div className="px-4 py-2 text-xs font-semibold text-muted-foreground">Результаты</div>
+                    {suggestions.map((item, i) => (
+                      <button key={item.href} type="button"
+                        onMouseDown={(e) => { e.preventDefault(); if (item.type !== "category") addRecent(item.label); router.push(item.href); setSearchOpen(false); }}
+                        className={cn("flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm transition-colors hover:bg-muted", highlightIdx === i && "bg-muted")}
+                      >
+                        <span className={cn("rounded-sm px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide", item.type === "brand" ? "bg-accent/10 text-accent" : "bg-success/10 text-success")}>
+                          {item.type === "brand" ? "Бренд" : "Категория"}
+                        </span>
+                        <span className="text-foreground">{item.label}</span>
+                      </button>
+                    ))}
+                  </>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* Right actions */}
+        <div className="ml-auto flex items-center gap-1">
+          <Link
+            href="/compare"
+            className="relative flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            aria-label={`Сравнение${compareCountSafe ? ` (${compareCountSafe})` : ""}`}
+          >
+            <GitCompareArrows className="h-5 w-5" />
+            {compareCountSafe > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-accent text-[10px] font-bold text-white">
+                {compareCountSafe}
+              </span>
+            )}
           </Link>
 
-          <div className="relative hidden max-w-2xl flex-1 lg:block">
-            <form className="relative" onSubmit={onSearchSubmit}>
-              <div className={cn("flex items-center rounded-lg border bg-card transition-colors", searchFocused ? "border-accent" : "border-border")}>
-                <Search className="pointer-events-none ml-3 h-4 w-4 text-muted-foreground" />
-                <Input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  onFocus={() => setSearchFocused(true)}
-                  onBlur={() => setTimeout(() => setSearchFocused(false), 150)}
-                  placeholder="Поиск товаров, брендов, категорий..."
-                  className="h-10 border-none bg-transparent pl-2 pr-20 shadow-none focus-visible:ring-0"
-                  aria-label="Поиск товаров"
-                />
-                <button type="submit" className="absolute right-1.5 top-1.5 rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-accent-foreground">
-                  Найти
-                </button>
-              </div>
-            </form>
-            {searchFocused && filteredSuggestions.length > 0 ? (
-              <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
-                {filteredSuggestions.map((suggestion) => (
-                  <button
-                    key={suggestion}
-                    type="button"
-                    onMouseDown={(event) => {
-                      event.preventDefault();
-                      setQuery(suggestion);
-                      router.push(`/catalog?q=${encodeURIComponent(suggestion)}`);
-                    }}
-                    className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-foreground transition-colors hover:bg-secondary"
-                  >
-                    <Search className="h-4 w-4 text-muted-foreground" />
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
-
-          <div className="ml-auto hidden items-center gap-1 md:flex">
-            <Link href="/compare" className="flex flex-col items-center gap-0.5 rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-accent">
-              <GitCompareArrows className="h-5 w-5" />
-              <span className="text-[10px]">Сравнение{compareCount ? ` (${compareCount})` : ""}</span>
-            </Link>
-            <Link href="/favorites" className="flex flex-col items-center gap-0.5 rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-accent">
-              <Heart className="h-5 w-5" />
-              <span className="text-[10px]">Избранное</span>
-            </Link>
-            <Link href={authLink.href} className="flex flex-col items-center gap-0.5 rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-accent">
-              <User className="h-5 w-5" />
-              <span className="text-[10px]">{authLink.label}</span>
-            </Link>
-            <ThemeToggle />
-          </div>
-
-          <button
-            type="button"
-            className="rounded-lg p-2 text-foreground md:hidden"
-            onClick={() => setMobileMenuOpen((prev) => !prev)}
-            aria-label={mobileMenuOpen ? "Закрыть меню" : "Открыть меню"}
+          <Link
+            href="/favorites"
+            className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            aria-label="Избранное"
           >
-            {mobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
-          </button>
+            <Heart className="h-5 w-5" />
+          </Link>
+
+          {hydrated && isAuthenticated ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="flex h-9 w-9 items-center justify-center rounded-md transition-colors hover:bg-muted" aria-label="Аккаунт">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-accent/10 text-accent">
+                    <User className="h-4 w-4" />
+                  </div>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuLabel>
+                  <p className="text-xs font-normal text-muted-foreground truncate">{me.data?.email ?? "Аккаунт"}</p>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild>
+                  <Link href="/profile" className="flex items-center gap-2"><User className="h-4 w-4" /> Профиль</Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/favorites" className="flex items-center gap-2"><Heart className="h-4 w-4" /> Избранное</Link>
+                </DropdownMenuItem>
+                {me.data?.role === "admin" && (
+                  <DropdownMenuItem asChild>
+                    <Link href="/dashboard/admin" className="flex items-center gap-2"><Settings className="h-4 w-4" /> Дашборд</Link>
+                  </DropdownMenuItem>
+                )}
+                {me.data?.role === "seller" && (
+                  <DropdownMenuItem asChild>
+                    <Link href="/dashboard/seller" className="flex items-center gap-2"><LayoutGrid className="h-4 w-4" /> Кабинет</Link>
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() => logout?.mutate(undefined)}
+                  className="text-danger focus:bg-danger/10 focus:text-danger"
+                >
+                  <LogOut className="mr-2 h-4 w-4" /> Выйти
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <Link
+              href={isLoginPage ? "/register" : "/login"}
+              className="hidden rounded-md border border-accent px-3 py-1.5 text-sm font-semibold text-accent transition-colors hover:bg-accent hover:text-white md:inline-flex"
+            >
+              {isLoginPage ? "Регистрация" : "Войти"}
+            </Link>
+          )}
+
+          <div className="hidden md:block"><ThemeToggle /></div>
+
+          {/* Mobile menu */}
+          <Sheet name="menu" open={menuOpen} onOpenChange={setMenuOpen}>
+            <SheetTrigger asChild>
+              <button type="button" className="flex h-9 w-9 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted md:hidden" aria-label="Открыть меню">
+                <Menu className="h-5 w-5" />
+              </button>
+            </SheetTrigger>
+            <SheetContent side="left" className="flex flex-col gap-4 p-0 pt-14">
+              <div className="px-4">
+                <form onSubmit={onSearchSubmit} className="flex items-center gap-2 rounded-md border border-border px-3 py-2">
+                  <Search className="h-4 w-4 text-muted-foreground" />
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Поиск..."
+                    className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                  />
+                </form>
+              </div>
+              <nav className="flex flex-col gap-0.5 px-3">
+                {[
+                  { href: "/", label: "Главная" },
+                  { href: "/catalog", label: "Каталог" },
+                  { href: "/compare", label: `Сравнение${compareCountSafe ? ` (${compareCountSafe})` : ""}` },
+                  { href: "/favorites", label: "Избранное" },
+                  isAuthenticated ? { href: "/profile", label: "Профиль" } : { href: "/login", label: "Войти" },
+                ].map((link) => (
+                  <Link key={link.href} href={link.href}
+                    className={cn("rounded-md px-3 py-2.5 text-sm font-medium transition-colors hover:bg-muted", pathname === link.href ? "bg-muted text-accent" : "text-foreground")}
+                  >
+                    {link.label}
+                  </Link>
+                ))}
+              </nav>
+              {topCategories.length > 0 && (
+                <div className="px-3">
+                  <p className="mb-1 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Категории</p>
+                  {topCategories.map((cat) => (
+                    <Link key={cat.id} href={`/category/${cat.slug}`}
+                      className="block rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                      {cat.name}
+                    </Link>
+                  ))}
+                </div>
+              )}
+              <div className="mt-auto border-t border-border px-4 py-4"><ThemeToggle /></div>
+            </SheetContent>
+          </Sheet>
         </div>
       </div>
 
-      <nav className="bg-card">
-        <div className="mx-auto max-w-7xl px-4">
-          <ul className="scrollbar-hide flex items-center gap-1 overflow-x-auto py-2">
-            {staticLinks.map((link) => (
-              <li key={link.href}>
-                <Link
-                  href={link.href}
-                  className={cn(
-                    "whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary hover:text-accent",
-                    pathname.startsWith(link.href) && "bg-secondary text-accent"
-                  )}
-                >
-                  {link.label}
-                </Link>
-              </li>
-            ))}
+      {/* Nav strip */}
+      <div className="hidden border-t border-border/50 md:block">
+        <div className="mx-auto max-w-[1280px] px-4">
+          <div className="scrollbar-hide flex items-center gap-0.5 overflow-x-auto py-1.5">
+            <Link
+              href="/catalog"
+              className={cn("whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted", pathname.startsWith("/catalog") ? "text-accent" : "text-muted-foreground")}
+            >
+              Все товары
+            </Link>
             {topBrands.map((brand) => (
-              <li key={brand.id}>
-                <Link
-                  href={`/category/brand-${slugify(brand.name)}`}
-                  className="whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary hover:text-accent"
-                >
-                  {brand.name}
-                </Link>
-              </li>
+              <Link key={brand.id} href={`/catalog?q=${encodeURIComponent(brand.name)}`}
+                className="whitespace-nowrap rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                {brand.name}
+              </Link>
             ))}
-            {topCategories.map((category) => (
-              <li key={category.id}>
-                <Link
-                  href={`/category/${category.slug}`}
-                  className="whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary hover:text-accent"
-                >
-                  {category.name}
-                </Link>
-              </li>
+            {topCategories.map((cat) => (
+              <Link key={cat.id} href={`/category/${cat.slug}`}
+                className="whitespace-nowrap rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                {cat.name}
+              </Link>
             ))}
-          </ul>
-        </div>
-      </nav>
-
-      {mobileMenuOpen ? (
-        <div className="bg-card md:hidden">
-          <div className="mx-auto max-w-7xl space-y-3 px-4 py-4">
-            <form className="relative" onSubmit={onSearchSubmit}>
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск..." className="pl-9" />
-            </form>
-            <div className="grid gap-1">
-              <Link href="/catalog" className="rounded-lg px-3 py-2 text-sm text-foreground hover:bg-secondary">
-                Каталог
-              </Link>
-              <Link href="/compare" className="rounded-lg px-3 py-2 text-sm text-foreground hover:bg-secondary">
-                Сравнение{compareCount ? ` (${compareCount})` : ""}
-              </Link>
-              <Link href="/favorites" className="rounded-lg px-3 py-2 text-sm text-foreground hover:bg-secondary">
-                Избранное
-              </Link>
-              <Link href={authLink.href} className="rounded-lg px-3 py-2 text-sm text-foreground hover:bg-secondary">
-                {authLink.label}
-              </Link>
-            </div>
-            {topCategories.length ? (
-              <div className="pt-2">
-                {topCategories.map((category) => (
-                  <Link key={category.id} href={`/category/${category.slug}`} className="block rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-secondary hover:text-foreground">
-                    {category.name}
-                  </Link>
-                ))}
-              </div>
-            ) : null}
-            <div className="flex justify-end">
-              <ThemeToggle />
-            </div>
           </div>
         </div>
-      ) : null}
+      </div>
     </header>
   );
 }

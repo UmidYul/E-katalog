@@ -212,8 +212,6 @@ class ExampleStoreParser(StoreParser):
             price = self._extract_price_from_html(html)
         if price is None:
             price = self._extract_price_from_network_payloads(network_payloads)
-        if price is None:
-            raise ValueError("price not found")
 
         old_price = self._parse_price_safe(old_price_node.text(strip=True)) if old_price_node else None
         if old_price is None:
@@ -227,9 +225,10 @@ class ExampleStoreParser(StoreParser):
         }
         description_node = tree.css_first("div.product-description")
         description = description_node.text(strip=True) if description_node else None
+        fallback_price = price if price is not None else Decimal("0")
         variants = self._extract_store_specific_variants(
             network_payloads=network_payloads,
-            price=price,
+            price=fallback_price,
             old_price=old_price,
             availability=availability,
             images=images,
@@ -258,6 +257,15 @@ class ExampleStoreParser(StoreParser):
                 images=images,
                 product_url=product_url,
             )
+
+        valid_variants = [item for item in variants if item.price is not None and item.price > 0]
+        if valid_variants:
+            variants = valid_variants
+            if price is None or price <= 0:
+                price = variants[0].price
+
+        if price is None or price <= 0:
+            raise ValueError("price not found")
 
         return ParsedProduct(
             title=title,

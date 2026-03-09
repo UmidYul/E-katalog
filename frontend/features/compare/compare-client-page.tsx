@@ -1,5 +1,6 @@
 "use client";
 
+import { motion } from "framer-motion";
 import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -428,29 +429,42 @@ export function CompareClientPage() {
   const columns = compareQuery.data?.items ?? [];
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6 px-4 py-6">
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4 }}
+      className="mx-auto max-w-7xl space-y-6 px-4 py-8"
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="space-y-1">
+        <div className="space-y-1.5">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="font-heading text-2xl font-extrabold">Сравнение</h1>
-            <Badge>
+            <span className="rounded-md bg-secondary px-2.5 py-1 text-xs font-medium">
               {compareItems.length}/{COMPARE_LIMIT} выбрано
-            </Badge>
-            {categoryScope ? <Badge className="bg-secondary/80">{formatCategory(categoryScope)}</Badge> : null}
-            {compareQuery.isFetching ? <Badge className="bg-secondary/80">Обновляем...</Badge> : null}
+            </span>
+            {categoryScope ? (
+              <span className="rounded-md bg-accent/10 px-2.5 py-1 text-xs font-medium text-accent">
+                {formatCategory(categoryScope)}
+              </span>
+            ) : null}
+            {compareQuery.isFetching ? (
+              <span className="rounded-md bg-secondary px-2.5 py-1 text-xs text-muted-foreground">Обновляем...</span>
+            ) : null}
           </div>
-          <p className="text-xs text-muted-foreground">Сравнение работает в рамках одной категории. Заголовки и первая колонка закреплены для удобного чтения.</p>
+          <p className="text-xs text-muted-foreground">
+            Сравнение работает в рамках одной категории. Заголовки и первая колонка закреплены.
+          </p>
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-1 text-success">
               <span className="h-2 w-2 rounded-full bg-success" /> Лучшее значение
             </span>
             <span>Подсветка лучшего значения рассчитывается по эвристике.</span>
           </div>
-          {shareStatus ? <p className="text-xs text-primary">{shareStatus}</p> : null}
+          {shareStatus ? <p className="text-xs text-accent">{shareStatus}</p> : null}
           {lastShareUrl ? (
             <p className="text-xs text-muted-foreground">
               Ссылка:{" "}
-              <a href={lastShareUrl} className="text-primary underline underline-offset-2" target="_blank" rel="noreferrer">
+              <a href={lastShareUrl} className="text-accent underline underline-offset-2" target="_blank" rel="noreferrer">
                 открыть
               </a>
               {lastShareExpiresAt ? ` (действует до ${formatDateTime(lastShareExpiresAt)})` : ""}
@@ -506,7 +520,7 @@ export function CompareClientPage() {
                   </Link>
                 );
               })()}
-              <Link href={`/product/${item.slug}`} className="line-clamp-2 text-sm font-semibold text-primary hover:underline">
+              <Link href={`/product/${item.slug}`} className="line-clamp-2 text-sm font-semibold text-accent hover:underline">
                 {item.title}
               </Link>
               <div className="flex gap-2">
@@ -548,7 +562,7 @@ export function CompareClientPage() {
                               </div>
                             </Link>
                           ) : null}
-                          <Link href={`/product/${slug}`} className="hover:text-primary">
+                          <Link href={`/product/${slug}`} className="font-medium hover:text-accent">
                             {title}
                           </Link>
                         </div>
@@ -611,7 +625,7 @@ export function CompareClientPage() {
           </CardContent>
         </Card>
       ) : null}
-    </div>
+    </motion.div>
   );
 }
 

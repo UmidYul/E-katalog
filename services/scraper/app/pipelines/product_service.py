@@ -14,6 +14,8 @@ from app.db.models import Offer, PriceHistory, Product, Shop
 from app.parsers.base import ParsedProduct, ParsedVariant
 from app.utils.variants import build_variant_key
 from shared.db.models import (
+    CatalogBrand,
+    CatalogCategory,
     CatalogCanonicalProduct,
     CatalogOffer,
     CatalogPriceHistory,
@@ -29,6 +31,33 @@ from shared.utils.time import UTC
 class ProductService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    @staticmethod
+    def _infer_brand_name(*, title: str, specs: dict[str, str] | None) -> str | None:
+        title_value = str(title or "").lower()
+        spec_values = " ".join(str(value or "") for value in (specs or {}).values()).lower()
+        signal = f"{title_value} {spec_values}".strip()
+        if not signal:
+            return None
+        brand_aliases: tuple[tuple[str, tuple[str, ...]], ...] = (
+            ("Apple", ("apple", "iphone")),
+            ("Samsung", ("samsung", "galaxy")),
+            ("Xiaomi", ("xiaomi", "redmi", "poco")),
+            ("Honor", ("honor",)),
+            ("Huawei", ("huawei",)),
+            ("Google", ("google", "pixel")),
+            ("OnePlus", ("oneplus", "one plus")),
+            ("Nothing", ("nothing",)),
+        )
+        for brand_name, aliases in brand_aliases:
+            for alias in aliases:
+                if re.search(rf"(?<![a-z0-9]){re.escape(alias)}(?![a-z0-9])", signal, flags=re.IGNORECASE):
+                    return brand_name
+        return None
+
+    @staticmethod
+    def _normalize_brand_name(name: str) -> str:
+        return re.sub(r"[^a-z0-9]+", " ", str(name or "").strip().lower()).strip()
 
     @staticmethod
     def _shop_name_candidates(name: str) -> set[str]:
@@ -105,6 +134,32 @@ class ProductService:
         }
         return {key: value for key, value in attrs.items() if value}
 
+    @classmethod
+    def _infer_category_slug_from_text(
+        cls, *, title: str, specs: dict[str, str] | None, category_slug_hint: str | None
+    ) -> str:
+        hint = str(category_slug_hint or "").strip().lower()
+        if hint in cls._CATEGORY_REGISTRY:
+            return hint
+        signal = f"{str(title or '')} {' '.join(str(v or '') for v in (specs or {}).values())}".lower()
+        if any(token in signal for token in ("науш", "гарнитур", "headphone", "earbud", "airpods", "buds")):
+            return "headphones"
+        if any(token in signal for token in ("playstation", "xbox", "nintendo", "ps5", "ps4", "консол", "console")):
+            return "consoles"
+        if any(token in signal for token in ("холодил", "стирал", "пылесос", "микроволн", "духов", "плита", "vacuum", "washer", "conditioner", "air fryer", "чайник", "утюг", "бойлер", "тостер")):
+            return "appliances"
+        if any(token in signal for token in ("камера", "фотоаппарат", "беззеркал", "объектив", "camera", "dslr", "gopro", "mirrorless", "lens")):
+            return "cameras"
+        if any(token in signal for token in ("telev", "televizor", " smart tv", "oled", "qled", "android tv")):
+            return "tvs"
+        if any(token in signal for token in ("watch", "smart watch", "смарт часы", "умные часы", "soat", "saat")):
+            return "watches"
+        if any(token in signal for token in ("noutbuk", "laptop", "notebook", "macbook")):
+            return "laptops"
+        if any(token in signal for token in ("planshet", "tablet", "ipad", "galaxy tab")):
+            return "tablets"
+        return "phones"
+
     @staticmethod
     def _iter_variants(parsed: ParsedProduct) -> list[ParsedVariant]:
         if parsed.variants:
@@ -135,8 +190,9 @@ class ProductService:
         if not settings.legacy_write_enabled:
             return Shop(name=name, url=url)
         candidates = self._shop_name_candidates(name)
-        result = await self.session.execute(select(Shop).where(Shop.name.in_(candidates)))
-        shop = result.scalar_one_or_none()
+        result = await self.session.execute(select(Shop).where(Shop.name.in_(candidates)).order_by(Shop.id.asc()))
+        shops = list(result.scalars().all())
+        shop = shops[0] if shops else None
         if shop:
             if shop.name != name:
                 shop.name = name
@@ -149,8 +205,9 @@ class ProductService:
             return shop
         except IntegrityError:
             await self.session.rollback()
-            result = await self.session.execute(select(Shop).where(Shop.name.in_(candidates)))
-            existing = result.scalar_one_or_none()
+            result = await self.session.execute(select(Shop).where(Shop.name.in_(candidates)).order_by(Shop.id.asc()))
+            existing_rows = list(result.scalars().all())
+            existing = existing_rows[0] if existing_rows else None
             if existing is None:
                 raise
             if existing.name != name:
@@ -158,8 +215,22 @@ class ProductService:
                 existing.url = url
             return existing
 
-    async def upsert_offer(self, parsed: ParsedProduct, shop: Shop, category_id: int | None = None) -> Offer | None:
+    async def upsert_offer(
+        self,
+        parsed: ParsedProduct,
+        shop: Shop,
+        category_id: int | None = None,
+        category_slug: str | None = None,
+    ) -> Offer | None:
         variants = self._iter_variants(parsed)
+        category_slug_resolved = self._infer_category_slug_from_text(
+            title=parsed.title,
+            specs=parsed.specifications,
+            category_slug_hint=category_slug,
+        )
+        catalog_category_id = await self._resolve_or_create_catalog_category(category_slug_resolved)
+        inferred_brand = self._infer_brand_name(title=parsed.title, specs=parsed.specifications)
+        brand_id = await self._resolve_or_create_brand(brand_name=inferred_brand) if inferred_brand else None
         legacy_product: Product | None = None
         if settings.legacy_write_enabled:
             if shop.id is None:
@@ -172,11 +243,15 @@ class ProductService:
             title=parsed.title,
             image=self._pick_main_image(parsed.images),
             specs=parsed.specifications,
+            brand_id=brand_id,
+            category_id=catalog_category_id,
         )
         catalog_product = await self._resolve_or_create_catalog_product(
             legacy_product_id=int(legacy_product.id) if legacy_product is not None else None,
             canonical_product_id=int(catalog_canonical.id),
             title=parsed.title,
+            brand_id=brand_id,
+            category_id=catalog_category_id,
         )
 
         processed_variant_keys: set[str] = set()
@@ -340,8 +415,9 @@ class ProductService:
 
     async def _resolve_or_create_catalog_store(self, *, name: str, url: str) -> CatalogStore:
         slug = self._store_slug(name)
-        result = await self.session.execute(select(CatalogStore).where(CatalogStore.slug == slug))
-        store = result.scalar_one_or_none()
+        result = await self.session.execute(select(CatalogStore).where(CatalogStore.slug == slug).order_by(CatalogStore.id.asc()))
+        stores = list(result.scalars().all())
+        store = stores[0] if stores else None
         if store is not None:
             store.name = name
             store.base_url = url
@@ -367,9 +443,10 @@ class ProductService:
             select(CatalogSeller).where(
                 CatalogSeller.store_id == store_id,
                 CatalogSeller.normalized_name == normalized_name,
-            )
+            ).order_by(CatalogSeller.id.asc())
         )
-        seller = result.scalar_one_or_none()
+        sellers = list(result.scalars().all())
+        seller = sellers[0] if sellers else None
         if seller is not None:
             seller.name = seller_name
             return seller
@@ -383,36 +460,155 @@ class ProductService:
         await self.session.flush()
         return seller
 
+    async def _resolve_or_create_brand(self, *, brand_name: str) -> int | None:
+        normalized_name = self._normalize_brand_name(brand_name)
+        if not normalized_name:
+            return None
+        result = await self.session.execute(
+            select(CatalogBrand).where(CatalogBrand.normalized_name == normalized_name).order_by(CatalogBrand.id.asc())
+        )
+        rows = list(result.scalars().all())
+        brand = rows[0] if rows else None
+        if brand is not None:
+            if brand.name != brand_name:
+                brand.name = brand_name
+            return int(brand.id)
+        brand = CatalogBrand(name=brand_name, normalized_name=normalized_name, aliases=[])
+        self.session.add(brand)
+        try:
+            async with self.session.begin_nested():
+                await self.session.flush()
+            return int(brand.id)
+        except IntegrityError:
+            if brand in self.session:
+                self.session.expunge(brand)
+            result = await self.session.execute(
+                select(CatalogBrand).where(CatalogBrand.normalized_name == normalized_name).order_by(CatalogBrand.id.asc())
+            )
+            rows = list(result.scalars().all())
+            existing = rows[0] if rows else None
+            if existing is None:
+                raise
+            if existing.name != brand_name:
+                existing.name = brand_name
+            return int(existing.id)
+
+    async def _resolve_or_create_catalog_category(self, slug: str) -> int:
+        normalized_slug = str(slug or "").strip().lower() or "phones"
+        meta = self._CATEGORY_REGISTRY.get(normalized_slug) or self._CATEGORY_REGISTRY["phones"]
+        result = await self.session.execute(
+            select(CatalogCategory).where(CatalogCategory.slug == normalized_slug).order_by(CatalogCategory.id.asc())
+        )
+        rows = list(result.scalars().all())
+        category = rows[0] if rows else None
+        if category is not None:
+            category.is_active = True
+            category.name_uz = meta["name_uz"]
+            category.name_ru = meta["name_ru"]
+            category.name_en = meta["name_en"]
+            return int(category.id)
+        category = CatalogCategory(
+            slug=normalized_slug,
+            parent_id=None,
+            name_uz=meta["name_uz"],
+            name_ru=meta["name_ru"],
+            name_en=meta["name_en"],
+            lft=0,
+            rgt=0,
+            is_active=True,
+        )
+        self.session.add(category)
+        await self.session.flush()
+        return int(category.id)
+
     async def _resolve_or_create_catalog_canonical(
-        self, *, title: str, image: str | None, specs: dict[str, str]
+        self, *, title: str, image: str | None, specs: dict[str, str], brand_id: int | None, category_id: int
     ) -> CatalogCanonicalProduct:
         normalized_title = str(title or "").strip().lower()
-        result = await self.session.execute(
-            select(CatalogCanonicalProduct).where(
-                CatalogCanonicalProduct.category_id == 1,
-                CatalogCanonicalProduct.normalized_title == normalized_title,
-            )
+        canonical: CatalogCanonicalProduct | None = await self._find_catalog_canonical_by_title_and_brand(
+            normalized_title=normalized_title,
+            brand_id=brand_id,
+            category_id=category_id,
         )
-        canonical = result.scalar_one_or_none()
         if canonical is not None:
+            if brand_id is not None and canonical.brand_id is None:
+                canonical.brand_id = brand_id
             if image and not canonical.main_image:
                 canonical.main_image = image
             if specs and (not canonical.specs or canonical.specs == {}):
                 canonical.specs = dict(specs)
             return canonical
-        canonical = CatalogCanonicalProduct(
+
+        candidate = CatalogCanonicalProduct(
             normalized_title=normalized_title,
             main_image=image,
-            category_id=1,
+            category_id=category_id,
+            brand_id=brand_id,
             specs=dict(specs or {}),
             is_active=True,
         )
-        self.session.add(canonical)
-        await self.session.flush()
+        self.session.add(candidate)
+        try:
+            # Guard against concurrent workers inserting the same canonical row.
+            async with self.session.begin_nested():
+                await self.session.flush()
+            canonical = candidate
+        except IntegrityError:
+            # Prevent repeated autoflush failures on the same transient row.
+            if candidate in self.session:
+                self.session.expunge(candidate)
+            canonical = await self._find_catalog_canonical_by_title_and_brand(
+                normalized_title=normalized_title,
+                brand_id=brand_id,
+                category_id=category_id,
+            )
+            if canonical is None:
+                raise
         return canonical
 
+    async def _find_catalog_canonical_by_title_and_brand(
+        self, *, normalized_title: str, brand_id: int | None, category_id: int
+    ) -> CatalogCanonicalProduct | None:
+        with self.session.no_autoflush:
+            if brand_id is not None:
+                exact = await self.session.execute(
+                    select(CatalogCanonicalProduct).where(
+                        CatalogCanonicalProduct.category_id == category_id,
+                        CatalogCanonicalProduct.normalized_title == normalized_title,
+                        CatalogCanonicalProduct.brand_id == brand_id,
+                    ).order_by(CatalogCanonicalProduct.id.asc())
+                )
+                exact_rows = list(exact.scalars().all())
+                if exact_rows:
+                    return exact_rows[0]
+                neutral = await self.session.execute(
+                    select(CatalogCanonicalProduct).where(
+                        CatalogCanonicalProduct.category_id == category_id,
+                        CatalogCanonicalProduct.normalized_title == normalized_title,
+                        CatalogCanonicalProduct.brand_id.is_(None),
+                    ).order_by(CatalogCanonicalProduct.id.asc())
+                )
+                neutral_rows = list(neutral.scalars().all())
+                if neutral_rows:
+                    return neutral_rows[0]
+
+            result = await self.session.execute(
+                select(CatalogCanonicalProduct).where(
+                    CatalogCanonicalProduct.category_id == category_id,
+                    CatalogCanonicalProduct.normalized_title == normalized_title,
+                ).order_by(CatalogCanonicalProduct.id.asc())
+            )
+            canonicals = list(result.scalars().all())
+            return canonicals[0] if canonicals else None
+
     async def _resolve_or_create_catalog_product(
-        self, *, legacy_product_id: int | None, canonical_product_id: int, title: str
+        self,
+        *,
+        legacy_product_id: int | None,
+        canonical_product_id: int,
+        title: str,
+        brand_id: int | None,
+        category_id: int,
     ) -> CatalogProduct:
         product: CatalogProduct | None = None
         if legacy_product_id is not None:
@@ -422,19 +618,24 @@ class ProductService:
                 select(CatalogProduct).where(
                     CatalogProduct.canonical_product_id == canonical_product_id,
                     CatalogProduct.normalized_title == str(title or "").strip().lower(),
-                )
+                ).order_by(CatalogProduct.id.asc())
             )
-            product = result.scalar_one_or_none()
+            products = list(result.scalars().all())
+            product = products[0] if products else None
         if product is not None:
             product.canonical_product_id = canonical_product_id
             product.normalized_title = str(title or "").strip().lower()
+            product.category_id = category_id
+            if brand_id is not None and product.brand_id is None:
+                product.brand_id = brand_id
             product.status = "active"
             return product
 
         product = CatalogProduct(
             id=legacy_product_id if legacy_product_id is not None else None,
             canonical_product_id=canonical_product_id,
-            category_id=1,
+            category_id=category_id,
+            brand_id=brand_id,
             normalized_title=str(title or "").strip().lower(),
             attributes={},
             specs={},
@@ -451,9 +652,10 @@ class ProductService:
             select(CatalogProductVariant).where(
                 CatalogProductVariant.product_id == product_id,
                 CatalogProductVariant.variant_key == variant_key,
-            )
+            ).order_by(CatalogProductVariant.id.asc())
         )
-        variant = result.scalar_one_or_none()
+        variants = list(result.scalars().all())
+        variant = variants[0] if variants else None
         if variant is not None:
             variant.color = str(variant_attrs.get("color") or variant.color or "")[:64] or None
             variant.storage = str(variant_attrs.get("storage") or variant.storage or "")[:64] or None
@@ -498,9 +700,10 @@ class ProductService:
                 select(CatalogStoreProduct).where(
                     CatalogStoreProduct.store_id == store_id,
                     CatalogStoreProduct.external_id == external_id,
-                )
+                ).order_by(CatalogStoreProduct.id.asc())
             )
-            store_product = result.scalar_one_or_none()
+            store_products = list(result.scalars().all())
+            store_product = store_products[0] if store_products else None
 
         metadata_json = {
             "images": list(images or []),
@@ -622,3 +825,15 @@ class ProductService:
             )
         )
         return catalog_offer
+    _CATEGORY_REGISTRY: dict[str, dict[str, str]] = {
+        "phones": {"name_uz": "Smartfonlar", "name_ru": "Смартфоны", "name_en": "Smartphones"},
+        "tablets": {"name_uz": "Planshetlar", "name_ru": "Планшеты", "name_en": "Tablets"},
+        "laptops": {"name_uz": "Noutbuklar", "name_ru": "Ноутбуки", "name_en": "Laptops"},
+        "watches": {"name_uz": "Soatlar", "name_ru": "Смарт-часы", "name_en": "Smart Watches"},
+        "tvs": {"name_uz": "Televizorlar", "name_ru": "Телевизоры", "name_en": "TVs"},
+        "headphones": {"name_uz": "Quloqchinlar", "name_ru": "Наушники", "name_en": "Headphones"},
+        "consoles": {"name_uz": "Konsollar", "name_ru": "Игровые консоли", "name_en": "Consoles"},
+        "appliances": {"name_uz": "Maishiy texnika", "name_ru": "Бытовая техника", "name_en": "Appliances"},
+        "cameras": {"name_uz": "Kameralar", "name_ru": "Камеры", "name_en": "Cameras"},
+    }
+

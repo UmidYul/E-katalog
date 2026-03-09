@@ -17,6 +17,8 @@ export type ProductListItem = {
   score?: number;
   brand?: { id: string; name: string } | null;
   category?: { id: string; name: string } | null;
+  is_new?: boolean;
+  discount_pct?: number;
 };
 
 export type ProductDetail = {

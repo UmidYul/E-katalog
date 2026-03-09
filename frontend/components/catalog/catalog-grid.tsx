@@ -1,5 +1,6 @@
 "use client";
 
+import { motion } from "framer-motion";
 import { useEffect, useMemo } from "react";
 
 import { ProductCard } from "@/components/catalog/product-card";
@@ -32,7 +33,7 @@ export function CatalogGrid({ loading, items }: { loading: boolean; items: Produ
     return (
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {Array.from({ length: 9 }).map((_, idx) => (
-          <Skeleton key={idx} className="h-[340px] rounded-xl" />
+          <Skeleton key={idx} className="h-[340px] rounded-2xl" />
         ))}
       </div>
     );
@@ -46,8 +47,18 @@ export function CatalogGrid({ loading, items }: { loading: boolean; items: Produ
   const compareFull = compareItems.length >= COMPARE_LIMIT;
   const referenceCompareCategory = getReferenceCategory(compareItems.map((item) => item.category));
 
+  const container = {
+    hidden: {},
+    show: { transition: { staggerChildren: 0.06 } },
+  };
+
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    <motion.div
+      variants={container}
+      initial="hidden"
+      animate="show"
+      className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
+    >
       {items.map((item) => {
         const inCompare = compareSet.has(item.id);
         const categoryMismatch = Boolean(referenceCompareCategory && normalizeCategory(item.category?.name) && normalizeCategory(item.category?.name) !== referenceCompareCategory);
@@ -79,7 +90,7 @@ export function CatalogGrid({ loading, items }: { loading: boolean; items: Produ
           />
         );
       })}
-    </div>
+    </motion.div>
   );
 }
 
