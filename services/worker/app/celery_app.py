@@ -75,6 +75,7 @@ celery_app.conf.update(
         "app.tasks.scrape_tasks.scrape_priority_category": {"queue": "scrape.high", "routing_key": "scrape.high"},
         "app.tasks.scrape_tasks.scrape_store_category": {"queue": "scrape.default", "routing_key": "scrape.default"},
         "app.tasks.scrape_tasks.enqueue_full_crawl": {"queue": "maintenance", "routing_key": "maintenance"},
+        "app.tasks.scrape_tasks.process_quarantine_item": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.scrape_tasks.enqueue_ingested_products_pipeline": {"queue": "normalize", "routing_key": "normalize"},
         "app.tasks.scrape_tasks.retry_failed_items": {"queue": "maintenance", "routing_key": "maintenance"},
         "app.tasks.normalize_tasks.normalize_product_batch": {"queue": "normalize", "routing_key": "normalize"},

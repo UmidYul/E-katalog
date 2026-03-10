@@ -12,8 +12,8 @@ celery_client = Celery(
 )
 
 
-def _send(task_name: str, *, queue: str, routing_key: str) -> str:
-    result = celery_client.send_task(task_name, queue=queue, routing_key=routing_key)
+def _send(task_name: str, *, queue: str, routing_key: str, kwargs: dict | None = None) -> str:
+    result = celery_client.send_task(task_name, kwargs=kwargs or {}, queue=queue, routing_key=routing_key)
     return result.id
 
 
@@ -110,4 +110,22 @@ def enqueue_b2b_feed_health_validation() -> str:
         "app.tasks.b2b_tasks.validate_b2b_feed_health",
         queue="maintenance",
         routing_key="maintenance",
+    )
+
+
+def enqueue_process_quarantine_item(
+    *,
+    item_uuid: str,
+    category_slug_override: str | None = None,
+    brand_hint_override: str | None = None,
+) -> str:
+    return _send(
+        "app.tasks.scrape_tasks.process_quarantine_item",
+        queue="maintenance",
+        routing_key="maintenance",
+        kwargs={
+            "item_uuid": str(item_uuid).strip().lower(),
+            "category_slug_override": str(category_slug_override or "").strip().lower() or None,
+            "brand_hint_override": str(brand_hint_override or "").strip() or None,
+        },
     )

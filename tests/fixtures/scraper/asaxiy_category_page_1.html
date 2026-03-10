@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ru">
+<body>
+<div class="row custom-gutter loading-more-product-list mb-40">
+  <div class="col-6 col-xl-3 col-md-4">
+    <div class="product__item d-flex flex-column justify-content-between product-installment-item">
+      <a href="/product/phone-a-8256-black">
+        <img data-src="https://cdn.example.com/phone-a.jpg" />
+      </a>
+      <span class="product__item__info-title">Phone A 8/256 Black</span>
+      <span class="product__item-old--price">4 899 000 sum</span>
+      <span class="product__item-price">4 299 000 sum</span>
+      <div class="installment__price">523 100 sum x 12</div>
+    </div>
+    <button class="open__one_click-modal" onclick="show_one_click_modal(`1 `, `111`)"></button>
+    <span id="product_cart_data_111"
+          data-id="111"
+          data-name="Phone A 8/256 Black"
+          data-price="4299000"
+          data-old-price="4899000"
+          data-img="https://assets.example/phone-a.jpg"
+          data-brand-name="Honor"></span>
+  </div>
+  <div class="col-6 col-xl-3 col-md-4">
+    <div class="product__item d-flex flex-column justify-content-between product-installment-item">
+      <a href="/product/phone-b-12256-blue">
+        <img data-src="https://cdn.example.com/phone-b.jpg" />
+      </a>
+      <span class="product__item__info-title">Phone B 12/256 Blue</span>
+      <span class="product__item-price">5 199 000 sum</span>
+      <div class="installment__price">641 500 sum x 12</div>
+    </div>
+    <button class="open__one_click-modal" onclick="show_one_click_modal(`0 `, `222`)"></button>
+    <span id="product_cart_data_222"
+          data-id="222"
+          data-name="Phone B 12/256 Blue"
+          data-price="5199000"
+          data-old-price="0"
+          data-img="https://assets.example/phone-b.jpg"
+          data-brand-name="Samsung"></span>
+  </div>
+</div>
+<nav class="pagination__nav">
+  <ul class="pagination">
+    <li class="page-item active"><span class="page-link" data-page="0">1</span></li>
+    <li class="page-item"><a class="page-link" href="/product/telefony-i-gadzhety/telefony/smartfony/page=2" data-page="1">2</a></li>
+  </ul>
+</nav>
+<script>let totalPages = parseInt('2', 10) || 1;</script>
+</body>
+</html>

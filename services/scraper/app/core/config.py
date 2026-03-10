@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False)
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra="ignore")
 
     environment: Literal["local", "staging", "production"] = "local"
     log_level: str = "INFO"
@@ -22,7 +22,11 @@ class Settings(BaseSettings):
     http_ca_bundle: str | None = None
     request_concurrency: int = 20
     scrape_inter_request_delay_seconds: float = 0.7
-    legacy_write_enabled: bool = True
+    legacy_write_enabled: bool = False
+    ingest_unknown_policy: Literal["fallback_phones", "quarantine"] = "quarantine"
+    ingest_category_confidence_threshold: float = 0.70
+    ingest_quarantine_enabled: bool = True
+    ingest_max_price_uzs: int = 200000000
     scrape_delay_jitter_ratio: float = 0.2
     scrape_default_domain_concurrency: int = 2
     scrape_default_domain_delay_seconds: float = 2.0
@@ -30,6 +34,8 @@ class Settings(BaseSettings):
     scrape_texnomart_delay_seconds: float = 1.5
     scrape_mediapark_concurrency: int = 5
     scrape_mediapark_delay_seconds: float = 1.0
+    scrape_asaxiy_concurrency: int = 2
+    scrape_asaxiy_delay_seconds: float = 2.0
     scrape_product_limit: int = 0
     max_retries: int = 5
     task_retry_backoff_max_seconds: int = 600
@@ -77,8 +83,9 @@ class Settings(BaseSettings):
     proxies: list[str] = Field(default_factory=list)
     proxy_texnomart: str = ""
     proxy_mediapark: str = ""
+    proxy_asaxiy: str = ""
 
-    scraper_provider: Literal["mediapark", "texnomart", "alifshop", "example"] = "texnomart"
+    scraper_provider: Literal["mediapark", "texnomart", "alifshop", "asaxiy", "example"] = "texnomart"
 
     mediapark_base_url: HttpUrl = "https://mediapark.uz"
     mediapark_category_paths: list[str] = Field(
@@ -101,6 +108,13 @@ class Settings(BaseSettings):
         default_factory=lambda: [
             "/ru/categories/smartfoni-apple",
             "/ru/categories/smartfoni-samsung",
+        ]
+    )
+
+    asaxiy_base_url: HttpUrl = "https://asaxiy.uz"
+    asaxiy_category_paths: list[str] = Field(
+        default_factory=lambda: [
+            "/product/telefony-i-gadzhety/telefony/smartfony",
         ]
     )
 
@@ -135,6 +149,8 @@ class Settings(BaseSettings):
             return self._parse_proxy_env(self.proxy_texnomart)
         if hostname.endswith("mediapark.uz"):
             return self._parse_proxy_env(self.proxy_mediapark)
+        if hostname.endswith("asaxiy.uz"):
+            return self._parse_proxy_env(self.proxy_asaxiy)
         return []
 
     def scrape_limits_for_host(self, host: str | None) -> tuple[int, float]:
@@ -143,6 +159,8 @@ class Settings(BaseSettings):
             return max(1, int(self.scrape_texnomart_concurrency)), max(0.0, float(self.scrape_texnomart_delay_seconds))
         if hostname.endswith("mediapark.uz"):
             return max(1, int(self.scrape_mediapark_concurrency)), max(0.0, float(self.scrape_mediapark_delay_seconds))
+        if hostname.endswith("asaxiy.uz"):
+            return max(1, int(self.scrape_asaxiy_concurrency)), max(0.0, float(self.scrape_asaxiy_delay_seconds))
         default_concurrency = int(self.scrape_default_domain_concurrency or self.request_concurrency)
         default_delay = float(self.scrape_default_domain_delay_seconds or self.scrape_inter_request_delay_seconds)
         return max(1, default_concurrency), max(0.0, default_delay)

@@ -96,8 +96,16 @@ async def _run_scrape_targets(targets: list[dict[str, Any]]) -> dict[str, Any]:
     stores_payload: list[dict[str, Any]] = []
     processed_urls_total = 0
     failed_urls_total = 0
+    rate_limited_urls_total = 0
+    quarantined_urls_total = 0
+    invalid_urls_total = 0
+    unknown_products_total = 0
     processed_by_store: dict[int, int] = defaultdict(int)
     failed_by_store: dict[int, int] = defaultdict(int)
+    rate_limited_by_store: dict[int, int] = defaultdict(int)
+    quarantined_by_store: dict[int, int] = defaultdict(int)
+    invalid_by_store: dict[int, int] = defaultdict(int)
+    unknown_products_by_store: dict[int, int] = defaultdict(int)
 
     async with AsyncSessionLocal() as session:
         for target in target_rows:
@@ -121,10 +129,44 @@ async def _run_scrape_targets(targets: list[dict[str, Any]]) -> dict[str, Any]:
             store_url_results: list[dict[str, Any]] = []
             for category_url in urls:
                 try:
-                    await service.scrape_categories([category_url])
-                    store_url_results.append({"url": category_url, "status": "done", "error": None})
-                    processed_urls_total += 1
-                    processed_by_store[store_id] += 1
+                    scrape_result = await service.scrape_categories([category_url])
+                    category_results = scrape_result.get("category_results") if isinstance(scrape_result, dict) else []
+                    category_result = (
+                        category_results[0]
+                        if isinstance(category_results, list) and category_results and isinstance(category_results[0], dict)
+                        else {}
+                    )
+                    item_status = str(category_result.get("status") or "done").strip().lower()
+                    error_text = str(category_result.get("error") or "").strip() or None
+                    payload = {
+                        "url": category_url,
+                        "status": item_status,
+                        "error": error_text,
+                        "processed_products": int(category_result.get("processed_products") or 0),
+                        "failed_products": int(category_result.get("failed_products") or 0),
+                        "invalid_products": int(category_result.get("invalid_products") or 0),
+                        "quarantined_products": int(category_result.get("quarantined_products") or 0),
+                        "rate_limited_products": int(category_result.get("rate_limited_products") or 0),
+                        "unknown_products": int(category_result.get("unknown_products") or 0),
+                    }
+                    store_url_results.append(payload)
+                    unknown_products_total += int(payload["unknown_products"])
+                    unknown_products_by_store[store_id] += int(payload["unknown_products"])
+                    if item_status in {"ok", "done", "completed", "success"}:
+                        processed_urls_total += 1
+                        processed_by_store[store_id] += 1
+                    elif item_status == "rate_limited":
+                        rate_limited_urls_total += 1
+                        rate_limited_by_store[store_id] += 1
+                    elif item_status == "quarantined":
+                        quarantined_urls_total += 1
+                        quarantined_by_store[store_id] += 1
+                    elif item_status == "invalid":
+                        invalid_urls_total += 1
+                        invalid_by_store[store_id] += 1
+                    else:
+                        failed_urls_total += 1
+                        failed_by_store[store_id] += 1
                 except Exception as exc:  # noqa: BLE001
                     logger.error(
                         "target_category_scrape_failed",
@@ -146,6 +188,10 @@ async def _run_scrape_targets(targets: list[dict[str, Any]]) -> dict[str, Any]:
                     "total_urls": len(urls),
                     "processed_urls": int(processed_by_store[store_id]),
                     "failed_urls": int(failed_by_store[store_id]),
+                    "rate_limited_urls": int(rate_limited_by_store[store_id]),
+                    "quarantined_urls": int(quarantined_by_store[store_id]),
+                    "invalid_urls": int(invalid_by_store[store_id]),
+                    "unknown_products": int(unknown_products_by_store[store_id]),
                     "url_results": store_url_results,
                 }
             )
@@ -158,6 +204,11 @@ async def _run_scrape_targets(targets: list[dict[str, Any]]) -> dict[str, Any]:
         "stores": stores_payload,
         "processed_urls": processed_urls_total,
         "failed_urls": failed_urls_total,
+        "rate_limited_urls": rate_limited_urls_total,
+        "quarantined_urls": quarantined_urls_total,
+        "invalid_urls": invalid_urls_total,
+        "unknown_products": unknown_products_total,
+        "legacy_write_attempts": 0,
     }
 
 
@@ -172,4 +223,84 @@ async def _run_scrape_targets(targets: list[dict[str, Any]]) -> dict[str, Any]:
 )
 def run_scrape_targets(self, targets: list[dict[str, Any]]) -> dict[str, Any]:
     return run_async_task(_run_scrape_targets(targets))
+
+
+async def _process_quarantine_item_remote(
+    *,
+    item_uuid: str,
+    store_id: int,
+    store_name: str,
+    provider: str,
+    base_url: str | None,
+    product_url: str,
+    category_slug_override: str | None,
+    brand_hint_override: str | None = None,
+    source_url: str | None = None,
+) -> dict[str, Any]:
+    await init_db()
+    async with AsyncSessionLocal() as session:
+        parser = build_parser(provider)
+        if store_name:
+            parser.shop_name = store_name
+        if base_url:
+            parser.shop_url = base_url
+        service = ScraperService(session, parser)
+        try:
+            payload = await service.scrape_product_urls(
+                [product_url],
+                category_slug_override=category_slug_override,
+                brand_hint_override=brand_hint_override,
+                source_url=source_url or product_url,
+            )
+            results = payload.get("results") if isinstance(payload, dict) else []
+            first = results[0] if isinstance(results, list) and results and isinstance(results[0], dict) else {}
+            return {
+                "status": "ok",
+                "item_uuid": item_uuid,
+                "store_id": int(store_id),
+                "result": {
+                    "url": str(first.get("url") or product_url),
+                    "status": str(first.get("status") or "failed"),
+                    "error": first.get("error"),
+                },
+            }
+        finally:
+            await parser.aclose()
+
+
+@celery_app.task(
+    bind=True,
+    name="app.tasks.scrape_tasks.process_quarantine_item_remote",
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=settings.task_retry_backoff_max_seconds,
+    retry_jitter=True,
+    max_retries=settings.max_retries,
+)
+def process_quarantine_item_remote(
+    self,
+    *,
+    item_uuid: str,
+    store_id: int,
+    store_name: str,
+    provider: str,
+    base_url: str | None,
+    product_url: str,
+    category_slug_override: str | None,
+    brand_hint_override: str | None = None,
+    source_url: str | None = None,
+) -> dict[str, Any]:
+    return run_async_task(
+        _process_quarantine_item_remote(
+            item_uuid=item_uuid,
+            store_id=store_id,
+            store_name=store_name,
+            provider=provider,
+            base_url=base_url,
+            product_url=product_url,
+            category_slug_override=category_slug_override,
+            brand_hint_override=brand_hint_override,
+            source_url=source_url,
+        )
+    )
 

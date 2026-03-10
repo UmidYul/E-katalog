@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ru">
+<body>
+<div class="row custom-gutter loading-more-product-list mb-40">
+  <div class="col-6 col-xl-3 col-md-4">
+    <div class="product__item d-flex flex-column justify-content-between product-installment-item">
+      <a href="/product/phone-c-8256-gold">
+        <img data-src="https://cdn.example.com/phone-c.jpg" />
+      </a>
+      <span class="product__item__info-title">Phone C 8/256 Gold</span>
+      <span class="product__item-price">3 199 000 sum</span>
+      <div class="installment__price">399 900 sum x 12</div>
+    </div>
+    <button class="open__one_click-modal" onclick="show_one_click_modal(`1 `, `333`)"></button>
+    <span id="product_cart_data_333"
+          data-id="333"
+          data-name="Phone C 8/256 Gold"
+          data-price="3199000"
+          data-old-price="0"
+          data-img="https://assets.example/phone-c.jpg"
+          data-brand-name="Xiaomi"></span>
+  </div>
+</div>
+<nav class="pagination__nav">
+  <ul class="pagination">
+    <li class="page-item"><a class="page-link" href="/product/telefony-i-gadzhety/telefony/smartfony" data-page="0">1</a></li>
+    <li class="page-item active"><span class="page-link" data-page="1">2</span></li>
+  </ul>
+</nav>
+<script>let totalPages = parseInt('2', 10) || 1;</script>
+</body>
+</html>

@@ -35,6 +35,7 @@ from app.services.worker_client import enqueue_admin_alert_evaluation
 from app.services.worker_client import enqueue_full_crawl
 from app.services.worker_client import enqueue_full_catalog_rebuild
 from app.services.worker_client import enqueue_ingested_products_pipeline
+from app.services.worker_client import enqueue_process_quarantine_item
 from app.services.worker_client import enqueue_reindex_batches
 from app.services.worker_client import enqueue_test_quality_alert
 from app.services.worker_client import get_task_status
@@ -256,6 +257,11 @@ class ScrapeSourcePatch(BaseModel):
     is_active: bool | None = None
 
 
+class IngestQuarantineResolveIn(BaseModel):
+    category_slug: str = Field(min_length=2, max_length=64, pattern=r"^[a-z0-9_-]+$")
+    brand_hint: str | None = Field(default=None, max_length=128)
+
+
 class ProductsBulkDeleteIn(BaseModel):
     product_ids: list[str]
 
@@ -310,6 +316,35 @@ def _serialize_datetime_value(value: Any) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _serialize_ingest_quarantine_row(row: dict[str, Any]) -> dict[str, Any]:
+    images_raw = row.get("images_raw") if isinstance(row.get("images_raw"), list) else []
+    specs_raw = row.get("specs_raw") if isinstance(row.get("specs_raw"), dict) else {}
+    validation_errors = row.get("validation_errors") if isinstance(row.get("validation_errors"), list) else []
+    return {
+        "id": str(row.get("id")) if row.get("id") is not None else None,
+        "store_id": str(row.get("store_id")) if row.get("store_id") is not None else None,
+        "store_name": row.get("store_name"),
+        "source_url": row.get("source_url"),
+        "product_url": row.get("product_url"),
+        "title_raw": row.get("title_raw"),
+        "description_raw": row.get("description_raw"),
+        "price_raw": row.get("price_raw"),
+        "currency_raw": row.get("currency_raw"),
+        "availability_raw": row.get("availability_raw"),
+        "images_raw": images_raw,
+        "specs_raw": specs_raw,
+        "classifier_category": row.get("classifier_category"),
+        "classifier_confidence": _to_float(row.get("classifier_confidence")) if row.get("classifier_confidence") is not None else None,
+        "classifier_reason": row.get("classifier_reason"),
+        "validation_errors": validation_errors,
+        "status": row.get("status"),
+        "first_seen_at": _serialize_datetime_value(row.get("first_seen_at")),
+        "last_seen_at": _serialize_datetime_value(row.get("last_seen_at")),
+        "seen_count": _to_int(row.get("seen_count")),
+        "payload_hash": row.get("payload_hash"),
+    }
 
 
 def _serialize_quality_no_offer_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -3767,6 +3802,216 @@ async def run_scrape(
         return {"task_id": task_id, "queued": "scrape"}
 
     return await execute_idempotent_json(request, redis, scope="admin.tasks.scrape.enqueue", handler=_op)
+
+
+@router.get("/ingest/quarantine")
+async def list_ingest_quarantine(
+    status: str | None = Query(default=None, pattern="^(open|resolved|discarded)$"),
+    store_id: str | None = Query(default=None, pattern=UUID_REF_PATTERN),
+    limit: int = Query(default=50, ge=1, le=300),
+    offset: int = Query(default=0, ge=0, le=20000),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    normalized_store_id = _normalize_uuid_ref(store_id, field_name="store_id") if store_id else None
+    total = int(
+        (
+            await db.execute(
+                text(
+                    """
+                    select count(*)::int as total
+                    from catalog_ingest_quarantine q
+                    join catalog_stores s on s.id = q.store_id
+                    where (cast(:status as text) is null or q.status = cast(:status as text))
+                      and (cast(:store_uuid as uuid) is null or s.uuid = cast(:store_uuid as uuid))
+                    """
+                ),
+                {"status": status, "store_uuid": normalized_store_id},
+            )
+        ).scalar_one()
+        or 0
+    )
+    rows = (
+        await db.execute(
+            text(
+                """
+                select
+                    q.uuid as id,
+                    s.uuid as store_id,
+                    s.name as store_name,
+                    q.source_url,
+                    q.product_url,
+                    q.title_raw,
+                    q.description_raw,
+                    q.price_raw,
+                    q.currency_raw,
+                    q.availability_raw,
+                    q.images_raw,
+                    q.specs_raw,
+                    q.classifier_category,
+                    q.classifier_confidence,
+                    q.classifier_reason,
+                    q.validation_errors,
+                    q.status,
+                    q.first_seen_at,
+                    q.last_seen_at,
+                    q.seen_count,
+                    q.payload_hash
+                from catalog_ingest_quarantine q
+                join catalog_stores s on s.id = q.store_id
+                where (cast(:status as text) is null or q.status = cast(:status as text))
+                  and (cast(:store_uuid as uuid) is null or s.uuid = cast(:store_uuid as uuid))
+                order by q.last_seen_at desc, q.id desc
+                limit :limit
+                offset :offset
+                """
+            ),
+            {"status": status, "store_uuid": normalized_store_id, "limit": limit, "offset": offset},
+        )
+    ).mappings().all()
+    return {
+        "items": [_serialize_ingest_quarantine_row(dict(row)) for row in rows],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "request_id": "admin-ingest-quarantine",
+    }
+
+
+@router.post("/ingest/quarantine/{item_id}/resolve")
+async def resolve_ingest_quarantine_item(
+    request: Request,
+    payload: IngestQuarantineResolveIn,
+    item_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    redis: Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    async def _op() -> dict[str, Any]:
+        normalized_item_id = _normalize_uuid_ref(item_id, field_name="item_id")
+        category_slug = str(payload.category_slug or "").strip().lower()
+        brand_hint = str(payload.brand_hint or "").strip() or None
+
+        category_exists = (
+            await db.execute(
+                text(
+                    """
+                    select id
+                    from catalog_categories
+                    where slug = :slug
+                    limit 1
+                    """
+                ),
+                {"slug": category_slug},
+            )
+        ).scalar_one_or_none()
+        if category_exists is None:
+            raise HTTPException(status_code=422, detail="category_slug does not exist")
+
+        row = (
+            await db.execute(
+                text(
+                    """
+                    select
+                        q.id,
+                        q.uuid,
+                        q.status
+                    from catalog_ingest_quarantine q
+                    where q.uuid = cast(:item_uuid as uuid)
+                    for update
+                    """
+                ),
+                {"item_uuid": normalized_item_id},
+            )
+        ).mappings().first()
+        if not row:
+            raise HTTPException(status_code=404, detail="quarantine item not found")
+        if str(row.get("status") or "").strip().lower() == "discarded":
+            raise HTTPException(status_code=409, detail="quarantine item is discarded")
+
+        await db.execute(
+            text(
+                """
+                update catalog_ingest_quarantine
+                set status = 'resolved',
+                    classifier_category = :classifier_category,
+                    classifier_reason = :classifier_reason,
+                    last_seen_at = now()
+                where id = :id
+                """
+            ),
+            {
+                "id": int(row["id"]),
+                "classifier_category": category_slug,
+                "classifier_reason": "manual_resolve",
+            },
+        )
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="ingest.quarantine.resolve",
+            entity_type="catalog_ingest_quarantine",
+            entity_id=normalized_item_id,
+            payload={"category_slug": category_slug, "has_brand_hint": bool(brand_hint)},
+        )
+        await db.commit()
+        task_id = enqueue_process_quarantine_item(
+            item_uuid=normalized_item_id,
+            category_slug_override=category_slug,
+            brand_hint_override=brand_hint,
+        )
+        return {
+            "id": normalized_item_id,
+            "status": "resolved",
+            "task_id": task_id,
+            "category_slug": category_slug,
+        }
+
+    scope = f"admin.ingest.quarantine.resolve:{item_id.lower()}:{payload.category_slug.lower()}"
+    return await execute_idempotent_json(request, redis, scope=scope, handler=_op)
+
+
+@router.post("/ingest/quarantine/{item_id}/discard")
+async def discard_ingest_quarantine_item(
+    request: Request,
+    item_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    current_user: dict = Depends(require_roles(ADMIN_ROLE, detail="admin access required")),
+    redis: Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    async def _op() -> dict[str, Any]:
+        normalized_item_id = _normalize_uuid_ref(item_id, field_name="item_id")
+        row = (
+            await db.execute(
+                text(
+                    """
+                    update catalog_ingest_quarantine
+                    set status = 'discarded',
+                        classifier_reason = 'manual_discard',
+                        last_seen_at = now()
+                    where uuid = cast(:item_uuid as uuid)
+                    returning uuid as id, status
+                    """
+                ),
+                {"item_uuid": normalized_item_id},
+            )
+        ).mappings().first()
+        if not row:
+            raise HTTPException(status_code=404, detail="quarantine item not found")
+        await _audit_admin_action(
+            db,
+            current_user=current_user,
+            request=request,
+            action="ingest.quarantine.discard",
+            entity_type="catalog_ingest_quarantine",
+            entity_id=normalized_item_id,
+            payload={"status": "discarded"},
+        )
+        await db.commit()
+        return {"id": row.get("id"), "status": row.get("status")}
+
+    scope = f"admin.ingest.quarantine.discard:{item_id.lower()}"
+    return await execute_idempotent_json(request, redis, scope=scope, handler=_op)
 
 
 @router.post("/catalog/rebuild")

@@ -66,6 +66,7 @@ celery_app.conf.update(
     task_routes={
         "app.tasks.scrape_tasks.run_scrape_targets": {"queue": "scrape.high", "routing_key": "scrape.high"},
         "app.tasks.scrape_tasks.enqueue_example_store_scrape": {"queue": "scrape.high", "routing_key": "scrape.high"},
+        "app.tasks.scrape_tasks.process_quarantine_item_remote": {"queue": "scrape.default", "routing_key": "scrape.default"},
     },
     beat_schedule={
         "scrape-every-6h": {

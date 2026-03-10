@@ -461,6 +461,39 @@ class CatalogCrawlJobItem(CatalogUuidMixin, Base):
     last_error: Mapped[str | None] = mapped_column(Text)
 
 
+class CatalogIngestQuarantine(CatalogUuidMixin, Base):
+    __tablename__ = "catalog_ingest_quarantine"
+    __table_args__ = (
+        UniqueConstraint("store_id", "payload_hash", name="uq_catalog_ingest_quarantine_store_payload_hash"),
+        CheckConstraint("status in ('open', 'resolved', 'discarded')", name="ck_catalog_ingest_quarantine_status"),
+        CheckConstraint(
+            "classifier_confidence is null or (classifier_confidence >= 0 and classifier_confidence <= 1)",
+            name="ck_catalog_ingest_quarantine_confidence",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("catalog_stores.id", ondelete="CASCADE"), nullable=False)
+    source_url: Mapped[str | None] = mapped_column(Text)
+    product_url: Mapped[str] = mapped_column(Text, nullable=False)
+    title_raw: Mapped[str] = mapped_column(Text, nullable=False)
+    description_raw: Mapped[str | None] = mapped_column(Text)
+    price_raw: Mapped[str | None] = mapped_column(String(64))
+    currency_raw: Mapped[str | None] = mapped_column(String(8))
+    availability_raw: Mapped[str | None] = mapped_column(String(64))
+    images_raw: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+    specs_raw: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    classifier_category: Mapped[str | None] = mapped_column(String(64))
+    classifier_confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    classifier_reason: Mapped[str | None] = mapped_column(String(255))
+    validation_errors: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="open", server_default="open")
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    seen_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
 class CatalogAIEnrichmentJob(CatalogUuidMixin, Base):
     __tablename__ = "catalog_ai_enrichment_jobs"
 
@@ -739,6 +772,8 @@ Index("ix_admin_audit_events_entity_created", AdminAuditEvent.entity_type, Admin
 Index("ix_admin_audit_events_action_created", AdminAuditEvent.action, AdminAuditEvent.created_at.desc())
 Index("ix_catalog_crawl_jobs_store_started", CatalogCrawlJob.store_id, CatalogCrawlJob.started_at.desc())
 Index("ix_catalog_crawl_job_items_job_status", CatalogCrawlJobItem.crawl_job_id, CatalogCrawlJobItem.status)
+Index("ix_catalog_ingest_quarantine_status_last_seen", CatalogIngestQuarantine.status, CatalogIngestQuarantine.last_seen_at.desc())
+Index("ix_catalog_ingest_quarantine_store_status", CatalogIngestQuarantine.store_id, CatalogIngestQuarantine.status)
 Index("ix_auth_users_email", AuthUser.email)
 Index("ix_auth_users_role_active", AuthUser.role, AuthUser.is_active)
 Index("ix_auth_users_last_seen_at", AuthUser.last_seen_at.desc())

@@ -1,4 +1,5 @@
 from app.parsers.alifshop import AlifshopParser
+from app.parsers.asaxiy import AsaxiyParser
 from app.parsers.base import ParsedProduct, ParseResult, StoreParser
 from app.parsers.example_store import ExampleStoreParser
 from app.parsers.mediapark import MediaParkParser
@@ -9,6 +10,7 @@ __all__ = [
     "ParseResult",
     "StoreParser",
     "AlifshopParser",
+    "AsaxiyParser",
     "MediaParkParser",
     "ExampleStoreParser",
     "TexnomartParser",

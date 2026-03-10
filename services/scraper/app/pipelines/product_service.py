@@ -1,15 +1,19 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import hashlib
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
+from urllib.parse import urlsplit
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.logging import logger
 from app.db.models import Offer, PriceHistory, Product, Shop
 from app.parsers.base import ParsedProduct, ParsedVariant
 from app.utils.variants import build_variant_key
@@ -17,6 +21,7 @@ from shared.db.models import (
     CatalogBrand,
     CatalogCategory,
     CatalogCanonicalProduct,
+    CatalogIngestQuarantine,
     CatalogOffer,
     CatalogPriceHistory,
     CatalogProduct,
@@ -26,6 +31,22 @@ from shared.db.models import (
     CatalogStoreProduct,
 )
 from shared.utils.time import UTC
+
+
+@dataclass(slots=True)
+class CategoryClassification:
+    category_slug: str
+    confidence: float
+    reason: str
+
+
+@dataclass(slots=True)
+class IngestResult:
+    status: Literal["done", "quarantined", "invalid"]
+    reason: str | None = None
+    category_slug: str | None = None
+    confidence: float | None = None
+    validation_errors: list[str] | None = None
 
 
 class ProductService:
@@ -92,7 +113,7 @@ class ProductService:
     @staticmethod
     def _is_in_stock(availability: str | None) -> bool:
         value = str(availability or "").strip().lower()
-        return value not in {"out_of_stock", "нет", "no"}
+        return value not in {"out_of_stock", "РЅРµС‚", "no"}
 
     @staticmethod
     def _pick_main_image(images: list[str]) -> str | None:
@@ -135,31 +156,110 @@ class ProductService:
         return {key: value for key, value in attrs.items() if value}
 
     @classmethod
-    def _infer_category_slug_from_text(
+    def _classify_category_from_text(
         cls, *, title: str, specs: dict[str, str] | None, category_slug_hint: str | None
-    ) -> str:
+    ) -> CategoryClassification:
         hint = str(category_slug_hint or "").strip().lower()
-        if hint in cls._CATEGORY_REGISTRY:
-            return hint
-        signal = f"{str(title or '')} {' '.join(str(v or '') for v in (specs or {}).values())}".lower()
-        if any(token in signal for token in ("науш", "гарнитур", "headphone", "earbud", "airpods", "buds")):
-            return "headphones"
-        if any(token in signal for token in ("playstation", "xbox", "nintendo", "ps5", "ps4", "консол", "console")):
-            return "consoles"
-        if any(token in signal for token in ("холодил", "стирал", "пылесос", "микроволн", "духов", "плита", "vacuum", "washer", "conditioner", "air fryer", "чайник", "утюг", "бойлер", "тостер")):
-            return "appliances"
-        if any(token in signal for token in ("камера", "фотоаппарат", "беззеркал", "объектив", "camera", "dslr", "gopro", "mirrorless", "lens")):
-            return "cameras"
-        if any(token in signal for token in ("telev", "televizor", " smart tv", "oled", "qled", "android tv")):
-            return "tvs"
-        if any(token in signal for token in ("watch", "smart watch", "смарт часы", "умные часы", "soat", "saat")):
-            return "watches"
-        if any(token in signal for token in ("noutbuk", "laptop", "notebook", "macbook")):
-            return "laptops"
-        if any(token in signal for token in ("planshet", "tablet", "ipad", "galaxy tab")):
-            return "tablets"
-        return "phones"
+        if hint in cls._CATEGORY_REGISTRY and hint != "unknown":
+            return CategoryClassification(category_slug=hint, confidence=1.0, reason="category_hint")
 
+        signal = f"{str(title or '')} {' '.join(str(v or '') for v in (specs or {}).values())}".lower()
+        rules: tuple[tuple[str, tuple[str, ...], float], ...] = (
+            ("headphones", ("РЅР°СѓС€", "РіР°СЂРЅРёС‚СѓСЂ", "headphone", "earbud", "airpods", "buds"), 0.95),
+            ("consoles", ("playstation", "xbox", "nintendo", "ps5", "ps4", "РєРѕРЅСЃРѕР»", "console"), 0.90),
+            (
+                "appliances",
+                (
+                    "С…РѕР»РѕРґРёР»",
+                    "СЃС‚РёСЂР°Р»",
+                    "РїС‹Р»РµСЃРѕСЃ",
+                    "РјРёРєСЂРѕРІРѕР»РЅ",
+                    "РґСѓС…РѕРІ",
+                    "РїР»РёС‚Р°",
+                    "vacuum",
+                    "washer",
+                    "conditioner",
+                    "air fryer",
+                    "С‡Р°Р№РЅРёРє",
+                    "СѓС‚СЋРі",
+                    "Р±РѕР№Р»РµСЂ",
+                    "С‚РѕСЃС‚РµСЂ",
+                ),
+                0.90,
+            ),
+            (
+                "cameras",
+                (
+                    "РєР°РјРµСЂР°",
+                    "С„РѕС‚РѕР°РїРїР°СЂР°С‚",
+                    "Р±РµР·Р·РµСЂРєР°Р»",
+                    "РѕР±СЉРµРєС‚РёРІ",
+                    "camera",
+                    "dslr",
+                    "gopro",
+                    "mirrorless",
+                    "lens",
+                ),
+                0.90,
+            ),
+            ("tvs", ("telev", "televizor", " smart tv", "oled", "qled", "android tv"), 0.88),
+            ("watches", ("watch", "smart watch", "СЃРјР°СЂС‚ С‡Р°СЃС‹", "СѓРјРЅС‹Рµ С‡Р°СЃС‹", "soat", "saat"), 0.88),
+            ("laptops", ("noutbuk", "laptop", "notebook", "macbook"), 0.86),
+            ("tablets", ("planshet", "tablet", "ipad", "galaxy tab"), 0.84),
+            ("phones", ("smartfon", "smartphone", "iphone", "galaxy", "xiaomi", "redmi", "poco"), 0.78),
+        )
+        for slug, tokens, confidence in rules:
+            if any(token in signal for token in tokens):
+                return CategoryClassification(
+                    category_slug=slug,
+                    confidence=float(confidence),
+                    reason=f"token_match:{slug}",
+                )
+        return CategoryClassification(category_slug="unknown", confidence=0.0, reason="no_signal")
+
+    @staticmethod
+    def _normalize_availability(availability: str | None) -> str:
+        value = str(availability or "").strip().lower()
+        if value in {"in_stock", "available", "yes", "true", "есть", "в наличии"}:
+            return "in_stock"
+        if value in {"preorder", "pre-order", "soon", "ожидается"}:
+            return "preorder"
+        if value in {"out_of_stock", "РЅРµС‚", "нет", "no", "not available", "sold out"}:
+            return "out_of_stock"
+        return "unknown"
+
+    @staticmethod
+    def _is_valid_http_url(value: str | None) -> bool:
+        source = str(value or "").strip()
+        if not source:
+            return False
+        parsed = urlsplit(source)
+        return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+    @classmethod
+    def _validate_parsed_product(cls, parsed: ParsedProduct) -> list[str]:
+        errors: list[str] = []
+        title = str(parsed.title or "").strip()
+        normalized_title = re.sub(r"\s+", " ", title.lower())
+        placeholders = {"unknown product", "product", "товар", "unknown", "n/a"}
+        if not title or normalized_title in placeholders:
+            errors.append("invalid_title")
+        if parsed.price is None or parsed.price <= 0:
+            errors.append("invalid_price")
+        elif parsed.price > Decimal(str(settings.ingest_max_price_uzs)):
+            errors.append("price_out_of_range")
+        if not cls._is_valid_http_url(parsed.product_url):
+            errors.append("invalid_product_url")
+        return errors
+
+    @classmethod
+    def _validate_variant(cls, variant: ParsedVariant) -> list[str]:
+        errors: list[str] = []
+        if variant.price is None or variant.price <= 0:
+            errors.append("invalid_variant_price")
+        if variant.product_url and not cls._is_valid_http_url(variant.product_url):
+            errors.append("invalid_variant_url")
+        return errors
     @staticmethod
     def _iter_variants(parsed: ParsedProduct) -> list[ParsedVariant]:
         if parsed.variants:
@@ -221,23 +321,82 @@ class ProductService:
         shop: Shop,
         category_id: int | None = None,
         category_slug: str | None = None,
-    ) -> Offer | None:
+        source_url: str | None = None,
+        brand_hint_override: str | None = None,
+    ) -> IngestResult:
         variants = self._iter_variants(parsed)
-        category_slug_resolved = self._infer_category_slug_from_text(
+        catalog_store = await self._resolve_or_create_catalog_store(name=shop.name, url=shop.url)
+        classification = self._classify_category_from_text(
             title=parsed.title,
             specs=parsed.specifications,
             category_slug_hint=category_slug,
         )
+
+        validation_errors = self._validate_parsed_product(parsed)
+        valid_variants: list[ParsedVariant] = []
+        for variant in variants:
+            variant_errors = self._validate_variant(variant)
+            if variant_errors:
+                validation_errors.extend(variant_errors)
+                continue
+            valid_variants.append(variant)
+        if not valid_variants:
+            validation_errors.append("no_valid_variants")
+        if validation_errors:
+            await self._upsert_quarantine_entry(
+                store_id=int(catalog_store.id),
+                source_url=source_url,
+                parsed=parsed,
+                classification=classification,
+                validation_errors=validation_errors,
+            )
+            return IngestResult(
+                status="invalid",
+                reason="validation_failed",
+                category_slug=classification.category_slug,
+                confidence=classification.confidence,
+                validation_errors=validation_errors,
+            )
+
+        threshold = max(0.0, min(1.0, float(settings.ingest_category_confidence_threshold)))
+        if classification.category_slug == "unknown" or classification.confidence < threshold:
+            policy = str(settings.ingest_unknown_policy or "quarantine").strip().lower()
+            if policy != "fallback_phones" and settings.ingest_quarantine_enabled:
+                await self._upsert_quarantine_entry(
+                    store_id=int(catalog_store.id),
+                    source_url=source_url,
+                    parsed=parsed,
+                    classification=classification,
+                    validation_errors=[],
+                )
+                return IngestResult(
+                    status="quarantined",
+                    reason=classification.reason,
+                    category_slug=classification.category_slug,
+                    confidence=classification.confidence,
+                    validation_errors=[],
+                )
+            category_slug_resolved = "phones"
+            logger.warning(
+                "ingest_unknown_category_fallback_phones",
+                product_url=parsed.product_url,
+                confidence=float(classification.confidence),
+                reason=classification.reason,
+            )
+        else:
+            category_slug_resolved = classification.category_slug
+
         catalog_category_id = await self._resolve_or_create_catalog_category(category_slug_resolved)
-        inferred_brand = self._infer_brand_name(title=parsed.title, specs=parsed.specifications)
+        normalized_brand_hint = str(brand_hint_override or "").strip()
+        inferred_brand = normalized_brand_hint or self._infer_brand_name(title=parsed.title, specs=parsed.specifications)
         brand_id = await self._resolve_or_create_brand(brand_name=inferred_brand) if inferred_brand else None
         legacy_product: Product | None = None
         if settings.legacy_write_enabled:
+            logger.warning("legacy_write_attempt")
             if shop.id is None:
                 raise ValueError("legacy shop id is required when LEGACY_WRITE_ENABLED=true")
             legacy_product = await self._resolve_or_create_product(parsed=parsed, shop_id=shop.id, category_id=category_id)
 
-        catalog_store = await self._resolve_or_create_catalog_store(name=shop.name, url=shop.url)
         catalog_seller = await self._resolve_or_create_catalog_seller(store_id=int(catalog_store.id), seller_name=shop.name)
         catalog_canonical = await self._resolve_or_create_catalog_canonical(
             title=parsed.title,
@@ -257,12 +416,12 @@ class ProductService:
         processed_variant_keys: set[str] = set()
         upserted_legacy: Offer | None = None
 
-        for variant in variants:
+        for variant in valid_variants:
             variant_key = self._normalize_variant_key(variant.variant_key, variant=variant)
             processed_variant_keys.add(variant_key)
             payload_price = variant.price
             payload_old_price = variant.old_price
-            payload_availability = variant.availability
+            payload_availability = self._normalize_availability(variant.availability or parsed.availability)
             payload_images = variant.images or parsed.images
             payload_specs = self._merge_specifications(parsed.specifications, variant.specifications)
             payload_attrs = self._variant_attrs(variant, payload_specs)
@@ -330,7 +489,109 @@ class ProductService:
 
         if settings.legacy_write_enabled and upserted_legacy is None:
             raise ValueError("no variants to persist")
-        return upserted_legacy
+        return IngestResult(
+            status="done",
+            reason=None,
+            category_slug=classification.category_slug,
+            confidence=classification.confidence,
+            validation_errors=[],
+        )
+
+    @staticmethod
+    def _quarantine_payload_hash(*, store_id: int, source_url: str | None, parsed: ParsedProduct) -> str:
+        source = "||".join(
+            [
+                str(store_id),
+                str(source_url or "").strip().lower(),
+                str(parsed.product_url or "").strip().lower(),
+                str(parsed.title or "").strip().lower(),
+                str(parsed.price or ""),
+            ]
+        )
+        return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
+    async def _upsert_quarantine_entry(
+        self,
+        *,
+        store_id: int,
+        source_url: str | None,
+        parsed: ParsedProduct,
+        classification: CategoryClassification,
+        validation_errors: list[str],
+    ) -> CatalogIngestQuarantine:
+        payload_hash = self._quarantine_payload_hash(store_id=store_id, source_url=source_url, parsed=parsed)
+        now = datetime.now(UTC)
+        result = await self.session.execute(
+            select(CatalogIngestQuarantine).where(
+                CatalogIngestQuarantine.store_id == store_id,
+                CatalogIngestQuarantine.payload_hash == payload_hash,
+            )
+        )
+        row = result.scalar_one_or_none()
+        normalized_errors = sorted({str(item).strip() for item in validation_errors if str(item).strip()})
+        if row is not None:
+            row.source_url = source_url
+            row.product_url = parsed.product_url
+            row.title_raw = parsed.title
+            row.description_raw = parsed.description
+            row.price_raw = str(parsed.price) if parsed.price is not None else None
+            row.currency_raw = "UZS"
+            row.availability_raw = parsed.availability
+            row.images_raw = [str(item).strip() for item in (parsed.images or []) if str(item).strip()]
+            row.specs_raw = dict(parsed.specifications or {})
+            row.classifier_category = classification.category_slug
+            row.classifier_confidence = Decimal(f"{max(0.0, min(1.0, float(classification.confidence))):.4f}")
+            row.classifier_reason = classification.reason[:255]
+            row.validation_errors = normalized_errors
+            row.last_seen_at = now
+            row.seen_count = int(row.seen_count or 0) + 1
+            if row.status == "discarded":
+                row.status = "open"
+            return row
+
+        row = CatalogIngestQuarantine(
+            store_id=store_id,
+            source_url=source_url,
+            product_url=parsed.product_url,
+            title_raw=parsed.title,
+            description_raw=parsed.description,
+            price_raw=str(parsed.price) if parsed.price is not None else None,
+            currency_raw="UZS",
+            availability_raw=parsed.availability,
+            images_raw=[str(item).strip() for item in (parsed.images or []) if str(item).strip()],
+            specs_raw=dict(parsed.specifications or {}),
+            classifier_category=classification.category_slug,
+            classifier_confidence=Decimal(f"{max(0.0, min(1.0, float(classification.confidence))):.4f}"),
+            classifier_reason=classification.reason[:255],
+            validation_errors=normalized_errors,
+            status="open",
+            first_seen_at=now,
+            last_seen_at=now,
+            seen_count=1,
+            payload_hash=payload_hash,
+        )
+        self.session.add(row)
+        try:
+            await self.session.flush()
+            return row
+        except IntegrityError:
+            if row in self.session:
+                self.session.expunge(row)
+            existing = (
+                await self.session.execute(
+                    select(CatalogIngestQuarantine).where(
+                        CatalogIngestQuarantine.store_id == store_id,
+                        CatalogIngestQuarantine.payload_hash == payload_hash,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is None:
+                raise
+            existing.last_seen_at = now
+            existing.seen_count = int(existing.seen_count or 0) + 1
+            if existing.status == "discarded":
+                existing.status = "open"
+            return existing
 
     async def _upsert_legacy_offer(
         self,
@@ -826,14 +1087,14 @@ class ProductService:
         )
         return catalog_offer
     _CATEGORY_REGISTRY: dict[str, dict[str, str]] = {
-        "phones": {"name_uz": "Smartfonlar", "name_ru": "Смартфоны", "name_en": "Smartphones"},
-        "tablets": {"name_uz": "Planshetlar", "name_ru": "Планшеты", "name_en": "Tablets"},
-        "laptops": {"name_uz": "Noutbuklar", "name_ru": "Ноутбуки", "name_en": "Laptops"},
-        "watches": {"name_uz": "Soatlar", "name_ru": "Смарт-часы", "name_en": "Smart Watches"},
-        "tvs": {"name_uz": "Televizorlar", "name_ru": "Телевизоры", "name_en": "TVs"},
-        "headphones": {"name_uz": "Quloqchinlar", "name_ru": "Наушники", "name_en": "Headphones"},
-        "consoles": {"name_uz": "Konsollar", "name_ru": "Игровые консоли", "name_en": "Consoles"},
-        "appliances": {"name_uz": "Maishiy texnika", "name_ru": "Бытовая техника", "name_en": "Appliances"},
-        "cameras": {"name_uz": "Kameralar", "name_ru": "Камеры", "name_en": "Cameras"},
+        "phones": {"name_uz": "Smartfonlar", "name_ru": "РЎРјР°СЂС‚С„РѕРЅС‹", "name_en": "Smartphones"},
+        "tablets": {"name_uz": "Planshetlar", "name_ru": "РџР»Р°РЅС€РµС‚С‹", "name_en": "Tablets"},
+        "laptops": {"name_uz": "Noutbuklar", "name_ru": "РќРѕСѓС‚Р±СѓРєРё", "name_en": "Laptops"},
+        "watches": {"name_uz": "Soatlar", "name_ru": "РЎРјР°СЂС‚-С‡Р°СЃС‹", "name_en": "Smart Watches"},
+        "tvs": {"name_uz": "Televizorlar", "name_ru": "РўРµР»РµРІРёР·РѕСЂС‹", "name_en": "TVs"},
+        "headphones": {"name_uz": "Quloqchinlar", "name_ru": "РќР°СѓС€РЅРёРєРё", "name_en": "Headphones"},
+        "consoles": {"name_uz": "Konsollar", "name_ru": "РРіСЂРѕРІС‹Рµ РєРѕРЅСЃРѕР»Рё", "name_en": "Consoles"},
+        "appliances": {"name_uz": "Maishiy texnika", "name_ru": "Р‘С‹С‚РѕРІР°СЏ С‚РµС…РЅРёРєР°", "name_en": "Appliances"},
+        "cameras": {"name_uz": "Kameralar", "name_ru": "РљР°РјРµСЂС‹", "name_en": "Cameras"},
     }
 

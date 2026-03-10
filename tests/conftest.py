@@ -10,4 +10,4 @@ SHARED_ROOT = os.path.join(ROOT, "shared")
 
 for path in (ROOT, WORKER_ROOT, API_ROOT, SCRAPER_ROOT, SHARED_ROOT):
     if path not in sys.path:
-        sys.path.insert(0, path)
+        sys.path.append(path)

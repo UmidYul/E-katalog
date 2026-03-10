@@ -34,6 +34,11 @@ def test_copywriting_schedule_registered() -> None:
     assert schedule["task"] == "app.tasks.copywriting_tasks.enqueue_product_copy_batches"
 
 
+def test_process_quarantine_item_task_routing() -> None:
+    route = celery_app.conf.task_routes.get("app.tasks.scrape_tasks.process_quarantine_item")
+    assert route == {"queue": "maintenance", "routing_key": "maintenance"}
+
+
 def test_quality_report_task_routing() -> None:
     route = celery_app.conf.task_routes.get("app.tasks.maintenance_tasks.generate_catalog_quality_report")
     assert route == {"queue": "maintenance", "routing_key": "maintenance"}

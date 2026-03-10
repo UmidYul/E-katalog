@@ -15,13 +15,25 @@ from app.celery_app import celery_app
 from app.core.asyncio_runner import run_async_task
 from app.core.config import settings
 from app.core.logging import logger
-from app.core.metrics import add_parse_errors, observe_stage_duration
+from app.core.metrics import (
+    add_category_unknown,
+    add_ingest_invalid,
+    add_ingest_quarantined,
+    add_legacy_write_attempt,
+    add_parse_errors,
+    add_rate_limited,
+    observe_stage_duration,
+)
+from app.core.scrape_status import derive_job_status
+from app.core.scrape_status import normalize_url_item_status
 from app.db.session import AsyncSessionLocal
 from app.orchestrators.product_pipeline import run_product_pipeline
 from shared.utils.time import UTC
 
 _SCRAPE_REMOTE_TASK_NAME = "app.tasks.scrape_tasks.run_scrape_targets"
+_SCRAPE_PROCESS_QUARANTINE_REMOTE_TASK_NAME = "app.tasks.scrape_tasks.process_quarantine_item_remote"
 _SCRAPE_REMOTE_TIMEOUT_SECONDS = 60 * 60 * 4
+_SCRAPE_PROCESS_QUARANTINE_REMOTE_TIMEOUT_SECONDS = 60 * 10
 _IMMEDIATE_REINDEX_TASK_NAME = "app.tasks.reindex_tasks.reindex_product_search_batch"
 
 _SOURCE_DISCOVERY_MIN_ACTIVE_PER_STORE = 8
@@ -271,24 +283,36 @@ async def _finalize_crawl_jobs(
 ) -> dict[str, int]:
     done_jobs = 0
     failed_jobs = 0
+    partial_jobs = 0
     indexed_results = _index_store_results(scrape_result)
     finished_at = datetime.now(UTC)
 
     for store_id, job_id in jobs_by_store.items():
         store_result = indexed_results.get(store_id, {})
         url_results = store_result.get("url_results") if isinstance(store_result.get("url_results"), list) else []
-        processed_urls = int(store_result.get("processed_urls") or 0)
-        failed_urls = int(store_result.get("failed_urls") or 0)
-        status = "completed" if failed_urls <= 0 else "failed"
+        status, status_counters = derive_job_status(url_results)
+        processed_urls = int(status_counters.get("done") or 0)
+        failed_urls = int(status_counters.get("failed") or 0)
+        rate_limited_urls = int(status_counters.get("rate_limited") or 0)
+        quarantined_urls = int(status_counters.get("quarantined") or 0)
+        invalid_urls = int(status_counters.get("invalid") or 0)
         if status == "completed":
             done_jobs += 1
+        elif status == "partial":
+            partial_jobs += 1
         else:
             failed_jobs += 1
 
         summary = {
             "processed_urls": processed_urls,
             "failed_urls": failed_urls,
-            "total_urls": int(store_result.get("total_urls") or processed_urls + failed_urls),
+            "rate_limited_urls": rate_limited_urls,
+            "quarantined_urls": quarantined_urls,
+            "invalid_urls": invalid_urls,
+            "total_urls": int(
+                store_result.get("total_urls")
+                or processed_urls + failed_urls + rate_limited_urls + quarantined_urls + invalid_urls
+            ),
         }
 
         await session.execute(
@@ -325,16 +349,17 @@ async def _finalize_crawl_jobs(
             url = str(item.get("url") or "").strip()
             if not url:
                 continue
-            item_status = str(item.get("status") or "").strip().lower()
-            if item_status in {"ok", "done", "completed", "success"}:
+            item_status = normalize_url_item_status(item.get("status"))
+            if item_status == "done":
                 continue
             error_text = str(item.get("error") or "").strip() or "scrape_failed"
+            retry_delta = 1 if item_status in {"failed", "rate_limited"} else 0
             await session.execute(
                 text(
                     """
                     update catalog_crawl_job_items
-                    set status = 'failed',
-                        retry_count = retry_count + 1,
+                    set status = :status,
+                        retry_count = retry_count + :retry_delta,
                         last_error = :last_error
                     where crawl_job_id = :job_id
                       and external_id = :external_id
@@ -343,12 +368,14 @@ async def _finalize_crawl_jobs(
                 {
                     "job_id": job_id,
                     "external_id": url[:255],
+                    "status": item_status,
+                    "retry_delta": retry_delta,
                     "last_error": error_text[:4000],
                 },
             )
 
     await session.commit()
-    return {"completed_jobs": done_jobs, "failed_jobs": failed_jobs}
+    return {"completed_jobs": done_jobs, "partial_jobs": partial_jobs, "failed_jobs": failed_jobs}
 
 
 async def _mark_jobs_failed(session, *, jobs_by_store: dict[int, int], error_text: str) -> None:
@@ -398,6 +425,20 @@ def _run_remote_scrape(targets: list[dict[str, Any]]) -> dict[str, Any]:
     if isinstance(payload, dict):
         return payload
     return {"status": "ok", "stores": []}
+
+
+def _run_remote_process_quarantine_item(payload: dict[str, Any]) -> dict[str, Any]:
+    async_result = celery_app.send_task(
+        _SCRAPE_PROCESS_QUARANTINE_REMOTE_TASK_NAME,
+        kwargs=payload,
+        queue="scrape.default",
+        routing_key="scrape.default",
+    )
+    with allow_join_result():
+        result_payload = async_result.get(timeout=_SCRAPE_PROCESS_QUARANTINE_REMOTE_TIMEOUT_SECONDS, propagate=True)
+    if isinstance(result_payload, dict):
+        return result_payload
+    return {"status": "error", "result": {"status": "failed", "error": "unexpected_remote_response"}}
 
 
 async def _enqueue_full_crawl() -> dict[str, Any]:
@@ -473,11 +514,29 @@ async def _enqueue_full_crawl() -> dict[str, Any]:
         routing_key="reindex",
     ).id
     total_urls = sum(len(target.get("category_urls", [])) for target in targets)
-    add_parse_errors(count=int(scrape_result.get("failed_urls") or 0))
+    failed_urls = int(scrape_result.get("failed_urls") or 0)
+    rate_limited_urls = int(scrape_result.get("rate_limited_urls") or 0)
+    quarantined_urls = int(scrape_result.get("quarantined_urls") or 0)
+    invalid_urls = int(scrape_result.get("invalid_urls") or 0)
+    unknown_products = int(scrape_result.get("unknown_products") or 0)
+    legacy_write_attempts = int(scrape_result.get("legacy_write_attempts") or 0)
+
+    add_parse_errors(count=failed_urls)
+    add_rate_limited(count=rate_limited_urls)
+    add_ingest_quarantined(count=quarantined_urls)
+    add_ingest_invalid(count=invalid_urls)
+    add_category_unknown(count=unknown_products)
+    add_legacy_write_attempt(count=legacy_write_attempts)
     logger.info(
         "full_crawl_enqueued",
         stores=len(targets),
         urls=total_urls,
+        failed_urls=failed_urls,
+        rate_limited_urls=rate_limited_urls,
+        quarantined_urls=quarantined_urls,
+        invalid_urls=invalid_urls,
+        unknown_products=unknown_products,
+        legacy_write_attempts=legacy_write_attempts,
         workflow_id=workflow_id,
         immediate_reindex_task_id=immediate_reindex_task_id,
         **crawl_stats,
@@ -508,7 +567,7 @@ async def _retry_failed_items() -> dict[str, Any]:
                     """
                     select count(*)::int as total
                     from catalog_crawl_job_items i
-                    where lower(i.status) in ('failed', 'failure', 'error')
+                    where lower(i.status) in ('failed', 'failure', 'error', 'rate_limited')
                       and i.retry_count >= :max_retries
                     """
                 ),
@@ -532,7 +591,7 @@ async def _retry_failed_items() -> dict[str, Any]:
                     from catalog_crawl_job_items i
                     join catalog_crawl_jobs j on j.id = i.crawl_job_id
                     join catalog_stores s on s.id = j.store_id
-                    where lower(i.status) in ('failed', 'failure', 'error')
+                    where lower(i.status) in ('failed', 'failure', 'error', 'rate_limited')
                       and i.retry_count < :max_retries
                     order by i.id asc
                     limit :limit
@@ -643,6 +702,202 @@ async def _retry_failed_items() -> dict[str, Any]:
     }
 
 
+def _merge_validation_errors(existing: Any, additions: list[str]) -> list[str]:
+    merged: list[str] = []
+    if isinstance(existing, list):
+        for item in existing:
+            value = str(item or "").strip()
+            if value:
+                merged.append(value)
+    for item in additions:
+        value = str(item or "").strip()
+        if value:
+            merged.append(value)
+    return sorted(set(merged))
+
+
+async def _process_quarantine_item(
+    *,
+    item_uuid: str,
+    category_slug_override: str | None = None,
+    brand_hint_override: str | None = None,
+) -> dict[str, Any]:
+    normalized_uuid = str(item_uuid or "").strip().lower()
+    if not normalized_uuid:
+        return {"status": "invalid", "reason": "item_uuid_required"}
+    if not re.match(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", normalized_uuid):
+        return {"status": "invalid", "reason": "invalid_item_uuid", "item_uuid": normalized_uuid}
+
+    async with AsyncSessionLocal() as session:
+        row = (
+            await session.execute(
+                text(
+                    """
+                    select
+                        q.id,
+                        q.uuid,
+                        q.store_id,
+                        q.product_url,
+                        q.source_url,
+                        q.status,
+                        q.classifier_category,
+                        q.classifier_reason,
+                        q.validation_errors,
+                        s.name as store_name,
+                        s.provider,
+                        s.base_url
+                    from catalog_ingest_quarantine q
+                    join catalog_stores s on s.id = q.store_id
+                    where q.uuid = cast(:item_uuid as uuid)
+                    for update
+                    """
+                ),
+                {"item_uuid": normalized_uuid},
+            )
+        ).mappings().first()
+        if row is None:
+            return {"status": "not_found", "item_uuid": normalized_uuid}
+
+        current_status = str(row.get("status") or "").strip().lower()
+        if current_status == "discarded":
+            return {"status": "skipped", "reason": "discarded", "item_uuid": normalized_uuid}
+        if current_status != "resolved":
+            return {
+                "status": "skipped",
+                "reason": "not_resolved",
+                "item_uuid": normalized_uuid,
+                "current_status": current_status,
+            }
+
+        category_slug = str(category_slug_override or row.get("classifier_category") or "").strip().lower()
+        if not category_slug or category_slug == "unknown":
+            return {
+                "status": "invalid",
+                "reason": "category_slug_required",
+                "item_uuid": normalized_uuid,
+            }
+
+        product_url = str(row.get("product_url") or "").strip()
+        if not product_url:
+            return {"status": "invalid", "reason": "product_url_required", "item_uuid": normalized_uuid}
+
+        remote_payload = {
+            "item_uuid": normalized_uuid,
+            "store_id": int(row["store_id"]),
+            "store_name": str(row.get("store_name") or f"store-{int(row['store_id'])}"),
+            "provider": str(row.get("provider") or "generic"),
+            "base_url": str(row.get("base_url") or "").strip() or None,
+            "product_url": product_url,
+            "category_slug_override": category_slug,
+            "brand_hint_override": str(brand_hint_override or "").strip() or None,
+            "source_url": str(row.get("source_url") or "").strip() or product_url,
+        }
+
+        now = datetime.now(UTC)
+        try:
+            remote_result = _run_remote_process_quarantine_item(remote_payload)
+        except Exception as exc:  # noqa: BLE001
+            next_errors = _merge_validation_errors(row.get("validation_errors"), ["reprocess_failed"])
+            reason = f"reprocess_failed:{str(exc)[:180]}"
+            await session.execute(
+                text(
+                    """
+                    update catalog_ingest_quarantine
+                    set status = 'open',
+                        last_seen_at = :last_seen_at,
+                        seen_count = coalesce(seen_count, 0) + 1,
+                        classifier_category = :classifier_category,
+                        classifier_reason = :classifier_reason,
+                        validation_errors = cast(:validation_errors as jsonb)
+                    where id = :id
+                    """
+                ),
+                {
+                    "id": int(row["id"]),
+                    "last_seen_at": now,
+                    "classifier_category": category_slug,
+                    "classifier_reason": reason,
+                    "validation_errors": json.dumps(next_errors, ensure_ascii=False),
+                },
+            )
+            await session.commit()
+            add_parse_errors(count=1)
+            return {"status": "error", "reason": str(exc), "item_uuid": normalized_uuid}
+
+        result = remote_result.get("result") if isinstance(remote_result, dict) else {}
+        raw_status = result.get("status") if isinstance(result, dict) else None
+        item_status = normalize_url_item_status(raw_status)
+        error_text = str((result or {}).get("error") or "").strip()
+
+        if item_status == "done":
+            await session.execute(
+                text(
+                    """
+                    update catalog_ingest_quarantine
+                    set status = 'resolved',
+                        last_seen_at = :last_seen_at,
+                        seen_count = coalesce(seen_count, 0) + 1,
+                        classifier_category = :classifier_category,
+                        classifier_reason = :classifier_reason
+                    where id = :id
+                    """
+                ),
+                {
+                    "id": int(row["id"]),
+                    "last_seen_at": now,
+                    "classifier_category": category_slug,
+                    "classifier_reason": "resolved_by_reprocess",
+                },
+            )
+            await session.commit()
+            return {
+                "status": "resolved",
+                "item_uuid": normalized_uuid,
+                "result_status": item_status,
+            }
+
+        failure_code = f"reprocess_{item_status}"
+        next_errors = _merge_validation_errors(row.get("validation_errors"), [failure_code])
+        if error_text:
+            next_errors = _merge_validation_errors(next_errors, [f"reprocess_error:{error_text[:160]}"])
+        await session.execute(
+            text(
+                """
+                update catalog_ingest_quarantine
+                set status = 'open',
+                    last_seen_at = :last_seen_at,
+                    seen_count = coalesce(seen_count, 0) + 1,
+                    classifier_category = :classifier_category,
+                    classifier_reason = :classifier_reason,
+                    validation_errors = cast(:validation_errors as jsonb)
+                where id = :id
+                """
+            ),
+            {
+                "id": int(row["id"]),
+                "last_seen_at": now,
+                "classifier_category": category_slug,
+                "classifier_reason": f"reprocess_{item_status}",
+                "validation_errors": json.dumps(next_errors, ensure_ascii=False),
+            },
+        )
+        await session.commit()
+        if item_status == "rate_limited":
+            add_rate_limited(count=1)
+        elif item_status == "quarantined":
+            add_ingest_quarantined(count=1)
+        elif item_status == "invalid":
+            add_ingest_invalid(count=1)
+        else:
+            add_parse_errors(count=1)
+        return {
+            "status": "reopened",
+            "item_uuid": normalized_uuid,
+            "result_status": item_status,
+            "error": error_text or None,
+        }
+
+
 @celery_app.task(bind=True)
 def scrape_store_category(self, store_id: int, category_id: int) -> dict:
     return {"status": "queued", "store_id": store_id, "category_id": category_id}
@@ -669,6 +924,39 @@ def enqueue_full_crawl(self) -> dict[str, Any]:
 @celery_app.task(bind=True)
 def retry_failed_items(self) -> dict[str, Any]:
     return run_async_task(_retry_failed_items())
+
+
+@celery_app.task(
+    bind=True,
+    name="app.tasks.scrape_tasks.process_quarantine_item",
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=settings.task_retry_backoff_max_seconds,
+    retry_jitter=True,
+    max_retries=settings.max_retries,
+)
+def process_quarantine_item(
+    self,
+    *,
+    item_uuid: str,
+    category_slug_override: str | None = None,
+    brand_hint_override: str | None = None,
+) -> dict[str, Any]:
+    started = perf_counter()
+    status = "ok"
+    try:
+        return run_async_task(
+            _process_quarantine_item(
+                item_uuid=item_uuid,
+                category_slug_override=category_slug_override,
+                brand_hint_override=brand_hint_override,
+            )
+        )
+    except Exception:  # noqa: BLE001
+        status = "error"
+        raise
+    finally:
+        observe_stage_duration(stage="scrape_process_quarantine_item", seconds=perf_counter() - started, status=status)
 
 
 @celery_app.task(bind=True)

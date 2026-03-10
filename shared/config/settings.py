@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     max_retries: int = 5
     task_retry_backoff_max_seconds: int = 600
     crawl_interval_minutes: int = 360
+    legacy_write_enabled: bool = False
+    ingest_unknown_policy: Literal["fallback_phones", "quarantine"] = "quarantine"
+    ingest_category_confidence_threshold: float = 0.70
+    ingest_quarantine_enabled: bool = True
 
     playwright_headless: bool = True
     ai_spec_enrichment_enabled: bool = False

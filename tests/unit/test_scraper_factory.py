@@ -74,6 +74,7 @@ def test_normalize_provider_explicit_and_hint_paths() -> None:
     assert factory_module._normalize_provider("mediapark") == "mediapark"
     assert factory_module._normalize_provider(None, base_url="https://ALIFSHOP.uz") == "alifshop"
     assert factory_module._normalize_provider("unknown", store_name="Texnomart Main") == "texnomart"
+    assert factory_module._normalize_provider(None, base_url="https://asaxiy.uz") == "asaxiy"
     assert factory_module._normalize_provider("unknown") == "example"
 
 
@@ -82,6 +83,7 @@ def test_build_parser_returns_expected_parser_types() -> None:
         factory_module.build_parser("mediapark"),
         factory_module.build_parser("texnomart"),
         factory_module.build_parser("alifshop"),
+        factory_module.build_parser("asaxiy"),
         factory_module.build_parser("example"),
     ]
 
@@ -89,7 +91,8 @@ def test_build_parser_returns_expected_parser_types() -> None:
         assert parsers[0].__class__ is factory_module.MediaParkParser
         assert parsers[1].__class__ is factory_module.TexnomartParser
         assert parsers[2].__class__ is factory_module.AlifshopParser
-        assert parsers[3].__class__ is factory_module.ExampleStoreParser
+        assert parsers[3].__class__ is factory_module.AsaxiyParser
+        assert parsers[4].__class__ is factory_module.ExampleStoreParser
     finally:
         for parser in parsers:
             asyncio.run(parser.aclose())
@@ -102,6 +105,16 @@ def test_fallback_category_urls_joins_base_and_paths(monkeypatch: pytest.MonkeyP
     assert factory_module._fallback_category_urls("mediapark") == [
         "https://mediapark.uz/c1",
         "https://mediapark.uz/c2",
+    ]
+
+
+def test_fallback_category_urls_for_asaxiy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(factory_module.settings, "asaxiy_base_url", "https://asaxiy.uz", raising=False)
+    monkeypatch.setattr(factory_module.settings, "asaxiy_category_paths", ["/phones", "product/smartphones"], raising=False)
+
+    assert factory_module._fallback_category_urls("asaxiy") == [
+        "https://asaxiy.uz/phones",
+        "https://asaxiy.uz/product/smartphones",
     ]
 
 

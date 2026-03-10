@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.logging import logger
 from app.parsers.alifshop import AlifshopParser
+from app.parsers.asaxiy import AsaxiyParser
 from app.parsers.base import StoreParser
 from app.parsers.example_store import ExampleStoreParser
 from app.parsers.mediapark import MediaParkParser
@@ -28,7 +29,7 @@ class ScrapeTarget:
 
 def _normalize_provider(provider: str | None, *, base_url: str | None = None, store_name: str | None = None) -> str:
     value = (provider or "").strip().lower()
-    if value in {"mediapark", "texnomart", "alifshop", "example"}:
+    if value in {"mediapark", "texnomart", "alifshop", "asaxiy", "example"}:
         return value
 
     hints = " ".join(part for part in [base_url or "", store_name or "", value] if part).lower()
@@ -38,6 +39,8 @@ def _normalize_provider(provider: str | None, *, base_url: str | None = None, st
         return "texnomart"
     if "alifshop" in hints:
         return "alifshop"
+    if "asaxiy" in hints:
+        return "asaxiy"
     return "example"
 
 
@@ -49,6 +52,8 @@ def build_parser(provider: str | None = None) -> StoreParser:
         return TexnomartParser()
     if resolved == "alifshop":
         return AlifshopParser()
+    if resolved == "asaxiy":
+        return AsaxiyParser()
     if resolved == "example":
         return ExampleStoreParser()
     raise ValueError(f"unsupported scraper_provider: {provider}")
@@ -64,6 +69,9 @@ def _fallback_category_urls(provider: str) -> list[str]:
     if provider == "alifshop":
         base_url = str(settings.alifshop_base_url).rstrip("/") + "/"
         return [urljoin(base_url, path.lstrip("/")) for path in settings.alifshop_category_paths]
+    if provider == "asaxiy":
+        base_url = str(settings.asaxiy_base_url).rstrip("/") + "/"
+        return [urljoin(base_url, path.lstrip("/")) for path in settings.asaxiy_category_paths]
 
     base_url = str(settings.example_store_base_url).rstrip("/") + "/"
     return [urljoin(base_url, path.lstrip("/")) for path in settings.example_store_category_paths]
