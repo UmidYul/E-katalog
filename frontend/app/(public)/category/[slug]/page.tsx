@@ -5,6 +5,9 @@ import { Suspense } from "react";
 import { env } from "@/config/env";
 import { CatalogClientPage } from "@/features/catalog/catalog-client-page";
 import { serverGet } from "@/lib/api/server";
+import { getRequestLocale } from "@/lib/i18n/server";
+import { createTranslator } from "@/lib/i18n/translate";
+import type { Locale } from "@/lib/i18n/types";
 import { buildCategoryFaq, buildCategorySeoParagraphs, toFaqJsonLd } from "@/lib/seo/content";
 
 type Category = { id: string; slug: string; name: string };
@@ -27,7 +30,7 @@ const formatBrandLabelFromSlug = (slug: string) =>
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
 
-const resolveVirtualCategory = (slug: string, categories: Category[], brands: Brand[]) => {
+const resolveVirtualCategory = (slug: string, categories: Category[], brands: Brand[], locale: Locale) => {
   const isGenericBrandCategory = slug.startsWith(BRAND_CATEGORY_PREFIX);
   const isLegacySmartphoneBrandCategory = slug.startsWith(LEGACY_SMARTPHONE_BRAND_PREFIX);
   if (!isGenericBrandCategory && !isLegacySmartphoneBrandCategory) return null;
@@ -45,7 +48,7 @@ const resolveVirtualCategory = (slug: string, categories: Category[], brands: Br
       categoryId: undefined,
       brandId: brand?.id,
       presetQuery: brand ? undefined : fallbackQuery,
-      title: `Бренд: ${brandLabel}`
+      title: locale === "uz-Cyrl-UZ" ? `Бренд: ${brandLabel}` : `Бренд: ${brandLabel}`
     };
   }
 
@@ -76,17 +79,22 @@ async function loadCategoryIndex(): Promise<{ categories: Category[]; brands: Br
 }
 
 export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
+  const locale = getRequestLocale();
+  const t = createTranslator(locale);
   const { categories, brands } = await loadCategoryIndex();
   const canonical = `${env.appUrl}/category/${params.slug}`;
 
   const category = categories.find((item) => item.slug === params.slug);
   if (category) {
-    const title = `${category.name}: цены и предложения`;
-    const description = `Сравнение цен, магазинов и характеристик по категории ${category.name}. Выберите лучшее предложение.`;
+    const title = locale === "uz-Cyrl-UZ" ? `${category.name}: нархлар ва таклифлар` : `${category.name}: цены и предложения`;
+    const description =
+      locale === "uz-Cyrl-UZ"
+        ? `${category.name} категорияси бўйича нарх, дўкон ва хусусиятларни солиштиринг. Энг яхши таклифни танланг.`
+        : `Сравнение цен, магазинов и характеристик по категории ${category.name}. Выберите лучшее предложение.`;
     return {
       title,
       description,
-      keywords: [category.name, "цены", "сравнение", "каталог"],
+      keywords: locale === "uz-Cyrl-UZ" ? [category.name, "нархлар", "солиштириш", "каталог"] : [category.name, "цены", "сравнение", "каталог"],
       alternates: { canonical },
       openGraph: {
         title: `${title} | ${env.siteName}`,
@@ -102,10 +110,13 @@ export async function generateMetadata({ params }: { params: { slug: string } })
     };
   }
 
-  const virtual = resolveVirtualCategory(params.slug, categories, brands);
+  const virtual = resolveVirtualCategory(params.slug, categories, brands, locale);
   if (virtual) {
-    const title = `${virtual.title}: цены и предложения`;
-    const description = `Сравнение цен и магазинов по подборке ${virtual.title}.`;
+    const title = locale === "uz-Cyrl-UZ" ? `${virtual.title}: нархлар ва таклифлар` : `${virtual.title}: цены и предложения`;
+    const description =
+      locale === "uz-Cyrl-UZ"
+        ? `${virtual.title} тўплами бўйича нарх ва дўконларни солиштиринг.`
+        : `Сравнение цен и магазинов по подборке ${virtual.title}.`;
     return {
       title,
       description,
@@ -125,8 +136,8 @@ export async function generateMetadata({ params }: { params: { slug: string } })
   }
 
   return {
-    title: `Категория: ${params.slug}`,
-    description: "Страница категории каталога товаров.",
+    title: locale === "uz-Cyrl-UZ" ? `Категория: ${params.slug}` : `Категория: ${params.slug}`,
+    description: locale === "uz-Cyrl-UZ" ? "Товарлар каталогининг категория саҳифаси." : "Страница категории каталога товаров.",
     alternates: { canonical },
     robots: {
       index: false,
@@ -136,6 +147,8 @@ export async function generateMetadata({ params }: { params: { slug: string } })
 }
 
 export default async function CategoryPage({ params }: { params: { slug: string } }) {
+  const locale = getRequestLocale();
+  const t = createTranslator(locale);
   const { categories, brands } = await loadCategoryIndex();
   if (!categories.length && !brands.length) {
     notFound();
@@ -143,12 +156,12 @@ export default async function CategoryPage({ params }: { params: { slug: string 
 
   const category = categories.find((item) => item.slug === params.slug);
   if (category) {
-    const faq = buildCategoryFaq(category.name);
-    const seoParagraphs = buildCategorySeoParagraphs(category.name);
+    const faq = buildCategoryFaq(category.name, locale);
+    const seoParagraphs = buildCategorySeoParagraphs(category.name, locale);
 
     return (
       <>
-        <Suspense fallback={<div className="mx-auto max-w-7xl px-4 py-8 text-sm text-muted-foreground">Загрузка каталога...</div>}>
+        <Suspense fallback={<div className="mx-auto max-w-7xl px-4 py-8 text-sm text-muted-foreground">{t("pages.catalog.loading")}</div>}>
           <CatalogClientPage categoryId={category.id} pageTitle={category.name} />
         </Suspense>
         <section className="mx-auto max-w-7xl space-y-2 px-4 pb-8 text-sm text-muted-foreground">
@@ -166,17 +179,17 @@ export default async function CategoryPage({ params }: { params: { slug: string 
     );
   }
 
-  const virtual = resolveVirtualCategory(params.slug, categories, brands);
+  const virtual = resolveVirtualCategory(params.slug, categories, brands, locale);
   if (!virtual) {
     notFound();
   }
 
-  const faq = buildCategoryFaq(virtual.title);
-  const seoParagraphs = buildCategorySeoParagraphs(virtual.title);
+  const faq = buildCategoryFaq(virtual.title, locale);
+  const seoParagraphs = buildCategorySeoParagraphs(virtual.title, locale);
 
   return (
     <>
-      <Suspense fallback={<div className="mx-auto max-w-7xl px-4 py-8 text-sm text-muted-foreground">Загрузка каталога...</div>}>
+      <Suspense fallback={<div className="mx-auto max-w-7xl px-4 py-8 text-sm text-muted-foreground">{t("pages.catalog.loading")}</div>}>
         <CatalogClientPage categoryId={virtual.categoryId} presetBrandId={virtual.brandId} presetQuery={virtual.presetQuery} pageTitle={virtual.title} />
       </Suspense>
       <section className="mx-auto max-w-7xl space-y-2 px-4 pb-8 text-sm text-muted-foreground">

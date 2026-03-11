@@ -1,4 +1,6 @@
-﻿const SPEC_KEY_ALIASES: Record<string, string> = {
+﻿import { getActiveClientLocale } from "../i18n/locale.ts";
+import type { Locale } from "../i18n/types.ts";
+const SPEC_KEY_ALIASES: Record<string, string> = {
   storage: "storage_gb",
   "storage gb": "storage_gb",
   built_in_memory: "storage_gb",
@@ -93,7 +95,8 @@ const SPEC_KEY_ALIASES_RUNTIME: Record<string, string> = {
   headset_jack: "headphone_connector"
 };
 
-const SPEC_LABELS: Record<string, string> = {
+
+const SPEC_LABELS_RU: Record<string, string> = {
   price_min: "Минимальная цена",
   price_max: "Максимальная цена",
   store_count: "Количество магазинов",
@@ -133,6 +136,48 @@ const SPEC_LABELS: Record<string, string> = {
   gps: "Геопозиционирование",
   headphone_connector: "Выход на наушники",
   wireless_interfaces: "Беспроводные интерфейсы"
+};
+
+const SPEC_LABELS_UZ: Record<string, string> = {
+  price_min: "Энг паст нарх",
+  price_max: "Энг юқори нарх",
+  store_count: "Дўконлар сони",
+
+  storage_gb: "Ички хотира",
+  ram_gb: "Оператив хотира",
+  virtual_ram_gb: "Виртуал оператив хотира",
+  battery_mah: "Батарея сиғими",
+  camera_mp: "Камера",
+  main_camera_mp: "Асосий камера",
+  front_camera_mp: "Олд камера",
+  display_inches: "Экран диагонали",
+  refresh_rate_hz: "Янгиланиш частотаси",
+  cpu_frequency_mhz: "Процессор частотаси",
+  wifi_standard: "Wi-Fi стандарти",
+  bluetooth_standard: "Bluetooth стандарти",
+  os: "Операцион тизим",
+  network_standard: "Алоқа стандартлари",
+  cpu: "Процессор",
+  gpu: "График процессор",
+  device_type: "Қурилма тури",
+  color: "Ранг",
+  sim_type: "SIM-карта тури",
+  sim_count: "SIM-карталар сони",
+  screen_resolution: "Экран ўлчами",
+  charging_connector: "Зарядлаш порти",
+  dimensions_mm: "Ўлчамлар",
+  weight_g: "Оғирлик",
+  display_matrix_type: "Экран матрицаси тури",
+  charging_power_w: "Зарядлаш қуввати",
+  charging_features: "Зарядлаш хусусиятлари",
+  unlock_type: "Қулфдан чиқариш тури",
+  body_material: "Корпус материали",
+  frame_material: "Рамка материали",
+  camera_count: "Камералар сони",
+  camera_features: "Камера хусусиятлари",
+  gps: "Геолокация",
+  headphone_connector: "Қулоқчин чиқиши",
+  wireless_interfaces: "Симсиз интерфейслар"
 };
 
 const PLACEHOLDER_VALUES = new Set(["", "-", "--", "—", "n/a", "na", "none", "null", "unknown", "not specified", "не указано"]);
@@ -398,4 +443,14 @@ export const isMeaningfulSpecValue = (value: unknown): boolean => {
   return true;
 };
 
-export const formatSpecLabel = (normalizedKey: string): string => SPEC_LABELS[normalizedKey] ?? normalizedKey.replace(/_/g, " ");
+export const formatSpecLabel = (normalizedKey: string, locale: Locale = getActiveClientLocale()): string => {
+  const localized = locale === "uz-Cyrl-UZ" ? SPEC_LABELS_UZ[normalizedKey] : SPEC_LABELS_RU[normalizedKey];
+  if (localized) return localized;
+
+  const fallback = SPEC_LABELS_RU[normalizedKey];
+  return fallback ?? normalizedKey.replace(/_/g, " ");
+};
+
+
+
+

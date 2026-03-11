@@ -3,6 +3,8 @@
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { useLocale } from "@/components/common/locale-provider";
+
 const UI_ICON_URL_PATTERNS: RegExp[] = [
   /(^|[\/_.-])(icon|icons|sprite|glyph|pictogram|logo)([\/_.-]|$)/i,
   /(^|[\/_.-])(cart|basket|shopping-cart|shopping-card|phone|call|location|map-marker|marker|pin)([\/_.-]|$)/i,
@@ -22,6 +24,10 @@ const isLikelyUiIconAsset = (url: string) => {
 };
 
 export function ProductGallery({ images }: { images: string[] }) {
+  const { locale } = useLocale();
+  const imageAlt = locale === "uz-Cyrl-UZ" ? "Товар расми" : "Изображение товара";
+  const thumbAlt = locale === "uz-Cyrl-UZ" ? "Товар миниатюраси" : "Миниатюра товара";
+
   const sourceList = useMemo(() => {
     const unique = new Set<string>();
     for (const raw of images) {
@@ -70,7 +76,7 @@ export function ProductGallery({ images }: { images: string[] }) {
         {active ? (
           <Image
             src={active}
-            alt="Product image"
+            alt={imageAlt}
             fill
             className="object-contain p-3"
             sizes="(max-width: 768px) 100vw, 40vw"
@@ -78,8 +84,10 @@ export function ProductGallery({ images }: { images: string[] }) {
           />
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-            <p className="text-sm font-medium text-muted-foreground">Фото товара недоступно</p>
-            <p className="text-xs text-muted-foreground/80">Попробуйте открыть карточку позже, когда данные обновятся.</p>
+            <p className="text-sm font-medium text-muted-foreground">{locale === "uz-Cyrl-UZ" ? "Товар расми мавжуд эмас" : "Фото товара недоступно"}</p>
+            <p className="text-xs text-muted-foreground/80">
+              {locale === "uz-Cyrl-UZ" ? "Маълумот янгилангандан кейин карточкани қайта очиб кўринг." : "Попробуйте открыть карточку позже, когда данные обновятся."}
+            </p>
           </div>
         )}
       </div>
@@ -91,7 +99,7 @@ export function ProductGallery({ images }: { images: string[] }) {
             className={`relative aspect-square overflow-hidden rounded-lg border ${active === src ? "border-accent" : "border-border"}`}
             onClick={() => setActive(src)}
           >
-            <Image src={src} alt="Product thumbnail" fill className="object-contain p-1" sizes="120px" onError={() => markFailed(src)} />
+            <Image src={src} alt={thumbAlt} fill className="object-contain p-1" sizes="120px" onError={() => markFailed(src)} />
           </button>
         ))}
       </div>

@@ -6,29 +6,31 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+import { useLocale } from "@/components/common/locale-provider";
 import { EmptyState } from "@/components/common/empty-state";
 import { ErrorState } from "@/components/common/error-state";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useCompareProducts, useCreateCompareShare, useResolveCompareShare } from "@/features/compare/use-compare";
+import type { Locale } from "@/lib/i18n/types";
 import { catalogApi } from "@/lib/api/openapi-client";
 import { formatColorValue } from "@/lib/utils/color-name";
 import { cn } from "@/lib/utils/cn";
+import { formatDateTime as formatLocalizedDateTime, formatNumber } from "@/lib/utils/format";
 import { formatSpecLabel, normalizeSpecsMap } from "@/lib/utils/specs";
 import { COMPARE_LIMIT, useCompareStore } from "@/store/compare.store";
 
-const normalizeValue = (value: unknown): string => {
+const normalizeValue = (value: unknown, locale: Locale): string => {
   if (value === null || value === undefined || value === "") return "-";
-  if (typeof value === "boolean") return value ? "Да" : "Нет";
+  if (typeof value === "boolean") return value ? (locale === "uz-Cyrl-UZ" ? "Ҳа" : "Да") : (locale === "uz-Cyrl-UZ" ? "Йўқ" : "Нет");
   if (typeof value === "number") return Number.isFinite(value) ? String(value) : "-";
   if (typeof value === "string") return value.trim() || "-";
   return JSON.stringify(value);
 };
 
-const hasDiffInRow = (values: unknown[]) => {
-  const unique = new Set(values.map((value) => normalizeValue(value)));
+const hasDiffInRow = (values: unknown[], locale: Locale) => {
+  const unique = new Set(values.map((value) => normalizeValue(value, locale)));
   return unique.size > 1;
 };
 
@@ -123,10 +125,10 @@ const getBestCellIndexes = (specKey: string, values: unknown[]) => {
   return new Set(numericValues.filter((item) => Math.abs(item.value - target) < 1e-9).map((item) => item.index));
 };
 
-const formatDateTime = (value: string) => {
+const formatDateTime = (value: string, locale: Locale) => {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Неизвестно";
-  return new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(date);
+  if (Number.isNaN(date.getTime())) return "-";
+  return formatLocalizedDateTime(date, locale);
 };
 
 const formatCategory = (value?: string) => {
@@ -162,15 +164,13 @@ const keySpecHints = [
   "dimensions"
 ];
 
-const formatInteger = (value: number) => Math.round(value).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
-
-const renderCellValue = (rowKey: string, value: unknown) => {
+const renderCellValue = (rowKey: string, value: unknown, locale: Locale) => {
   if (rowKey === "price_min" || rowKey === "price_max") {
     const numeric = parseNumeric(value);
-    if (numeric !== null) return `${formatInteger(numeric)} UZS`;
+    if (numeric !== null) return `${formatNumber(Math.round(numeric), locale, { maximumFractionDigits: 0 })} UZS`;
   }
   if (rowKey.includes("color") && typeof value === "string") return formatColorValue(value);
-  return normalizeValue(value);
+  return normalizeValue(value, locale);
 };
 
 const isImageUrl = (value: unknown): value is string => {
@@ -180,6 +180,18 @@ const isImageUrl = (value: unknown): value is string => {
 };
 
 export function CompareClientPage() {
+  const { locale } = useLocale();
+  const isUz = locale === "uz-Cyrl-UZ";
+  const tr = (ru: string, uz: string) => (isUz ? uz : ru);
+  const itemCountLabel = (count: number) => {
+    if (isUz) return `${count} та товар`;
+    const mod10 = count % 10;
+    const mod100 = count % 100;
+    if (mod10 === 1 && mod100 !== 11) return `${count} товар`;
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return `${count} товара`;
+    return `${count} товаров`;
+  };
+
   const searchParams = useSearchParams();
   const compareItems = useCompareStore((s) => s.items);
   const history = useCompareStore((s) => s.history);
@@ -251,12 +263,17 @@ export function CompareClientPage() {
       }
       if (cancelled) return;
       if (nextItems.length < 2) {
-        setShareStatus("Не удалось восстановить сравнение по ссылке.");
+        setShareStatus(tr("Не удалось восстановить сравнение по ссылке.", "Солиштиришни ҳавола орқали тиклаб бўлмади."));
         return;
       }
       replace(nextItems);
       setAppliedShareToken(shareToken);
-      setShareStatus(`Сравнение загружено по общей ссылке до ${formatDateTime(sharedCompareQuery.data.expires_at)}.`);
+      setShareStatus(
+        tr(
+          `Сравнение загружено по общей ссылке до ${formatDateTime(sharedCompareQuery.data.expires_at, locale)}.`,
+          `Солиштириш умумий ҳавола орқали ${formatDateTime(sharedCompareQuery.data.expires_at, locale)} гача юкланди.`
+        )
+      );
     };
     void hydrateSharedCompare();
     return () => {
@@ -266,8 +283,8 @@ export function CompareClientPage() {
 
   useEffect(() => {
     if (!shareToken || !sharedCompareQuery.isError) return;
-    setShareStatus("Ссылка сравнения недействительна или устарела.");
-  }, [shareToken, sharedCompareQuery.isError]);
+    setShareStatus(tr("Ссылка сравнения недействительна или устарела.", "Солиштириш ҳаволаси амал қилмайди ёки эскирган."));
+  }, [shareToken, sharedCompareQuery.isError, tr]);
 
   const rows = useMemo(() => {
     const items = compareQuery.data?.items ?? [];
@@ -285,13 +302,13 @@ export function CompareClientPage() {
 
     const allRows = keys.map((key) => {
       const values = normalizedItems.map((specs) => specs[key]);
-      return { key, label: formatSpecLabel(key), values, bestCellIndexes: getBestCellIndexes(key, values) };
+      return { key, label: formatSpecLabel(key, locale), values, bestCellIndexes: getBestCellIndexes(key, values) };
     });
 
     const normalizedQuery = specQuery.trim().toLowerCase();
 
     return allRows.filter((row) => {
-      if (onlyDiff && !hasDiffInRow(row.values)) return false;
+      if (onlyDiff && !hasDiffInRow(row.values, locale)) return false;
       if (
         focusMode === "key" &&
         !keySpecHints.some((hint) => row.key.toLowerCase().includes(hint) || row.label.toLowerCase().includes(hint))
@@ -301,13 +318,13 @@ export function CompareClientPage() {
       if (!normalizedQuery) return true;
       return row.key.toLowerCase().includes(normalizedQuery) || row.label.toLowerCase().includes(normalizedQuery);
     });
-  }, [compareQuery.data?.items, focusMode, onlyDiff, specQuery]);
+  }, [compareQuery.data?.items, focusMode, locale, onlyDiff, specQuery]);
 
-  const diffRowsCount = useMemo(() => rows.filter((row) => hasDiffInRow(row.values)).length, [rows]);
+  const diffRowsCount = useMemo(() => rows.filter((row) => hasDiffInRow(row.values, locale)).length, [locale, rows]);
 
   const onCreateShareLink = async () => {
     if (productIds.length < 2) {
-      setShareStatus("Для общей ссылки выберите минимум 2 товара.");
+      setShareStatus(tr("Для общей ссылки выберите минимум 2 товара.", "Умумий ҳавола учун камида 2 та товар танланг."));
       return;
     }
     try {
@@ -316,22 +333,27 @@ export function CompareClientPage() {
       setLastShareUrl(shareUrl);
       setLastShareExpiresAt(response.expires_at);
       if (typeof navigator !== "undefined" && navigator.share) {
-        await navigator.share({ url: shareUrl, title: "Сравнение товаров" });
-        setShareStatus("Ссылка сравнения отправлена через системный share.");
+        await navigator.share({ url: shareUrl, title: tr("Сравнение товаров", "Товарларни солиштириш") });
+        setShareStatus(tr("Ссылка сравнения отправлена через системный share.", "Солиштириш ҳаволаси тизимли share орқали юборилди."));
         return;
       }
       if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(shareUrl);
-        setShareStatus("Ссылка сравнения скопирована в буфер.");
+        setShareStatus(tr("Ссылка сравнения скопирована в буфер.", "Солиштириш ҳаволаси буферга нусхаланди."));
         return;
       }
-      setShareStatus(`Ссылка сравнения готова до ${formatDateTime(response.expires_at)}.`);
+      setShareStatus(
+        tr(
+          `Ссылка сравнения готова до ${formatDateTime(response.expires_at, locale)}.`,
+          `Солиштириш ҳаволаси ${formatDateTime(response.expires_at, locale)} гача тайёр.`
+        )
+      );
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
-        setShareStatus("Отправка ссылки отменена.");
+        setShareStatus(tr("Отправка ссылки отменена.", "Ҳаволани юбориш бекор қилинди."));
         return;
       }
-      setShareStatus("Не удалось создать ссылку сравнения.");
+      setShareStatus(tr("Не удалось создать ссылку сравнения.", "Солиштириш ҳаволасини яратиб бўлмади."));
     }
   };
 
@@ -340,19 +362,24 @@ export function CompareClientPage() {
       <div className="mx-auto max-w-7xl space-y-3 px-4 py-6">
         {shareToken ? (
           <p className="text-sm text-muted-foreground">
-            {sharedCompareQuery.isPending ? "Загружаем сравнение по ссылке..." : shareStatus ?? "Ожидаем данные сравнения..."}
+            {sharedCompareQuery.isPending
+              ? tr("Загружаем сравнение по ссылке...", "Ҳавола бўйича солиштириш юкланмоқда...")
+              : shareStatus ?? tr("Ожидаем данные сравнения...", "Солиштириш маълумотларини кутмоқдамиз...")}
           </p>
         ) : null}
-        <EmptyState title="Сравнение пока пустое" message="Добавьте товары из каталога или карточки товара, чтобы начать сравнение." />
+        <EmptyState
+          title={tr("Сравнение пока пустое", "Солиштириш ҳозирча бўш")}
+          message={tr("Добавьте товары из каталога или карточки товара, чтобы начать сравнение.", "Солиштиришни бошлаш учун каталогдан ёки товар карточкасидан товар қўшинг.")}
+        />
         <Link href="/catalog">
-          <Button>Перейти в каталог</Button>
+          <Button>{tr("Перейти в каталог", "Каталогга ўтиш")}</Button>
         </Link>
         {history.length ? (
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>Недавние сравнения</CardTitle>
+              <CardTitle>{tr("Недавние сравнения", "Охирги солиштиришлар")}</CardTitle>
               <Button variant="ghost" size="sm" onClick={clearHistory}>
-                Очистить историю
+                {tr("Очистить историю", "Тарихни тозалаш")}
               </Button>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -361,12 +388,12 @@ export function CompareClientPage() {
                   <div>
                     <p className="line-clamp-1 text-sm font-medium">{entry.items.map((item) => item.title).join(" vs ")}</p>
                     <p className="text-xs text-muted-foreground">
-                      {formatDateTime(entry.createdAt)} | {entry.items.length} товаров
+                      {formatDateTime(entry.createdAt, locale)} | {itemCountLabel(entry.items.length)}
                       {entry.category ? ` | ${formatCategory(entry.category)}` : ""}
                     </p>
                   </div>
                   <Button size="sm" variant="outline" onClick={() => restoreSnapshot(entry.id)}>
-                    Восстановить
+                    {tr("Восстановить", "Тиклаш")}
                   </Button>
                 </div>
               ))}
@@ -385,28 +412,33 @@ export function CompareClientPage() {
       <div className="mx-auto max-w-7xl space-y-4 px-4 py-6">
         <Card>
           <CardHeader>
-            <CardTitle>Для сравнения нужно минимум 2 товара</CardTitle>
+            <CardTitle>{tr("Для сравнения нужно минимум 2 товара", "Солиштириш учун камида 2 та товар керак")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <p className="text-sm text-muted-foreground">Сейчас выбран только один товар. Добавьте ещё один, чтобы увидеть полную матрицу сравнения.</p>
+            <p className="text-sm text-muted-foreground">
+              {tr(
+                "Сейчас выбран только один товар. Добавьте ещё один, чтобы увидеть полную матрицу сравнения.",
+                "Ҳозир фақат битта товар танланган. Тўлиқ матрицани кўриш учун яна бир товар қўшинг."
+              )}
+            </p>
             <div className="flex flex-wrap gap-2">
               <Link href={`/product/${onlyItem.slug}`}>
-                <Button variant="outline">Открыть выбранный товар</Button>
+                <Button variant="outline">{tr("Открыть выбранный товар", "Танланган товарни очиш")}</Button>
               </Link>
               <Link href="/catalog">
-                <Button>Добавить ещё товар</Button>
+                <Button>{tr("Добавить ещё товар", "Яна товар қўшиш")}</Button>
               </Link>
               <Button variant="ghost" onClick={clear}>
-                Очистить
+                {tr("Очистить", "Тозалаш")}
               </Button>
             </div>
             {history.length ? (
               <div className="space-y-2 border-t border-border pt-3">
-                <p className="text-xs text-muted-foreground">Недавние сравнения:</p>
+                <p className="text-xs text-muted-foreground">{tr("Недавние сравнения:", "Охирги солиштиришлар:")}</p>
                 <div className="flex flex-wrap gap-2">
                   {history.slice(0, 4).map((entry) => (
                     <Button key={entry.id} size="sm" variant="outline" onClick={() => restoreSnapshot(entry.id)}>
-                      Восстановить {entry.items.length}
+                      {tr("Восстановить", "Тиклаш")} {entry.items.length}
                     </Button>
                   ))}
                 </div>
@@ -421,7 +453,10 @@ export function CompareClientPage() {
   if (compareQuery.error) {
     return (
       <div className="mx-auto max-w-7xl px-4 py-6">
-        <ErrorState title="Не удалось построить сравнение" message="Попробуйте убрать недоступные товары и повторите." />
+        <ErrorState
+          title={tr("Не удалось построить сравнение", "Солиштиришни тузиб бўлмади")}
+          message={tr("Попробуйте убрать недоступные товары и повторите.", "Мавжуд эмас товарларни олиб ташлаб, қайта уриниб кўринг.")}
+        />
       </div>
     );
   }
@@ -438,9 +473,9 @@ export function CompareClientPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="space-y-1.5">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="font-heading text-2xl font-extrabold">Сравнение</h1>
+            <h1 className="font-heading text-2xl font-extrabold">{tr("Сравнение", "Солиштириш")}</h1>
             <span className="rounded-md bg-secondary px-2.5 py-1 text-xs font-medium">
-              {compareItems.length}/{COMPARE_LIMIT} выбрано
+              {tr(`${compareItems.length}/${COMPARE_LIMIT} выбрано`, `${compareItems.length}/${COMPARE_LIMIT} танланган`)}
             </span>
             {categoryScope ? (
               <span className="rounded-md bg-accent/10 px-2.5 py-1 text-xs font-medium text-accent">
@@ -448,45 +483,53 @@ export function CompareClientPage() {
               </span>
             ) : null}
             {compareQuery.isFetching ? (
-              <span className="rounded-md bg-secondary px-2.5 py-1 text-xs text-muted-foreground">Обновляем...</span>
+              <span className="rounded-md bg-secondary px-2.5 py-1 text-xs text-muted-foreground">{tr("Обновляем...", "Янгиланмоқда...")}</span>
             ) : null}
           </div>
           <p className="text-xs text-muted-foreground">
-            Сравнение работает в рамках одной категории. Заголовки и первая колонка закреплены.
+            {tr(
+              "Сравнение работает в рамках одной категории. Заголовки и первая колонка закреплены.",
+              "Солиштириш битта категория доирасида ишлайди. Сарлавҳа ва биринчи устун қотирилган."
+            )}
           </p>
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-1 text-success">
-              <span className="h-2 w-2 rounded-full bg-success" /> Лучшее значение
+              <span className="h-2 w-2 rounded-full bg-success" /> {tr("Лучшее значение", "Энг яхши қиймат")}
             </span>
-            <span>Подсветка лучшего значения рассчитывается по эвристике.</span>
+            <span>{tr("Подсветка лучшего значения рассчитывается по эвристике.", "Энг яхши қиймат ёритилиши эвристика асосида ҳисобланади.")}</span>
           </div>
           {shareStatus ? <p className="text-xs text-accent">{shareStatus}</p> : null}
           {lastShareUrl ? (
             <p className="text-xs text-muted-foreground">
-              Ссылка:{" "}
+              {tr("Ссылка:", "Ҳавола:")}{" "}
               <a href={lastShareUrl} className="text-accent underline underline-offset-2" target="_blank" rel="noreferrer">
-                открыть
+                {tr("открыть", "очиш")}
               </a>
-              {lastShareExpiresAt ? ` (действует до ${formatDateTime(lastShareExpiresAt)})` : ""}
+              {lastShareExpiresAt
+                ? tr(
+                  ` (действует до ${formatDateTime(lastShareExpiresAt, locale)})`,
+                  ` (амал қилади: ${formatDateTime(lastShareExpiresAt, locale)})`
+                )
+                : ""}
             </p>
           ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant={onlyDiff ? "default" : "outline"} size="sm" onClick={() => setOnlyDiff((prev) => !prev)}>
-            {onlyDiff ? "Показаны отличия" : "Показать только отличия"}
+            {onlyDiff ? tr("Показаны отличия", "Фарқлар кўрсатилган") : tr("Показать только отличия", "Фақат фарқларни кўрсатиш")}
           </Button>
           <Button variant={focusMode === "key" ? "default" : "outline"} size="sm" onClick={() => setFocusMode((prev) => (prev === "all" ? "key" : "all"))}>
-            {focusMode === "key" ? "Ключевые характеристики" : "Фокус: ключевые"}
+            {focusMode === "key" ? tr("Ключевые характеристики", "Калит хусусиятлар") : tr("Фокус: ключевые", "Фокус: калит")}
           </Button>
           <Button variant="outline" size="sm" onClick={onCreateShareLink} disabled={createShare.isPending || productIds.length < 2}>
-            {createShare.isPending ? "Готовим ссылку..." : "Поделиться"}
+            {createShare.isPending ? tr("Готовим ссылку...", "Ҳавола тайёрланмоқда...") : tr("Поделиться", "Улашиш")}
           </Button>
           <Button variant="ghost" size="sm" onClick={clear}>
-            Очистить всё
+            {tr("Очистить всё", "Барчасини тозалаш")}
           </Button>
           {history.length ? (
             <Button variant="ghost" size="sm" onClick={clearHistory}>
-              Очистить историю
+              {tr("Очистить историю", "Тарихни тозалаш")}
             </Button>
           ) : null}
         </div>
@@ -495,12 +538,12 @@ export function CompareClientPage() {
         <Input
           value={specQuery}
           onChange={(event) => setSpecQuery(event.target.value)}
-          placeholder="Поиск по характеристикам: например, камера, ram, wifi"
-          aria-label="Поиск характеристики в матрице сравнения"
+          placeholder={tr("Поиск по характеристикам: например, камера, ram, wifi", "Хусусият бўйича қидирув: масалан, камера, ram, wifi")}
+          aria-label={tr("Поиск характеристики в матрице сравнения", "Солиштириш матрицасида хусусият қидириш")}
           className="h-9"
         />
         <p className="text-xs text-muted-foreground">
-          Строк в матрице: {rows.length}, отличий: {diffRowsCount}.
+          {tr(`Строк в матрице: ${rows.length}, отличий: ${diffRowsCount}.`, `Матрица қаторлари: ${rows.length}, фарқлар: ${diffRowsCount}.`)}
         </p>
       </div>
 
@@ -526,11 +569,11 @@ export function CompareClientPage() {
               <div className="flex gap-2">
                 <Link href={`/product/${item.slug}`}>
                   <Button size="sm" variant="outline">
-                    Открыть
+                    {tr("Открыть", "Очиш")}
                   </Button>
                 </Link>
                 <Button size="sm" variant="ghost" onClick={() => remove(item.id)}>
-                  Убрать
+                  {tr("Убрать", "Олиб ташлаш")}
                 </Button>
               </div>
             </CardContent>
@@ -541,12 +584,12 @@ export function CompareClientPage() {
       <Card className="overflow-hidden">
         <CardContent className="p-0">
           {compareQuery.isLoading ? (
-            <div className="p-4 text-sm text-muted-foreground">Загружаем матрицу сравнения...</div>
+            <div className="p-4 text-sm text-muted-foreground">{tr("Загружаем матрицу сравнения...", "Солиштириш матрицаси юкланмоқда...")}</div>
           ) : (
             <table className="min-w-[760px] w-full border-collapse">
               <thead>
                 <tr className="border-b border-border bg-card">
-                  <th className="sticky left-0 top-0 z-30 min-w-56 bg-card px-4 py-3 text-left text-sm font-semibold">Характеристика</th>
+                  <th className="sticky left-0 top-0 z-30 min-w-56 bg-card px-4 py-3 text-left text-sm font-semibold">{tr("Характеристика", "Хусусият")}</th>
                   {columns.map((item) => {
                     const local = productMetaById.get(item.id);
                     const title = local?.title || item.normalized_title;
@@ -574,7 +617,7 @@ export function CompareClientPage() {
               <tbody>
                 {rows.length === 0 ? (
                   <tr>
-                    <td className="sticky left-0 z-10 bg-card px-4 py-3 text-sm text-muted-foreground">Отличий не найдено</td>
+                    <td className="sticky left-0 z-10 bg-card px-4 py-3 text-sm text-muted-foreground">{tr("Отличий не найдено", "Фарқлар топилмади")}</td>
                     {columns.map((item) => (
                       <td key={item.id} className="px-4 py-3 text-sm text-muted-foreground">
                         -
@@ -590,7 +633,7 @@ export function CompareClientPage() {
                           key={`${row.key}:${columns[index]?.id ?? index}`}
                           className={cn("px-4 py-3 text-sm text-muted-foreground", row.bestCellIndexes.has(index) && "bg-success/15 font-semibold text-success")}
                         >
-                          {renderCellValue(row.key, value)}
+                          {renderCellValue(row.key, value, locale)}
                         </td>
                       ))}
                     </tr>
@@ -605,7 +648,7 @@ export function CompareClientPage() {
       {history.length ? (
         <Card>
           <CardHeader>
-            <CardTitle>Недавние сравнения</CardTitle>
+            <CardTitle>{tr("Недавние сравнения", "Охирги солиштиришлар")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {history.slice(0, 6).map((entry) => (
@@ -613,12 +656,12 @@ export function CompareClientPage() {
                 <div>
                   <p className="line-clamp-1 text-sm font-medium">{entry.items.map((item) => item.title).join(" vs ")}</p>
                   <p className="text-xs text-muted-foreground">
-                    {formatDateTime(entry.createdAt)} | {entry.items.length} товаров
+                    {formatDateTime(entry.createdAt, locale)} | {itemCountLabel(entry.items.length)}
                     {entry.category ? ` | ${formatCategory(entry.category)}` : ""}
                   </p>
                 </div>
                 <Button size="sm" variant="outline" onClick={() => restoreSnapshot(entry.id)}>
-                  Восстановить
+                  {tr("Восстановить", "Тиклаш")}
                 </Button>
               </div>
             ))}

@@ -10,6 +10,7 @@ import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 
 import { Button, buttonVariants } from "@/components/ui/button";
+import { useT } from "@/components/common/locale-provider";
 import { Input } from "@/components/ui/input";
 import { env } from "@/config/env";
 import { useLogin, useRegister } from "@/features/auth/use-auth";
@@ -17,11 +18,11 @@ import { authApi } from "@/lib/api/openapi-client";
 import { cn } from "@/lib/utils/cn";
 import { type LoginFormValues, type RegisterFormValues, loginSchema, registerSchema } from "@/lib/validators/auth";
 
-const extractErrorMessage = (error: unknown) => {
+const extractErrorMessage = (error: unknown, fallback: string) => {
   if (error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string") {
     return (error as { message: string }).message;
   }
-  return "Не удалось выполнить запрос. Проверьте данные и попробуйте снова.";
+  return fallback;
 };
 
 const buildOAuthStartUrl = (provider: "google" | "facebook", nextPath: string) =>
@@ -35,6 +36,7 @@ const roleLanding = (role: string | undefined) => {
 };
 
 function SocialAuthButtons({ nextPath }: { nextPath: string }) {
+  const t = useT("authForm");
   const providersQuery = useQuery({
     queryKey: ["auth", "oauth-providers"],
     queryFn: async () => {
@@ -48,15 +50,15 @@ function SocialAuthButtons({ nextPath }: { nextPath: string }) {
   const providers = useMemo(() => {
     const fallback = ["google", "facebook"] as const;
     if (!providersQuery.data) {
-      return fallback.map((id) => ({ id, title: id === "google" ? "Войти через Google" : "Войти через Facebook" }));
+      return fallback.map((id) => ({ id, title: id === "google" ? t("loginGoogle") : t("loginFacebook") }));
     }
     return providersQuery.data
       .filter((provider) => provider.enabled)
       .map((provider) => ({
         id: provider.provider as "google" | "facebook",
-        title: provider.provider === "google" ? "Войти через Google" : "Войти через Facebook",
+        title: provider.provider === "google" ? t("loginGoogle") : t("loginFacebook"),
       }));
-  }, [providersQuery.data]);
+  }, [providersQuery.data, t]);
 
   if (providers.length === 0) {
     return null;
@@ -74,6 +76,7 @@ function SocialAuthButtons({ nextPath }: { nextPath: string }) {
 }
 
 export function LoginForm() {
+  const t = useT("authForm");
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestedNext = searchParams.get("next");
@@ -93,13 +96,13 @@ export function LoginForm() {
       <div className="hidden flex-col justify-between bg-accent p-12 text-white lg:flex lg:w-[420px] lg:shrink-0">
         <div>
           <p className="text-2xl font-bold tracking-tight">Doxx</p>
-          <p className="mt-1 text-sm text-white/60">Сравниваем цены, экономим ваше время</p>
+          <p className="mt-1 text-sm text-white/60">{t("leftTagline")}</p>
         </div>
         <div className="space-y-6">
           {[
-            { icon: CheckCircle, text: "Реальные цены из проверенных магазинов" },
-            { icon: CheckCircle, text: "История цен и ценовые алерты" },
-            { icon: CheckCircle, text: "Сравнение технических характеристик" },
+            { icon: CheckCircle, text: t("leftFeature1") },
+            { icon: CheckCircle, text: t("leftFeature2") },
+            { icon: CheckCircle, text: t("leftFeature3") },
           ].map((item) => (
             <div key={item.text} className="flex items-start gap-3">
               <item.icon className="mt-0.5 h-5 w-5 shrink-0 text-white/70" />
@@ -119,8 +122,8 @@ export function LoginForm() {
           className="w-full max-w-md"
         >
           <div className="mb-8">
-            <h1 className="font-heading text-2xl font-bold text-foreground">Вход в аккаунт</h1>
-            <p className="mt-1.5 text-sm text-muted-foreground">Единый кабинет для избранного, сравнения и ценовых алертов.</p>
+            <h1 className="font-heading text-2xl font-bold text-foreground">{t("loginTitle")}</h1>
+            <p className="mt-1.5 text-sm text-muted-foreground">{t("loginSubtitle")}</p>
           </div>
 
           <form
@@ -137,7 +140,7 @@ export function LoginForm() {
 
                 if ("requires_2fa" in data && data.requires_2fa) {
                   setChallengeToken(data.challenge_token);
-                  setSubmitError("Введите код из приложения-аутентификатора или recovery code.");
+                  setSubmitError(t("twoFaPrompt"));
                   return;
                 }
 
@@ -148,28 +151,28 @@ export function LoginForm() {
                 router.replace(redirectTarget);
                 router.refresh();
               } catch (error) {
-                setSubmitError(extractErrorMessage(error));
+                setSubmitError(extractErrorMessage(error, t("requestError")));
               }
             })}
           >
             <div className="relative">
               <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input placeholder="Email" className="pl-10" {...form.register("email")} />
+              <Input placeholder={t("emailPlaceholder")} className="pl-10" {...form.register("email")} />
             </div>
             <div className="relative">
               <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input type="password" placeholder="Пароль" className="pl-10" {...form.register("password")} />
+              <Input type="password" placeholder={t("passwordPlaceholder")} className="pl-10" {...form.register("password")} />
             </div>
 
             {challengeToken ? (
               <>
-                <Input placeholder="Код 2FA (6 цифр)" inputMode="numeric" value={twoFactorCode} onChange={(e) => setTwoFactorCode(e.target.value)} />
-                <Input placeholder="Recovery code (если нет 2FA-кода)" value={recoveryCode} onChange={(e) => setRecoveryCode(e.target.value)} />
+                <Input placeholder={t("twoFaCodePlaceholder")} inputMode="numeric" value={twoFactorCode} onChange={(e) => setTwoFactorCode(e.target.value)} />
+                <Input placeholder={t("recoveryCodePlaceholder")} value={recoveryCode} onChange={(e) => setRecoveryCode(e.target.value)} />
               </>
             ) : null}
 
             <Button type="submit" variant="accent" className="w-full" disabled={login.isPending}>
-              {login.isPending ? "Выполняем вход..." : challengeToken ? "Подтвердить 2FA" : "Войти"}
+              {login.isPending ? t("loginPending") : challengeToken ? t("confirmTwoFa") : t("loginButton")}
             </Button>
 
             {submitError && (
@@ -177,19 +180,19 @@ export function LoginForm() {
                 {submitError}
               </motion.p>
             )}
-            {!submitError && oauthError ? <p className="text-sm text-destructive">OAuth ошибка: {oauthError}</p> : null}
+            {!submitError && oauthError ? <p className="text-sm text-destructive">{t("oauthError", { error: oauthError })}</p> : null}
 
             <div className="relative my-2 flex items-center gap-3">
               <div className="flex-1 border-t border-border" />
-              <span className="text-xs text-muted-foreground">или</span>
+              <span className="text-xs text-muted-foreground">{t("or")}</span>
               <div className="flex-1 border-t border-border" />
             </div>
             <SocialAuthButtons nextPath={next ?? "/"} />
 
             <p className="pt-1 text-center text-sm text-muted-foreground">
-              Нет аккаунта?{" "}
+              {t("noAccount")}{" "}
               <Link href="/register" className="font-semibold text-accent hover:underline">
-                Зарегистрироваться
+                {t("signUp")}
               </Link>
             </p>
           </form>
@@ -200,6 +203,7 @@ export function LoginForm() {
 }
 
 export function RegisterForm() {
+  const t = useT("authForm");
   const router = useRouter();
   const register = useRegister();
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -214,15 +218,13 @@ export function RegisterForm() {
       <div className="hidden flex-col justify-between bg-accent p-12 text-white lg:flex lg:w-[420px] lg:shrink-0">
         <div>
           <p className="text-2xl font-bold tracking-tight">Doxx</p>
-          <p className="mt-1 text-sm text-white/60">Сравниваем цены, экономим ваше время</p>
+          <p className="mt-1 text-sm text-white/60">{t("leftTagline")}</p>
         </div>
         <div className="space-y-8">
           <div>
-            <p className="text-3xl font-bold leading-snug">Создайте профиль и начните экономить</p>
+            <p className="text-3xl font-bold leading-snug">{t("registerHeroTitle")}</p>
           </div>
-          <p className="text-sm text-white/70">
-            Сохраняйте избранные товары, настраивайте ценовые алерты и сравнивайте характеристики — всё в одном кабинете.
-          </p>
+          <p className="text-sm text-white/70">{t("registerHeroText")}</p>
         </div>
         <p className="text-xs text-white/40">© {new Date().getFullYear()} Doxx</p>
       </div>
@@ -236,8 +238,8 @@ export function RegisterForm() {
           className="w-full max-w-md"
         >
           <div className="mb-8">
-            <h1 className="font-heading text-2xl font-bold text-foreground">Регистрация</h1>
-            <p className="mt-1.5 text-sm text-muted-foreground">Создайте профиль, чтобы сохранять товары и настраивать отслеживание цен.</p>
+            <h1 className="font-heading text-2xl font-bold text-foreground">{t("registerTitle")}</h1>
+            <p className="mt-1.5 text-sm text-muted-foreground">{t("registerSubtitle")}</p>
           </div>
 
           <form
@@ -248,29 +250,29 @@ export function RegisterForm() {
                 await register.mutateAsync({ email: values.email, password: values.password, full_name: values.fullName });
                 router.push("/profile");
               } catch (error) {
-                setSubmitError(extractErrorMessage(error));
+                setSubmitError(extractErrorMessage(error, t("requestError")));
               }
             })}
           >
             <div className="relative">
               <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input placeholder="Имя и фамилия" className="pl-10" {...form.register("fullName")} />
+              <Input placeholder={t("fullNamePlaceholder")} className="pl-10" {...form.register("fullName")} />
             </div>
             <div className="relative">
               <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input placeholder="Email" className="pl-10" {...form.register("email")} />
+              <Input placeholder={t("emailPlaceholder")} className="pl-10" {...form.register("email")} />
             </div>
             <div className="relative">
               <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input type="password" placeholder="Пароль" className="pl-10" {...form.register("password")} />
+              <Input type="password" placeholder={t("passwordPlaceholder")} className="pl-10" {...form.register("password")} />
             </div>
             <div className="relative">
               <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input type="password" placeholder="Подтверждение пароля" className="pl-10" {...form.register("confirmPassword")} />
+              <Input type="password" placeholder={t("confirmPasswordPlaceholder")} className="pl-10" {...form.register("confirmPassword")} />
             </div>
 
             <Button type="submit" variant="accent" className="w-full" disabled={register.isPending}>
-              {register.isPending ? "Создаем аккаунт..." : "Зарегистрироваться"}
+              {register.isPending ? t("registerPending") : t("registerButton")}
             </Button>
 
             {submitError && (
@@ -281,15 +283,15 @@ export function RegisterForm() {
 
             <div className="relative my-2 flex items-center gap-3">
               <div className="flex-1 border-t border-border" />
-              <span className="text-xs text-muted-foreground">или</span>
+              <span className="text-xs text-muted-foreground">{t("or")}</span>
               <div className="flex-1 border-t border-border" />
             </div>
             <SocialAuthButtons nextPath="/profile" />
 
             <p className="pt-1 text-center text-sm text-muted-foreground">
-              Уже есть аккаунт?{" "}
+              {t("hasAccount")}{" "}
               <Link href="/login" className="font-semibold text-accent hover:underline">
-                Войти
+                {t("signIn")}
               </Link>
             </p>
           </form>

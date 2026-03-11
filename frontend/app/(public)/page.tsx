@@ -2,26 +2,32 @@ import { HomeClient } from "@/features/catalog/home-client";
 import type { Metadata } from "next";
 
 import { env } from "@/config/env";
+import { getRequestLocale } from "@/lib/i18n/server";
+import { createTranslator } from "@/lib/i18n/translate";
 
-export const metadata: Metadata = {
-  title: "Сравнение цен на технику",
-  description:
-    "Сравнивайте цены на смартфоны, ноутбуки и другую электронику. Находите лучшие предложения от проверенных магазинов.",
-  alternates: { canonical: `${env.appUrl}/` },
-  openGraph: {
-    title: `Сравнение цен на технику | ${env.siteName}`,
-    description:
-      "Актуальные цены, сравнение характеристик и предложения от магазинов в одном месте.",
-    url: env.appUrl
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: `Сравнение цен на технику | ${env.siteName}`,
-    description: "Актуальные цены и сравнение характеристик техники."
-  }
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = createTranslator(getRequestLocale());
+  const title = t("rootMeta.titleDefault", { siteName: env.siteName });
+  return {
+    title,
+    description: t("rootMeta.description"),
+    alternates: { canonical: `${env.appUrl}/` },
+    openGraph: {
+      title,
+      description: t("rootMeta.ogDescription"),
+      url: env.appUrl,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description: t("rootMeta.twitterDescription"),
+    }
+  };
+}
 
 export default function HomePage() {
+  const locale = getRequestLocale();
+
   const structuredData = {
     "@context": "https://schema.org",
     "@graph": [
@@ -36,7 +42,7 @@ export default function HomePage() {
         "@id": `${env.appUrl}#website`,
         url: env.appUrl,
         name: env.siteName,
-        inLanguage: "ru",
+        inLanguage: locale === "uz-Cyrl-UZ" ? "uz-Cyrl" : "ru",
         publisher: { "@id": `${env.appUrl}#organization` },
         potentialAction: {
           "@type": "SearchAction",

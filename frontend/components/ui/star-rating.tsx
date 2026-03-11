@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import { Star } from "lucide-react";
 
+import { useLocale } from "@/components/common/locale-provider";
 import { cn } from "@/lib/utils/cn";
 
 interface StarRatingProps {
@@ -21,11 +22,15 @@ const sizeMap = {
 };
 
 export function StarRating({ value, max = 5, onChange, readonly = false, size = "md", className }: StarRatingProps) {
+    const { locale } = useLocale();
+    const ratingLabel = locale === "uz-Cyrl-UZ" ? `Рейтинг: ${value} / ${max}` : `Рейтинг: ${value} из ${max}`;
+    const starLabel = (index: number) => (locale === "uz-Cyrl-UZ" ? `${index} юлдуз` : `${index} звезда`);
+
     return (
         <div
             className={cn("inline-flex items-center gap-0.5", className)}
             role={readonly ? "img" : "group"}
-            aria-label={`Рейтинг: ${value} из ${max}`}
+            aria-label={ratingLabel}
         >
             {Array.from({ length: max }, (_, i) => {
                 const filled = i < Math.floor(value);
@@ -43,7 +48,7 @@ export function StarRating({ value, max = 5, onChange, readonly = false, size = 
                             "relative transition-colors",
                             readonly ? "cursor-default" : "cursor-pointer"
                         )}
-                        aria-label={`${i + 1} звезда`}
+                        aria-label={starLabel(i + 1)}
                     >
                         <Star
                             className={cn(

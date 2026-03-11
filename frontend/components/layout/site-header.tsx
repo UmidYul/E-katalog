@@ -7,6 +7,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ThemeToggle } from "@/components/common/theme-toggle";
+import { LocaleSwitcher } from "@/components/common/locale-switcher";
+import { useT } from "@/components/common/locale-provider";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -45,6 +47,7 @@ function useRecentSearches() {
 }
 
 export function SiteHeader() {
+  const t = useT("header");
   const router = useRouter();
   const pathname = usePathname();
   const shouldLoadMe = pathname !== "/login" && pathname !== "/register";
@@ -86,6 +89,7 @@ export function SiteHeader() {
   const topCategories = useMemo(() => (hydrated ? (categories.data ?? []).slice(0, 8) : []), [categories.data, hydrated]);
   const topBrands = useMemo(() => (hydrated ? (brands.data ?? []).slice(0, 5) : []), [brands.data, hydrated]);
   const compareCountSafe = hydrated ? compareCount : 0;
+  const compareCountSuffix = compareCountSafe ? ` (${compareCountSafe})` : "";
   const isAuthenticated = hydrated && Boolean(me.data?.id);
   const isLoginPage = pathname === "/login";
 
@@ -142,7 +146,7 @@ export function SiteHeader() {
     >
       <div className="mx-auto flex max-w-[1280px] items-center gap-4 px-4 py-3">
         {/* Logo */}
-        <Link href="/" className="flex shrink-0 items-center gap-2.5" aria-label="Doxx — главная">
+        <Link href="/" className="flex shrink-0 items-center gap-2.5" aria-label={t("homeAria")}>
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent shadow-sm">
             <span className="font-heading text-lg font-bold text-white">D</span>
           </div>
@@ -166,9 +170,9 @@ export function SiteHeader() {
                 onFocus={() => setSearchOpen(true)}
                 onBlur={handleBlur}
                 onKeyDown={onKeyDown}
-                placeholder="Поиск товаров, брендов, категорий..."
+                placeholder={t("searchPlaceholder")}
                 className="flex-1 bg-transparent py-2.5 pl-2 pr-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-                aria-label="Поиск"
+                aria-label={t("searchAria")}
                 aria-autocomplete="list"
                 aria-expanded={showDropdown}
               />
@@ -178,7 +182,7 @@ export function SiteHeader() {
                 </button>
               )}
               <button type="submit" className="mr-1.5 rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-accent/90">
-                Найти
+                {t("searchButton")}
               </button>
             </div>
           </form>
@@ -194,7 +198,7 @@ export function SiteHeader() {
               >
                 {!query.trim() && recent.length > 0 && (
                   <>
-                    <div className="px-4 py-2 text-xs font-semibold text-muted-foreground">Недавние запросы</div>
+                    <div className="px-4 py-2 text-xs font-semibold text-muted-foreground">{t("recentSearches")}</div>
                     {recent.map((term, i) => (
                       <button key={term} type="button"
                         onMouseDown={(e) => { e.preventDefault(); setQuery(term); addRecent(term); router.push(`/catalog?q=${encodeURIComponent(term)}`); setSearchOpen(false); }}
@@ -208,14 +212,14 @@ export function SiteHeader() {
                 )}
                 {suggestions.length > 0 && (
                   <>
-                    <div className="px-4 py-2 text-xs font-semibold text-muted-foreground">Результаты</div>
+                    <div className="px-4 py-2 text-xs font-semibold text-muted-foreground">{t("results")}</div>
                     {suggestions.map((item, i) => (
                       <button key={item.href} type="button"
                         onMouseDown={(e) => { e.preventDefault(); if (item.type !== "category") addRecent(item.label); router.push(item.href); setSearchOpen(false); }}
                         className={cn("flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm transition-colors hover:bg-muted", highlightIdx === i && "bg-muted")}
                       >
                         <span className={cn("rounded-sm px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide", item.type === "brand" ? "bg-accent/10 text-accent" : "bg-success/10 text-success")}>
-                          {item.type === "brand" ? "Бренд" : "Категория"}
+                          {item.type === "brand" ? t("badgeBrand") : t("badgeCategory")}
                         </span>
                         <span className="text-foreground">{item.label}</span>
                       </button>
@@ -232,7 +236,7 @@ export function SiteHeader() {
           <Link
             href="/compare"
             className="relative flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            aria-label={`Сравнение${compareCountSafe ? ` (${compareCountSafe})` : ""}`}
+            aria-label={t("compareAria", { countSuffix: compareCountSuffix })}
           >
             <GitCompareArrows className="h-5 w-5" />
             {compareCountSafe > 0 && (
@@ -245,7 +249,7 @@ export function SiteHeader() {
           <Link
             href="/favorites"
             className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            aria-label="Избранное"
+            aria-label={t("favoritesAria")}
           >
             <Heart className="h-5 w-5" />
           </Link>
@@ -253,7 +257,7 @@ export function SiteHeader() {
           {hydrated && isAuthenticated ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="flex h-9 w-9 items-center justify-center rounded-md transition-colors hover:bg-muted" aria-label="Аккаунт">
+                <button className="flex h-9 w-9 items-center justify-center rounded-md transition-colors hover:bg-muted" aria-label={t("accountAria")}>
                   <div className="flex h-7 w-7 items-center justify-center rounded-full bg-accent/10 text-accent">
                     <User className="h-4 w-4" />
                   </div>
@@ -261,23 +265,23 @@ export function SiteHeader() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-52">
                 <DropdownMenuLabel>
-                  <p className="text-xs font-normal text-muted-foreground truncate">{me.data?.email ?? "Аккаунт"}</p>
+                  <p className="text-xs font-normal text-muted-foreground truncate">{me.data?.email ?? t("accountFallback")}</p>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild>
-                  <Link href="/profile" className="flex items-center gap-2"><User className="h-4 w-4" /> Профиль</Link>
+                  <Link href="/profile" className="flex items-center gap-2"><User className="h-4 w-4" /> {t("profile")}</Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                  <Link href="/favorites" className="flex items-center gap-2"><Heart className="h-4 w-4" /> Избранное</Link>
+                  <Link href="/favorites" className="flex items-center gap-2"><Heart className="h-4 w-4" /> {t("favorites")}</Link>
                 </DropdownMenuItem>
                 {me.data?.role === "admin" && (
                   <DropdownMenuItem asChild>
-                    <Link href="/dashboard/admin" className="flex items-center gap-2"><Settings className="h-4 w-4" /> Дашборд</Link>
+                    <Link href="/dashboard/admin" className="flex items-center gap-2"><Settings className="h-4 w-4" /> {t("adminDashboard")}</Link>
                   </DropdownMenuItem>
                 )}
                 {me.data?.role === "seller" && (
                   <DropdownMenuItem asChild>
-                    <Link href="/dashboard/seller" className="flex items-center gap-2"><LayoutGrid className="h-4 w-4" /> Кабинет</Link>
+                    <Link href="/dashboard/seller" className="flex items-center gap-2"><LayoutGrid className="h-4 w-4" /> {t("sellerCabinet")}</Link>
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuSeparator />
@@ -285,7 +289,7 @@ export function SiteHeader() {
                   onClick={() => logout?.mutate(undefined)}
                   className="text-danger focus:bg-danger/10 focus:text-danger"
                 >
-                  <LogOut className="mr-2 h-4 w-4" /> Выйти
+                  <LogOut className="mr-2 h-4 w-4" /> {t("logout")}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -294,16 +298,20 @@ export function SiteHeader() {
               href={isLoginPage ? "/register" : "/login"}
               className="hidden rounded-md border border-accent px-3 py-1.5 text-sm font-semibold text-accent transition-colors hover:bg-accent hover:text-white md:inline-flex"
             >
-              {isLoginPage ? "Регистрация" : "Войти"}
+              {isLoginPage ? t("register") : t("login")}
             </Link>
           )}
+
+          <div className="hidden md:block">
+            <LocaleSwitcher />
+          </div>
 
           <div className="hidden md:block"><ThemeToggle /></div>
 
           {/* Mobile menu */}
           <Sheet name="menu" open={menuOpen} onOpenChange={setMenuOpen}>
             <SheetTrigger asChild>
-              <button type="button" className="flex h-9 w-9 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted md:hidden" aria-label="Открыть меню">
+              <button type="button" className="flex h-9 w-9 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted md:hidden" aria-label={t("openMenu")}>
                 <Menu className="h-5 w-5" />
               </button>
             </SheetTrigger>
@@ -314,18 +322,18 @@ export function SiteHeader() {
                   <input
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Поиск..."
+                    placeholder={t("mobileSearchPlaceholder")}
                     className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
                   />
                 </form>
               </div>
               <nav className="flex flex-col gap-0.5 px-3">
                 {[
-                  { href: "/", label: "Главная" },
-                  { href: "/catalog", label: "Каталог" },
-                  { href: "/compare", label: `Сравнение${compareCountSafe ? ` (${compareCountSafe})` : ""}` },
-                  { href: "/favorites", label: "Избранное" },
-                  isAuthenticated ? { href: "/profile", label: "Профиль" } : { href: "/login", label: "Войти" },
+                  { href: "/", label: t("navHome") },
+                  { href: "/catalog", label: t("navCatalog") },
+                  { href: "/compare", label: t("navCompare", { countSuffix: compareCountSuffix }) },
+                  { href: "/favorites", label: t("favorites") },
+                  isAuthenticated ? { href: "/profile", label: t("navProfile") } : { href: "/login", label: t("login") },
                 ].map((link) => (
                   <Link key={link.href} href={link.href}
                     className={cn("rounded-md px-3 py-2.5 text-sm font-medium transition-colors hover:bg-muted", pathname === link.href ? "bg-muted text-accent" : "text-foreground")}
@@ -336,7 +344,7 @@ export function SiteHeader() {
               </nav>
               {topCategories.length > 0 && (
                 <div className="px-3">
-                  <p className="mb-1 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Категории</p>
+                  <p className="mb-1 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("categories")}</p>
                   {topCategories.map((cat) => (
                     <Link key={cat.id} href={`/category/${cat.slug}`}
                       className="block rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
@@ -346,7 +354,10 @@ export function SiteHeader() {
                   ))}
                 </div>
               )}
-              <div className="mt-auto border-t border-border px-4 py-4"><ThemeToggle /></div>
+              <div className="mt-auto border-t border-border px-4 py-4 space-y-3">
+                <LocaleSwitcher />
+                <ThemeToggle />
+              </div>
             </SheetContent>
           </Sheet>
         </div>
@@ -360,7 +371,7 @@ export function SiteHeader() {
               href="/catalog"
               className={cn("whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted", pathname.startsWith("/catalog") ? "text-accent" : "text-muted-foreground")}
             >
-              Все товары
+              {t("allProducts")}
             </Link>
             {topBrands.map((brand) => (
               <Link key={brand.id} href={`/catalog?q=${encodeURIComponent(brand.name)}`}

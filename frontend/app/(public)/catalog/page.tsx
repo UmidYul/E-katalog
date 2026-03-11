@@ -3,28 +3,33 @@ import { Suspense } from "react";
 
 import { env } from "@/config/env";
 import { CatalogClientPage } from "@/features/catalog/catalog-client-page";
+import { getRequestLocale } from "@/lib/i18n/server";
+import { createTranslator } from "@/lib/i18n/translate";
 
-export const metadata: Metadata = {
-  title: "Каталог техники",
-  description:
-    "Каталог техники с актуальными ценами, фильтрами по брендам и магазинам, сравнением характеристик и предложений.",
-  alternates: { canonical: `${env.appUrl}/catalog` },
-  openGraph: {
-    title: `Каталог техники | ${env.siteName}`,
-    description:
-      "Сравнивайте предложения по технике, используйте фильтры и выбирайте лучшие цены.",
-    url: `${env.appUrl}/catalog`
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: `Каталог техники | ${env.siteName}`,
-    description: "Каталог с фильтрами, сравнением и актуальными ценами по магазинам."
-  }
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = createTranslator(getRequestLocale());
+  return {
+    title: t("pages.catalog.title"),
+    description: t("pages.catalog.description"),
+    alternates: { canonical: `${env.appUrl}/catalog` },
+    openGraph: {
+      title: t("pages.catalog.ogTitle", { siteName: env.siteName }),
+      description: t("pages.catalog.ogDescription"),
+      url: `${env.appUrl}/catalog`
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: t("pages.catalog.ogTitle", { siteName: env.siteName }),
+      description: t("pages.catalog.twitterDescription")
+    }
+  };
+}
 
 export default function CatalogPage() {
+  const t = createTranslator(getRequestLocale());
+
   return (
-    <Suspense fallback={<div className="container py-8 text-sm text-muted-foreground">Загрузка каталога...</div>}>
+    <Suspense fallback={<div className="container py-8 text-sm text-muted-foreground">{t("pages.catalog.loading")}</div>}>
       <CatalogClientPage />
     </Suspense>
   );

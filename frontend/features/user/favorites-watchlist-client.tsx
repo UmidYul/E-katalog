@@ -5,6 +5,7 @@ import { useQueries } from "@tanstack/react-query";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { useLocale } from "@/components/common/locale-provider";
 import { PriceAlertBadge } from "@/components/common/price-alert-badge";
 import { EmptyState } from "@/components/common/empty-state";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +23,12 @@ import { usePriceAlertsStore } from "@/store/priceAlerts.store";
 import type { WatchlistFilter } from "@/types/domain";
 
 export function FavoritesWatchlistClient() {
+  const { locale } = useLocale();
+  const isUz = locale === "uz-Cyrl-UZ";
+  const tr = (ru: string, uz: string) => (isUz ? uz : ru);
+  const storesCountLabel = (count: number) => (isUz ? `${count} та дўкон` : `${count} магазинов`);
+  const offersCountLabel = (count: number) => (isUz ? `${count} та таклиф` : `${count} предложений`);
+
   const favorites = useFavorites();
   const toggleFavorite = useToggleFavorite();
   const serverPriceAlerts = useUserPriceAlerts();
@@ -212,7 +219,7 @@ export function FavoritesWatchlistClient() {
   if (favorites.isLoading) {
     return (
       <div className="mx-auto max-w-7xl space-y-4 px-4 py-6">
-        <h1 className="font-heading text-2xl font-extrabold">Избранное</h1>
+        <h1 className="font-heading text-2xl font-extrabold">{tr("Избранное", "Сараланганлар")}</h1>
         <Skeleton className="h-24 w-full" />
         <Skeleton className="h-24 w-full" />
       </div>
@@ -222,38 +229,41 @@ export function FavoritesWatchlistClient() {
   return (
     <div className="mx-auto max-w-7xl px-4 py-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h1 className="font-heading text-2xl font-extrabold">Избранное</h1>
-        <Badge>{favoriteIds.length} сохранено</Badge>
+        <h1 className="font-heading text-2xl font-extrabold">{tr("Избранное", "Сараланганлар")}</h1>
+        <Badge>{tr(`${favoriteIds.length} сохранено`, `${favoriteIds.length} та сақланган`)}</Badge>
       </div>
 
       {(favorites.data?.length ?? 0) === 0 ? (
-        <EmptyState title="Избранное пока пустое" message="Сохраняйте товары, чтобы вернуться к ним позже и включить отслеживание цены." />
+        <EmptyState
+          title={tr("Избранное пока пустое", "Сараланганлар ҳозирча бўш")}
+          message={tr("Сохраняйте товары, чтобы вернуться к ним позже и включить отслеживание цены.", "Кейинроқ қайтиш ва нархни кузатиш учун товарларни сақланг.")}
+        />
       ) : (
         <>
           <Card className="mb-4">
             <CardHeader className="space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <CardTitle className="font-heading text-lg font-extrabold">Отслеживание цен</CardTitle>
+                <CardTitle className="font-heading text-lg font-extrabold">{tr("Отслеживание цен", "Нарх кузатуви")}</CardTitle>
                 <div className="flex flex-wrap items-center gap-2">
-                  <Badge className="border-warning/40 bg-warning/15 text-warning">Снижений: {watchlistDropCount}</Badge>
-                  <Badge className="border-success/40 bg-success/15 text-success">Целей достигнуто: {watchlistTargetCount}</Badge>
+                  <Badge className="border-warning/40 bg-warning/15 text-warning">{tr("Снижений", "Пасайишлар")}: {watchlistDropCount}</Badge>
+                  <Badge className="border-success/40 bg-success/15 text-success">{tr("Целей достигнуто", "Мақсадга етган")}: {watchlistTargetCount}</Badge>
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button size="sm" variant={watchlistFilter === "all" ? "default" : "outline"} onClick={() => setWatchlistFilter("all")}>
-                  Все
+                  {tr("Все", "Барчаси")}
                 </Button>
                 <Button size="sm" variant={watchlistFilter === "drop" ? "default" : "outline"} onClick={() => setWatchlistFilter("drop")}>
-                  Есть снижение
+                  {tr("Есть снижение", "Пасайиш бор")}
                 </Button>
                 <Button size="sm" variant={watchlistFilter === "target_hit" ? "default" : "outline"} onClick={() => setWatchlistFilter("target_hit")}>
-                  Достигли цели
+                  {tr("Достигли цели", "Мақсадга етган")}
                 </Button>
               </div>
             </CardHeader>
             <CardContent>
               {!filteredWatchlistItems.length ? (
-                <p className="text-sm text-muted-foreground">Для выбранного фильтра пока нет подходящих товаров.</p>
+                <p className="text-sm text-muted-foreground">{tr("Для выбранного фильтра пока нет подходящих товаров.", "Танланган фильтр учун мос товарлар ҳозирча йўқ.")}</p>
               ) : (
                 <div className="space-y-3">
                   {filteredWatchlistItems.map((item) => {
@@ -266,7 +276,7 @@ export function FavoritesWatchlistClient() {
                               {item.data.title}
                             </Link>
                             <p className="text-xs text-muted-foreground">
-                              Текущая цена: {item.minPrice != null ? formatPrice(item.minPrice) : "нет данных"}
+                              {tr("Текущая цена", "Жорий нарх")}: {item.minPrice != null ? formatPrice(item.minPrice) : tr("нет данных", "маълумот йўқ")}
                             </p>
                           </div>
                           <PriceAlertBadge signal={item.signal} />
@@ -274,25 +284,25 @@ export function FavoritesWatchlistClient() {
 
                         <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,220px)_auto_auto_auto] sm:items-end">
                           <div className="space-y-1">
-                            <label className="text-xs text-muted-foreground">Целевая цена (UZS)</label>
+                            <label className="text-xs text-muted-foreground">{tr("Целевая цена (UZS)", "Мақсад нархи (UZS)")}</label>
                             <Input
                               value={targetDrafts[item.id] ?? ""}
                               onChange={(event) => setTargetDrafts((prev) => ({ ...prev, [item.id]: event.target.value }))}
-                              placeholder="Например: 12000000"
+                              placeholder={tr("Например: 12000000", "Масалан: 12000000")}
                             />
                           </div>
                           <Button size="sm" variant="outline" onClick={() => saveTarget(item.id)}>
-                            Сохранить цель
+                            {tr("Сохранить цель", "Мақсадни сақлаш")}
                           </Button>
                           <Button size="sm" variant="outline" onClick={() => handleResetBaseline(item.id, item.minPrice)}>
-                            Обновить базу
+                            {tr("Обновить базу", "Базани янгилаш")}
                           </Button>
                           <Button
                             size="sm"
                             variant={item.meta?.alerts_enabled ? "default" : "outline"}
                             onClick={() => handleToggleAlertsEnabled(item.id, !Boolean(item.meta?.alerts_enabled), item.minPrice)}
                           >
-                            {item.meta?.alerts_enabled ? "Алерт включён" : "Включить алерт"}
+                            {item.meta?.alerts_enabled ? tr("Алерт включён", "Алерт ёқилган") : tr("Включить алерт", "Алертни ёқиш")}
                           </Button>
                         </div>
                       </div>
@@ -303,7 +313,7 @@ export function FavoritesWatchlistClient() {
             </CardContent>
           </Card>
 
-          {isLoadingProducts && !products.length ? <p className="mb-3 text-sm text-muted-foreground">Загружаем товары из избранного...</p> : null}
+          {isLoadingProducts && !products.length ? <p className="mb-3 text-sm text-muted-foreground">{tr("Загружаем товары из избранного...", "Сараланган товарлар юкланмоқда...")}</p> : null}
 
           <div className="space-y-3">
             {products.map(({ id, data }) => {
@@ -313,7 +323,11 @@ export function FavoritesWatchlistClient() {
               const inCompare = compareSet.has(id);
               const categoryMismatch = Boolean(referenceCompareCategory && normalizeCategory(data.category) && normalizeCategory(data.category) !== referenceCompareCategory);
               const compareDisabled = !inCompare && (compareFull || categoryMismatch);
-              const compareDisabledReason = compareFull ? `Лимит: ${COMPARE_LIMIT} товара` : categoryMismatch ? "Сравнение доступно только в одной категории" : undefined;
+              const compareDisabledReason = compareFull
+                ? tr(`Лимит: ${COMPARE_LIMIT} товара`, `Лимит: ${COMPARE_LIMIT} та товар`)
+                : categoryMismatch
+                  ? tr("Сравнение доступно только в одной категории", "Солиштириш фақат битта категорияда мумкин")
+                  : undefined;
               return (
                 <Card key={id}>
                   <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
@@ -327,14 +341,14 @@ export function FavoritesWatchlistClient() {
                       </p>
                       <div className="flex flex-wrap items-center gap-2">
                         {Number.isFinite(minPrice) ? <Badge className="bg-secondary/80">{formatPrice(minPrice)}</Badge> : null}
-                        <Badge>{data.offers_by_store.length} магазинов</Badge>
-                        <Badge>{offersCount} предложений</Badge>
+                        <Badge>{storesCountLabel(data.offers_by_store.length)}</Badge>
+                        <Badge>{offersCountLabel(offersCount)}</Badge>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
                       <Link href={`/product/${productSlug}`}>
                         <Button variant="outline" size="sm">
-                          Открыть
+                          {tr("Открыть", "Очиш")}
                         </Button>
                       </Link>
                       <Button
@@ -351,7 +365,7 @@ export function FavoritesWatchlistClient() {
                         disabled={compareDisabled}
                         title={compareDisabled ? compareDisabledReason : undefined}
                       >
-                        {inCompare ? "В сравнении" : "Сравнить"}
+                        {inCompare ? tr("В сравнении", "Солиштиришда") : tr("Сравнить", "Солиштириш")}
                       </Button>
                       <Button
                         variant="ghost"
@@ -359,7 +373,7 @@ export function FavoritesWatchlistClient() {
                         onClick={() => handleRemoveFavorite(id)}
                         disabled={toggleFavorite.isPending}
                       >
-                        Убрать
+                        {tr("Убрать", "Олиб ташлаш")}
                       </Button>
                     </div>
                   </CardContent>
@@ -370,14 +384,14 @@ export function FavoritesWatchlistClient() {
             {failedIds.map((id) => (
               <Card key={id}>
                 <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
-                  <p className="text-sm text-muted-foreground">Товар #{id} недоступен.</p>
+                  <p className="text-sm text-muted-foreground">{tr(`Товар #${id} недоступен.`, `#${id} товар мавжуд эмас.`)}</p>
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => handleRemoveFavorite(id)}
                     disabled={toggleFavorite.isPending}
                   >
-                    Убрать
+                    {tr("Убрать", "Олиб ташлаш")}
                   </Button>
                 </CardContent>
               </Card>
@@ -386,7 +400,7 @@ export function FavoritesWatchlistClient() {
             {unresolvedIds.map((id) => (
               <Card key={id}>
                 <CardContent className="p-4">
-                  <p className="text-sm text-muted-foreground">Загружаем товар #{id}...</p>
+                  <p className="text-sm text-muted-foreground">{tr(`Загружаем товар #${id}...`, `#${id} товар юкланмоқда...`)}</p>
                 </CardContent>
               </Card>
             ))}

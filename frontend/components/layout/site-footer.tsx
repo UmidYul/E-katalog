@@ -2,34 +2,41 @@
 
 import Link from "next/link";
 import { Send, Youtube } from "lucide-react";
+import { useMemo } from "react";
 
-const footerLinks = {
-  "О сервисе": [
-    { href: "/", label: "О Doxx" },
-    { href: "/contacts", label: "Контакты" },
-    { href: "/status", label: "Статус сервиса" },
-    { href: "/become-seller", label: "Стать продавцом" },
-  ],
-  "Каталог": [
-    { href: "/catalog", label: "Все товары" },
-    { href: "/compare", label: "Сравнение" },
-    { href: "/favorites", label: "Избранное" },
-    { href: "/recently-viewed", label: "История" },
-  ],
-  "Аккаунт": [
-    { href: "/profile", label: "Профиль" },
-    { href: "/login", label: "Войти" },
-    { href: "/register", label: "Регистрация" },
-  ],
-  "Правовая": [
-    { href: "/privacy", label: "Конфиденциальность" },
-    { href: "/terms", label: "Условия" },
-    { href: "/cookies", label: "Cookies" },
-  ],
-};
+import { useT } from "@/components/common/locale-provider";
 
 export function SiteFooter() {
+  const t = useT("footer");
   const year = new Date().getUTCFullYear();
+
+  const footerLinks = useMemo(
+    () => ({
+      [t("aboutTitle")]: [
+        { href: "/", label: t("aboutDoxx") },
+        { href: "/contacts", label: t("contacts") },
+        { href: "/status", label: t("status") },
+        { href: "/become-seller", label: t("becomeSeller") },
+      ],
+      [t("catalogTitle")]: [
+        { href: "/catalog", label: t("allProducts") },
+        { href: "/compare", label: t("compare") },
+        { href: "/favorites", label: t("favorites") },
+        { href: "/recently-viewed", label: t("history") },
+      ],
+      [t("accountTitle")]: [
+        { href: "/profile", label: t("profile") },
+        { href: "/login", label: t("login") },
+        { href: "/register", label: t("register") },
+      ],
+      [t("legalTitle")]: [
+        { href: "/privacy", label: t("privacy") },
+        { href: "/terms", label: t("terms") },
+        { href: "/cookies", label: t("cookies") },
+      ],
+    }),
+    [t]
+  );
 
   return (
     <footer style={{ backgroundColor: "#0D1117", color: "#9BA3B5" }}>
@@ -44,7 +51,7 @@ export function SiteFooter() {
               <span className="font-heading text-xl font-bold text-white">Doxx</span>
             </Link>
             <p className="mt-3 max-w-xs text-sm leading-relaxed" style={{ color: "#5A6478" }}>
-              Агрегатор цен на технику — сравнивайте предложения магазинов в реальном времени.
+              {t("tagline")}
             </p>
           </div>
 
@@ -111,7 +118,7 @@ export function SiteFooter() {
           style={{ borderColor: "rgba(255,255,255,0.08)" }}
         >
           <p className="text-xs" style={{ color: "#5A6478" }}>
-            © {year} Doxx. Все права защищены.
+            {t("rights", { year })}
           </p>
           <div className="flex items-center gap-2">
             {["Visa", "Mastercard", "МИР", "SBP"].map((method) => (

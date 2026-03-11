@@ -6,6 +6,7 @@ import { useEffect, useMemo } from "react";
 import { ProductCard } from "@/components/catalog/product-card";
 import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useLocale } from "@/components/common/locale-provider";
 import { useFavorites, useToggleFavorite } from "@/features/user/use-favorites";
 import { buildPriceAlertSignal, toPositivePriceOrNull } from "@/lib/utils/price-alerts";
 import { COMPARE_LIMIT, useCompareStore } from "@/store/compare.store";
@@ -13,6 +14,7 @@ import { usePriceAlertsStore } from "@/store/priceAlerts.store";
 import type { ProductListItem } from "@/types/domain";
 
 export function CatalogGrid({ loading, items }: { loading: boolean; items: ProductListItem[] }) {
+  const { locale } = useLocale();
   const { data: favorites } = useFavorites();
   const toggle = useToggleFavorite();
   const compareItems = useCompareStore((s) => s.items);
@@ -40,7 +42,12 @@ export function CatalogGrid({ loading, items }: { loading: boolean; items: Produ
   }
 
   if (!items.length) {
-    return <EmptyState title="Товары не найдены" message="Попробуйте изменить фильтры или поисковый запрос." />;
+    return (
+      <EmptyState
+        title={locale === "uz-Cyrl-UZ" ? "Товарлар топилмади" : "Товары не найдены"}
+        message={locale === "uz-Cyrl-UZ" ? "Фильтр ёки қидирув сўровини ўзгартириб кўринг." : "Попробуйте изменить фильтры или поисковый запрос."}
+      />
+    );
   }
 
   const compareSet = new Set(compareItems.map((item) => item.id));
@@ -63,7 +70,15 @@ export function CatalogGrid({ loading, items }: { loading: boolean; items: Produ
         const inCompare = compareSet.has(item.id);
         const categoryMismatch = Boolean(referenceCompareCategory && normalizeCategory(item.category?.name) && normalizeCategory(item.category?.name) !== referenceCompareCategory);
         const compareDisabled = !inCompare && (compareFull || categoryMismatch);
-        const compareDisabledReason = compareFull ? `Лимит: ${COMPARE_LIMIT} товара` : categoryMismatch ? "Можно сравнивать только внутри одной категории" : undefined;
+        const compareDisabledReason = compareFull
+          ? locale === "uz-Cyrl-UZ"
+            ? `Лимит: ${COMPARE_LIMIT} товар`
+            : `Лимит: ${COMPARE_LIMIT} товара`
+          : categoryMismatch
+            ? locale === "uz-Cyrl-UZ"
+              ? "Фақат битта категория ичида солиштириш мумкин"
+              : "Можно сравнивать только внутри одной категории"
+            : undefined;
         const isTracking = favoriteSet.has(item.id);
         const alertMeta = alertMetas[item.id];
         const signal = isTracking && alertMeta?.alerts_enabled ? buildPriceAlertSignal(alertMeta, toPositivePriceOrNull(item.min_price)) : null;

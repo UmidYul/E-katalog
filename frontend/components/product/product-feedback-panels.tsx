@@ -3,6 +3,7 @@
 import { MessageCircleQuestion, Star } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { useLocale } from "@/components/common/locale-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,12 +22,13 @@ import {
   useReportProductReview,
   useVoteProductReview
 } from "@/features/product/use-product-feedback";
+import { formatDateTime as formatLocalizedDateTime } from "@/lib/utils/format";
 import { authStore } from "@/store/auth.store";
 
 const formatDateTime = (value: string) => {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Неизвестно";
-  return new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(date);
+  if (Number.isNaN(date.getTime())) return "-";
+  return formatLocalizedDateTime(date);
 };
 
 const renderStars = (rating: number) =>
@@ -48,6 +50,10 @@ const statusBadgeClass = (status: string) => {
 };
 
 export function ProductReviewsPanel({ productId }: { productId: string }) {
+  const { locale } = useLocale();
+  const isUz = locale === "uz-Cyrl-UZ";
+  const tr = (ru: string, uz: string) => (isUz ? uz : ru);
+
   const PAGE_SIZE = 20;
   const authUserStore = authStore((s) => s.user);
   const [reviewsLimit, setReviewsLimit] = useState(PAGE_SIZE);
@@ -89,11 +95,11 @@ export function ProductReviewsPanel({ productId }: { productId: string }) {
     const normalizedAuthor = author.trim();
     const normalizedComment = comment.trim();
     if (normalizedAuthor.length < 2) {
-      setStatus("Имя должно быть не короче 2 символов.");
+      setStatus(tr("Имя должно быть не короче 2 символов.", "Исм камида 2 белгидан иборат бўлиши керак."));
       return;
     }
     if (normalizedComment.length < 10) {
-      setStatus("Отзыв должен содержать минимум 10 символов.");
+      setStatus(tr("Отзыв должен содержать минимум 10 символов.", "Изоҳ камида 10 белги бўлиши керак."));
       return;
     }
 
@@ -109,31 +115,34 @@ export function ProductReviewsPanel({ productId }: { productId: string }) {
       setCons("");
       setComment("");
       setRating(5);
-      setStatus("Отзыв отправлен на модерацию.");
+      setStatus(tr("Отзыв отправлен на модерацию.", "Изоҳ модерацияга юборилди."));
     } catch (error) {
-      setStatus(normalizeApiError(error, "Не удалось отправить отзыв."));
+      setStatus(normalizeApiError(error, tr("Не удалось отправить отзыв.", "Изоҳни юбориб бўлмади.")));
     }
   };
 
   const onVoteReview = async (reviewId: string, helpful: boolean) => {
     try {
       await voteReview.mutateAsync({ reviewId, helpful });
-      setStatus(helpful ? "Голос за полезность учтён." : "Отметка «не полезно» учтена.");
+      setStatus(helpful ? tr("Голос за полезность учтён.", "Фойдали деб овоз қабул қилинди.") : tr("Отметка «не полезно» учтена.", "«Фойдали эмас» белгиси қабул қилинди."));
     } catch (error) {
-      setStatus(normalizeApiError(error, "Не удалось отправить голос."));
+      setStatus(normalizeApiError(error, tr("Не удалось отправить голос.", "Овоз юбориб бўлмади.")));
     }
   };
 
   const onReportReview = async (reviewId: string) => {
-    const reason = window.prompt("Причина жалобы на отзыв (минимум 3 символа):", "Нарушение правил") ?? "";
+    const reason = window.prompt(
+      tr("Причина жалобы на отзыв (минимум 3 символа):", "Изоҳга шикоят сабаби (камида 3 белги):"),
+      tr("Нарушение правил", "Қоидалар бузилиши")
+    ) ?? "";
     if (!reason.trim()) return;
     setReportedReviewIds((prev) => ({ ...prev, [reviewId]: true }));
-    setStatus("Жалоба на отзыв отправлена.");
+    setStatus(tr("Жалоба на отзыв отправлена.", "Изоҳга шикоят юборилди."));
     try {
       await reportReview.mutateAsync({ reviewId, reason });
     } catch (error) {
       setReportedReviewIds((prev) => ({ ...prev, [reviewId]: false }));
-      setStatus(normalizeApiError(error, "Не удалось отправить жалобу."));
+      setStatus(normalizeApiError(error, tr("Не удалось отправить жалобу.", "Шикоятни юбориб бўлмади.")));
     }
   };
 
@@ -141,9 +150,9 @@ export function ProductReviewsPanel({ productId }: { productId: string }) {
     <div className="space-y-4">
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Отзывы пользователей</CardTitle>
+          <CardTitle>{tr("Отзывы пользователей", "Фойдаланувчи изоҳлари")}</CardTitle>
           <div className="flex items-center gap-2">
-            <Badge>{summary.count} всего</Badge>
+            <Badge>{tr(`${summary.count} всего`, `${summary.count} жами`)}</Badge>
             <div className="flex items-center gap-1">
               {renderStars(Math.round(summary.avg))}
               <span className="text-sm font-medium">{summary.count ? summary.avg.toFixed(1) : "0.0"}</span>
@@ -153,11 +162,11 @@ export function ProductReviewsPanel({ productId }: { productId: string }) {
         <CardContent className="space-y-3">
           <div className="grid gap-3 md:grid-cols-2">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Ваше имя</label>
-              <Input value={author} onChange={(event) => setAuthor(event.target.value)} placeholder="Имя" />
+              <label className="text-xs font-medium text-muted-foreground">{tr("Ваше имя", "Исмингиз")}</label>
+              <Input value={author} onChange={(event) => setAuthor(event.target.value)} placeholder={tr("Имя", "Исм")} />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Оценка (1-5)</label>
+              <label className="text-xs font-medium text-muted-foreground">{tr("Оценка (1-5)", "Баҳо (1-5)")}</label>
               <Input
                 type="number"
                 min={1}
@@ -169,36 +178,36 @@ export function ProductReviewsPanel({ productId }: { productId: string }) {
           </div>
           <div className="grid gap-3 md:grid-cols-2">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Плюсы</label>
-              <Input value={pros} onChange={(event) => setPros(event.target.value)} placeholder="Что понравилось" />
+              <label className="text-xs font-medium text-muted-foreground">{tr("Плюсы", "Афзалликлар")}</label>
+              <Input value={pros} onChange={(event) => setPros(event.target.value)} placeholder={tr("Что понравилось", "Нима ёқди")} />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Минусы</label>
-              <Input value={cons} onChange={(event) => setCons(event.target.value)} placeholder="Что можно улучшить" />
+              <label className="text-xs font-medium text-muted-foreground">{tr("Минусы", "Камчиликлар")}</label>
+              <Input value={cons} onChange={(event) => setCons(event.target.value)} placeholder={tr("Что можно улучшить", "Нимани яхшилаш мумкин")} />
             </div>
           </div>
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Отзыв</label>
-            <Textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Поделитесь опытом использования этого товара..." />
+            <label className="text-xs font-medium text-muted-foreground">{tr("Отзыв", "Изоҳ")}</label>
+            <Textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder={tr("Поделитесь опытом использования этого товара...", "Бу товардан фойдаланиш тажрибангиз билан ўртоқлашинг...")} />
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs text-muted-foreground">Отзывы синхронизируются с сервером и публикуются после модерации.</p>
+            <p className="text-xs text-muted-foreground">{tr("Отзывы синхронизируются с сервером и публикуются после модерации.", "Изоҳлар сервер билан синхронланади ва модерациядан кейин чиқарилади.")}</p>
             <Button size="sm" onClick={submitReview} disabled={createReview.isPending}>
-              {createReview.isPending ? "Отправляем..." : "Отправить отзыв"}
+              {createReview.isPending ? tr("Отправляем...", "Юборилмоқда...") : tr("Отправить отзыв", "Изоҳ юбориш")}
             </Button>
           </div>
           {status ? <p className="text-xs text-accent">{status}</p> : null}
-          {reviewsQuery.isError ? <p className="text-xs text-destructive">Не удалось загрузить отзывы.</p> : null}
+          {reviewsQuery.isError ? <p className="text-xs text-destructive">{tr("Не удалось загрузить отзывы.", "Изоҳларни юклаб бўлмади.")}</p> : null}
         </CardContent>
       </Card>
 
       {reviewsQuery.isLoading ? (
         <Card className="border-dashed">
-          <CardContent className="py-6 text-sm text-muted-foreground">Загрузка отзывов...</CardContent>
+          <CardContent className="py-6 text-sm text-muted-foreground">{tr("Загрузка отзывов...", "Изоҳлар юкланмоқда...")}</CardContent>
         </Card>
       ) : reviews.length === 0 ? (
         <Card className="border-dashed">
-          <CardContent className="py-6 text-sm text-muted-foreground">Пока нет отзывов. Станьте первым.</CardContent>
+          <CardContent className="py-6 text-sm text-muted-foreground">{tr("Пока нет отзывов. Станьте первым.", "Ҳозирча изоҳлар йўқ. Биринчи бўлиб ёзинг.")}</CardContent>
         </Card>
       ) : (
         <div className="space-y-3">
@@ -209,7 +218,7 @@ export function ProductReviewsPanel({ productId }: { productId: string }) {
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-semibold">{review.author}</p>
                     <div className="flex items-center gap-1">{renderStars(review.rating)}</div>
-                    {review.is_verified_purchase ? <Badge className="border-accent/30 bg-accent/10 text-accent">Покупка подтверждена</Badge> : null}
+                    {review.is_verified_purchase ? <Badge className="border-accent/30 bg-accent/10 text-accent">{tr("Покупка подтверждена", "Харид тасдиқланган")}</Badge> : null}
                     <Badge className={statusBadgeClass(review.status)}>{review.status}</Badge>
                   </div>
                   <p className="text-xs text-muted-foreground">{formatDateTime(review.created_at)}</p>
@@ -217,10 +226,10 @@ export function ProductReviewsPanel({ productId }: { productId: string }) {
                 <p className="text-sm">{review.comment}</p>
                 <div className="flex flex-wrap items-center gap-2">
                   <Button size="sm" variant="outline" onClick={() => onVoteReview(review.id, true)} disabled={voteReview.isPending}>
-                    Полезно ({review.helpful_votes ?? 0})
+                    {tr("Полезно", "Фойдали")} ({review.helpful_votes ?? 0})
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => onVoteReview(review.id, false)} disabled={voteReview.isPending}>
-                    Не полезно ({review.not_helpful_votes ?? 0})
+                    {tr("Не полезно", "Фойдали эмас")} ({review.not_helpful_votes ?? 0})
                   </Button>
                   <Button
                     size="sm"
@@ -228,19 +237,19 @@ export function ProductReviewsPanel({ productId }: { productId: string }) {
                     onClick={() => onReportReview(review.id)}
                     disabled={reportReview.isPending || Boolean(reportedReviewIds[review.id])}
                   >
-                    {reportedReviewIds[review.id] ? "Жалоба отправлена" : "Пожаловаться"}
+                    {reportedReviewIds[review.id] ? tr("Жалоба отправлена", "Шикоят юборилди") : tr("Пожаловаться", "Шикоят қилиш")}
                   </Button>
                 </div>
                 {review.pros || review.cons ? (
                   <div className="grid gap-2 md:grid-cols-2">
                     {review.pros ? (
                       <p className="rounded-lg bg-success/10 px-3 py-2 text-xs text-success">
-                        <strong>Плюсы:</strong> {review.pros}
+                        <strong>{tr("Плюсы", "Афзалликлар")}:</strong> {review.pros}
                       </p>
                     ) : null}
                     {review.cons ? (
                       <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                        <strong>Минусы:</strong> {review.cons}
+                        <strong>{tr("Минусы", "Камчиликлар")}:</strong> {review.cons}
                       </p>
                     ) : null}
                   </div>
@@ -253,7 +262,7 @@ export function ProductReviewsPanel({ productId }: { productId: string }) {
       {reviews.length > 0 && hasMoreReviews ? (
         <div className="flex justify-center">
           <Button size="sm" variant="outline" onClick={() => setReviewsLimit((prev) => prev + PAGE_SIZE)} disabled={reviewsQuery.isFetching}>
-            {reviewsQuery.isFetching ? "Загрузка..." : "Загрузить ещё отзывы"}
+            {reviewsQuery.isFetching ? tr("Загрузка...", "Юкланмоқда...") : tr("Загрузить ещё отзывы", "Яна изоҳларни юклаш")}
           </Button>
         </div>
       ) : null}
@@ -262,6 +271,10 @@ export function ProductReviewsPanel({ productId }: { productId: string }) {
 }
 
 export function ProductQuestionsPanel({ productId }: { productId: string }) {
+  const { locale } = useLocale();
+  const isUz = locale === "uz-Cyrl-UZ";
+  const tr = (ru: string, uz: string) => (isUz ? uz : ru);
+
   const PAGE_SIZE = 20;
   const authUserStore = authStore((s) => s.user);
   const me = useAuthMe();
@@ -286,7 +299,7 @@ export function ProductQuestionsPanel({ productId }: { productId: string }) {
   const roleFromMe = normalizeRole((me.data as { role?: string } | undefined)?.role);
   const effectiveRole = roleFromStore || roleFromMe;
   const isStaff = effectiveRole === "admin" || effectiveRole === "moderator" || effectiveRole === "seller_support";
-  const staffDisplayName = authUser?.full_name || (me.data as { full_name?: string } | undefined)?.full_name || "Сотрудник";
+  const staffDisplayName = authUser?.full_name || (me.data as { full_name?: string } | undefined)?.full_name || tr("Сотрудник", "Ходим");
 
   const [author, setAuthor] = useState("");
   const [questionText, setQuestionText] = useState("");
@@ -305,11 +318,11 @@ export function ProductQuestionsPanel({ productId }: { productId: string }) {
     const normalizedAuthor = author.trim();
     const normalizedQuestion = questionText.trim();
     if (normalizedAuthor.length < 2) {
-      setStatus("Имя должно быть не короче 2 символов.");
+      setStatus(tr("Имя должно быть не короче 2 символов.", "Исм камида 2 белгидан иборат бўлиши керак."));
       return;
     }
     if (normalizedQuestion.length < 8) {
-      setStatus("Вопрос должен содержать минимум 8 символов.");
+      setStatus(tr("Вопрос должен содержать минимум 8 символов.", "Савол камида 8 белгидан иборат бўлиши керак."));
       return;
     }
 
@@ -319,22 +332,22 @@ export function ProductQuestionsPanel({ productId }: { productId: string }) {
         question: normalizedQuestion
       });
       setQuestionText("");
-      setStatus("Вопрос отправлен на модерацию.");
+      setStatus(tr("Вопрос отправлен на модерацию.", "Савол модерацияга юборилди."));
     } catch (error) {
-      setStatus(normalizeApiError(error, "Не удалось отправить вопрос."));
+      setStatus(normalizeApiError(error, tr("Не удалось отправить вопрос.", "Саволни юбориб бўлмади.")));
     }
   };
 
   const onSubmitAnswer = async (questionId: string) => {
     if (!isStaff) {
-      setStatus("Только сотрудники могут публиковать ответы.");
+      setStatus(tr("Только сотрудники могут публиковать ответы.", "Фақат ходимлар жавоб жойлаши мумкин."));
       return;
     }
 
     const draft = answerDrafts[questionId];
     const normalizedText = draft?.text?.trim() ?? "";
     if (normalizedText.length < 2) {
-      setStatus("Ответ должен быть не короче 2 символов.");
+      setStatus(tr("Ответ должен быть не короче 2 символов.", "Жавоб камида 2 белгидан иборат бўлиши керак."));
       return;
     }
 
@@ -345,35 +358,38 @@ export function ProductQuestionsPanel({ productId }: { productId: string }) {
         is_official: Boolean(draft?.isOfficial)
       });
       setAnswerDrafts((prev) => ({ ...prev, [questionId]: { text: "", isOfficial: false } }));
-      setStatus("Ответ опубликован.");
+      setStatus(tr("Ответ опубликован.", "Жавоб чоп этилди."));
     } catch (error) {
-      setStatus(normalizeApiError(error, "Не удалось отправить ответ."));
+      setStatus(normalizeApiError(error, tr("Не удалось отправить ответ.", "Жавобни юбориб бўлмади.")));
     }
   };
 
   const onReportQuestion = async (questionId: string) => {
-    const reason = window.prompt("Причина жалобы на вопрос (минимум 3 символа):", "Нарушение правил") ?? "";
+    const reason = window.prompt(
+      tr("Причина жалобы на вопрос (минимум 3 символа):", "Саволга шикоят сабаби (камида 3 белги):"),
+      tr("Нарушение правил", "Қоидалар бузилиши")
+    ) ?? "";
     if (!reason.trim()) return;
     setReportedQuestionIds((prev) => ({ ...prev, [questionId]: true }));
-    setStatus("Жалоба на вопрос отправлена.");
+    setStatus(tr("Жалоба на вопрос отправлена.", "Саволга шикоят юборилди."));
     try {
       await reportQuestion.mutateAsync({ questionId, reason });
     } catch (error) {
       setReportedQuestionIds((prev) => ({ ...prev, [questionId]: false }));
-      setStatus(normalizeApiError(error, "Не удалось отправить жалобу."));
+      setStatus(normalizeApiError(error, tr("Не удалось отправить жалобу.", "Шикоятни юбориб бўлмади.")));
     }
   };
 
   const onTogglePinAnswer = async (answerId: string, pinned: boolean) => {
     if (!isStaff) {
-      setStatus("Только сотрудники могут закреплять ответы.");
+      setStatus(tr("Только сотрудники могут закреплять ответы.", "Фақат ходимлар жавобни мустаҳкамлаши мумкин."));
       return;
     }
     try {
       await pinAnswer.mutateAsync({ answerId, pinned });
-      setStatus(pinned ? "Ответ закреплён." : "Закрепление ответа снято.");
+      setStatus(pinned ? tr("Ответ закреплён.", "Жавоб мустаҳкамланди.") : tr("Закрепление ответа снято.", "Жавобни мустаҳкамлаш бекор қилинди."));
     } catch (error) {
-      setStatus(normalizeApiError(error, "Не удалось изменить закрепление ответа."));
+      setStatus(normalizeApiError(error, tr("Не удалось изменить закрепление ответа.", "Жавоб мустаҳкамлаш ҳолатини ўзгартириб бўлмади.")));
     }
   };
 
@@ -382,37 +398,41 @@ export function ProductQuestionsPanel({ productId }: { productId: string }) {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-2">
-            <MessageCircleQuestion className="h-4 w-4 text-accent" /> Вопросы и ответы
+            <MessageCircleQuestion className="h-4 w-4 text-accent" /> {tr("Вопросы и ответы", "Савол ва жавоблар")}
           </CardTitle>
-          <Badge>{questions.length} вопросов</Badge>
+          <Badge>{tr(`${questions.length} вопросов`, `${questions.length} та савол`)}</Badge>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Ваше имя</label>
-            <Input value={author} onChange={(event) => setAuthor(event.target.value)} placeholder="Имя" />
+            <label className="text-xs font-medium text-muted-foreground">{tr("Ваше имя", "Исмингиз")}</label>
+            <Input value={author} onChange={(event) => setAuthor(event.target.value)} placeholder={tr("Имя", "Исм")} />
           </div>
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Вопрос</label>
-            <Textarea value={questionText} onChange={(event) => setQuestionText(event.target.value)} placeholder="Спросите о батарее, камере, нагреве, доставке, гарантии..." />
+            <label className="text-xs font-medium text-muted-foreground">{tr("Вопрос", "Савол")}</label>
+            <Textarea
+              value={questionText}
+              onChange={(event) => setQuestionText(event.target.value)}
+              placeholder={tr("Спросите о батарее, камере, нагреве, доставке, гарантии...", "Батарея, камера, қизиш, етказиб бериш, кафолат ҳақида сўранг...")}
+            />
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs text-muted-foreground">Вопросы публикуются после модерации.</p>
+            <p className="text-xs text-muted-foreground">{tr("Вопросы публикуются после модерации.", "Саволлар модерациядан кейин чоп этилади.")}</p>
             <Button size="sm" onClick={submitQuestion} disabled={createQuestion.isPending}>
-              {createQuestion.isPending ? "Отправляем..." : "Отправить вопрос"}
+              {createQuestion.isPending ? tr("Отправляем...", "Юборилмоқда...") : tr("Отправить вопрос", "Савол юбориш")}
             </Button>
           </div>
           {status ? <p className="text-xs text-accent">{status}</p> : null}
-          {questionsQuery.isError ? <p className="text-xs text-destructive">Не удалось загрузить вопросы.</p> : null}
+          {questionsQuery.isError ? <p className="text-xs text-destructive">{tr("Не удалось загрузить вопросы.", "Саволларни юклаб бўлмади.")}</p> : null}
         </CardContent>
       </Card>
 
       {questionsQuery.isLoading ? (
         <Card className="border-dashed">
-          <CardContent className="py-6 text-sm text-muted-foreground">Загрузка вопросов...</CardContent>
+          <CardContent className="py-6 text-sm text-muted-foreground">{tr("Загрузка вопросов...", "Саволлар юкланмоқда...")}</CardContent>
         </Card>
       ) : questions.length === 0 ? (
         <Card className="border-dashed">
-          <CardContent className="py-6 text-sm text-muted-foreground">Пока нет вопросов. Задайте первый.</CardContent>
+          <CardContent className="py-6 text-sm text-muted-foreground">{tr("Пока нет вопросов. Задайте первый.", "Ҳозирча саволлар йўқ. Биринчи саволни беринг.")}</CardContent>
         </Card>
       ) : (
         <div className="space-y-3">
@@ -434,7 +454,7 @@ export function ProductQuestionsPanel({ productId }: { productId: string }) {
                         onClick={() => onReportQuestion(question.id)}
                         disabled={reportQuestion.isPending || Boolean(reportedQuestionIds[question.id])}
                       >
-                        {reportedQuestionIds[question.id] ? "Жалоба отправлена" : "Пожаловаться"}
+                        {reportedQuestionIds[question.id] ? tr("Жалоба отправлена", "Шикоят юборилди") : tr("Пожаловаться", "Шикоят қилиш")}
                       </Button>
                     </div>
                   </div>
@@ -446,8 +466,8 @@ export function ProductQuestionsPanel({ productId }: { productId: string }) {
                         <div key={answer.id} className="rounded-xl border border-border bg-card px-3 py-2">
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="text-xs font-semibold">{answer.author}</p>
-                            {answer.is_official ? <Badge className="h-5 bg-accent text-white">Официальный</Badge> : null}
-                            {answer.is_pinned ? <Badge className="h-5 border-warning/40 bg-warning/15 text-warning">Закреплён</Badge> : null}
+                            {answer.is_official ? <Badge className="h-5 bg-accent text-white">{tr("Официальный", "Расмий")}</Badge> : null}
+                            {answer.is_pinned ? <Badge className="h-5 border-warning/40 bg-warning/15 text-warning">{tr("Закреплён", "Мустаҳкамланган")}</Badge> : null}
                             <Badge className={statusBadgeClass(answer.status)}>{answer.status}</Badge>
                             <p className="text-xs text-muted-foreground">{formatDateTime(answer.created_at)}</p>
                             {isStaff ? (
@@ -457,7 +477,7 @@ export function ProductQuestionsPanel({ productId }: { productId: string }) {
                                 onClick={() => onTogglePinAnswer(answer.id, !Boolean(answer.is_pinned))}
                                 disabled={pinAnswer.isPending}
                               >
-                                {answer.is_pinned ? "Открепить" : "Закрепить"}
+                                {answer.is_pinned ? tr("Открепить", "Ечиш") : tr("Закрепить", "Мустаҳкамлаш")}
                               </Button>
                             ) : null}
                           </div>
@@ -466,20 +486,22 @@ export function ProductQuestionsPanel({ productId }: { productId: string }) {
                       ))}
                     </div>
                   ) : (
-                    <p className="text-xs text-muted-foreground">Пока нет ответов.</p>
+                    <p className="text-xs text-muted-foreground">{tr("Пока нет ответов.", "Ҳозирча жавоблар йўқ.")}</p>
                   )}
 
                   {isStaff ? (
                     <div className="space-y-2 rounded-xl border border-border bg-card p-3">
-                      <p className="text-xs text-muted-foreground">Ответ от {staffDisplayName} ({effectiveRole || "staff"})</p>
+                      <p className="text-xs text-muted-foreground">
+                        {tr("Ответ от", "Жавоб")} {staffDisplayName} ({effectiveRole || tr("staff", "ходим")})
+                      </p>
                       <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
                         <Input
                           value={draft.text}
                           onChange={(event) => setAnswerDrafts((prev) => ({ ...prev, [question.id]: { ...draft, text: event.target.value } }))}
-                          placeholder="Напишите ответ..."
+                          placeholder={tr("Напишите ответ...", "Жавоб ёзинг...")}
                         />
                         <Button size="sm" onClick={() => onSubmitAnswer(question.id)} disabled={createAnswer.isPending}>
-                          {createAnswer.isPending ? "Отправляем..." : "Ответить"}
+                          {createAnswer.isPending ? tr("Отправляем...", "Юборилмоқда...") : tr("Ответить", "Жавоб бериш")}
                         </Button>
                       </div>
                       <div className="flex items-center gap-2">
@@ -487,11 +509,11 @@ export function ProductQuestionsPanel({ productId }: { productId: string }) {
                           checked={draft.isOfficial}
                           onCheckedChange={(checked) => setAnswerDrafts((prev) => ({ ...prev, [question.id]: { ...draft, isOfficial: checked } }))}
                         />
-                        <span className="text-xs text-muted-foreground">Отметить как официальный ответ</span>
+                        <span className="text-xs text-muted-foreground">{tr("Отметить как официальный ответ", "Расмий жавоб деб белгилаш")}</span>
                       </div>
                     </div>
                   ) : (
-                    <p className="text-xs text-muted-foreground">Ответы публикуются только сотрудниками поддержки.</p>
+                    <p className="text-xs text-muted-foreground">{tr("Ответы публикуются только сотрудниками поддержки.", "Жавоблар фақат қўллаб-қувватлаш ходимлари томонидан чоп этилади.")}</p>
                   )}
                 </CardContent>
               </Card>
@@ -502,7 +524,7 @@ export function ProductQuestionsPanel({ productId }: { productId: string }) {
       {questions.length > 0 && hasMoreQuestions ? (
         <div className="flex justify-center">
           <Button size="sm" variant="outline" onClick={() => setQuestionsLimit((prev) => prev + PAGE_SIZE)} disabled={questionsQuery.isFetching}>
-            {questionsQuery.isFetching ? "Загрузка..." : "Загрузить ещё вопросы"}
+            {questionsQuery.isFetching ? tr("Загрузка...", "Юкланмоқда...") : tr("Загрузить ещё вопросы", "Яна саволларни юклаш")}
           </Button>
         </div>
       ) : null}

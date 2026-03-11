@@ -1,21 +1,52 @@
+﻿import type { Locale } from "@/lib/i18n/types";
+
 type FaqItem = {
   question: string;
   answer: string;
 };
 
 const normalize = (value: string) => value.trim();
+const isUz = (locale: Locale) => locale === "uz-Cyrl-UZ";
 
-export function buildCategorySeoParagraphs(topic: string): string[] {
+export function buildCategorySeoParagraphs(topic: string, locale: Locale): string[] {
   const label = normalize(topic);
+
+  if (isUz(locale)) {
+    return [
+      `"${label}" бўлимида турли дўкон таклифларини нарх, мавжудлик ва етказиб бериш шартлари бўйича тез солиштиришингиз мумкин.`,
+      "Ортиқча тўловсиз энг мос вариантни танлаш учун бренд, нарх ва хусусиятлар фильтрларидан фойдаланинг.",
+      "Товар карточкалари мунтазам янгиланади, шунинг учун сиз долзарб нархларни кўриб, қарорни янги маълумотлар асосида қабул қиласиз."
+    ];
+  }
+
   return [
     `В разделе "${label}" вы можете быстро сравнить предложения по цене, наличию и условиям доставки от разных магазинов.`,
-    `Используйте фильтры по брендам, стоимости и характеристикам, чтобы выбрать оптимальный вариант покупки без переплаты.`,
-    `Карточки товаров регулярно обновляются, поэтому вы видите актуальные цены и можете принять решение на основе свежих данных.`
+    "Используйте фильтры по брендам, стоимости и характеристикам, чтобы выбрать оптимальный вариант покупки без переплаты.",
+    "Карточки товаров регулярно обновляются, поэтому вы видите актуальные цены и можете принять решение на основе свежих данных."
   ];
 }
 
-export function buildCategoryFaq(topic: string): FaqItem[] {
+export function buildCategoryFaq(topic: string, locale: Locale): FaqItem[] {
   const label = normalize(topic);
+
+  if (isUz(locale)) {
+    return [
+      {
+        question: `${label} категориясида энг яхши товарни қандай танлаш мумкин?`,
+        answer:
+          "Нарх, хусусият, мавжудлик ва сотувчилар таклифлари сонини солиштиринг, сўнг ўзингиз учун муҳим параметр бўйича сараланг."
+      },
+      {
+        question: "Каталогда нархлар қанчалик тез-тез янгиланади?",
+        answer: "Каталог маълумотлари мунтазам янгиланади, шунинг учун дўконларнинг энг долзарб таклифлари кўрсатилади."
+      },
+      {
+        question: "Товарларни бренд ва нарх бўйича фильтрлаш мумкинми?",
+        answer: "Ҳа, каталогда бренд, нарх диапазони, сотувчи ва бошқа параметрлар бўйича фильтрлар мавжуд."
+      }
+    ];
+  }
+
   return [
     {
       question: `Как выбрать лучший товар в категории ${label}?`,
@@ -35,9 +66,31 @@ export function buildCategoryFaq(topic: string): FaqItem[] {
   ];
 }
 
-export function buildProductFaq(productTitle: string, category?: string | null): FaqItem[] {
+export function buildProductFaq(productTitle: string, category: string | null | undefined, locale: Locale): FaqItem[] {
   const product = normalize(productTitle);
   const categoryLabel = normalize(category ?? "");
+
+  if (isUz(locale)) {
+    const categoryPart = categoryLabel ? ` ${categoryLabel} категориясида` : "";
+
+    return [
+      {
+        question: `${product} ни қаердан манфаатлироқ сотиб олиш мумкин?`,
+        answer:
+          "Товар саҳифасида сотувчилар таклифлари, энг паст нарх ва сотиб олиш шартларини солиштириб, энг яхши вариантни танланг."
+      },
+      {
+        question: `${product} нархининг долзарблигини қандай текшириш мумкин?`,
+        answer: "Таклифлар блоки ва нарх тарихини кўринг: улар жорий қиймат ва вақт бўйича ўзгариш динамикасини кўрсатади."
+      },
+      {
+        question: `Модел танлашда нимага эътибор бериш керак${categoryPart}?`,
+        answer:
+          "Асосий хусусиятлар, фикр-мулоҳазалар ва етказиб бериш шартларини солиштиринг, кейин нарх ва параметрлар балансига кўра таклифни танланг."
+      }
+    ];
+  }
+
   const categoryPart = categoryLabel ? ` в категории ${categoryLabel}` : "";
 
   return [
@@ -73,4 +126,3 @@ export function toFaqJsonLd(faq: FaqItem[]) {
     }))
   };
 }
-

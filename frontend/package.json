@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --experimental-strip-types tests/price-alerts.signal.test.ts tests/price-alerts.store.test.ts tests/admin-analytics.utils.test.ts",
+    "test": "node --test --experimental-strip-types --experimental-specifier-resolution=node tests/price-alerts.signal.test.ts tests/price-alerts.store.test.ts tests/admin-analytics.utils.test.ts tests/i18n.locale.test.ts",
     "openapi:generate": "openapi-typescript $NEXT_PUBLIC_API_ORIGIN/openapi.json -o lib/api/openapi.ts"
   },
   "dependencies": {

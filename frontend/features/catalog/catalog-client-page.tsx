@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { CatalogFilters, type FilterState } from "@/components/catalog/catalog-filters";
 import { CatalogGrid } from "@/components/catalog/catalog-grid";
 import { ErrorState } from "@/components/common/error-state";
+import { useLocale } from "@/components/common/locale-provider";
 import { Button } from "@/components/ui/button";
 import { useCatalogFiltersFromUrl } from "@/features/catalog/use-catalog-filters";
 import { useBrands, useCatalogProducts, useDynamicFilters } from "@/features/catalog/use-catalog-queries";
@@ -19,12 +20,20 @@ const PRICE_MAX = 100_000_000;
 const DEFAULT_SORT: FilterState["sort"] = "popular";
 const EMPTY_FILTERS: FilterState = { sort: DEFAULT_SORT, brands: [], stores: [], sellers: [] };
 const mergeUnique = (values: string[]) => Array.from(new Set(values));
-const sortLabelMap: Record<FilterState["sort"], string> = {
+const sortLabelMapRu: Record<FilterState["sort"], string> = {
   popular: "Популярные",
   relevance: "Релевантные",
   price_asc: "Цена: по возрастанию",
   price_desc: "Цена: по убыванию",
   newest: "Сначала новые",
+};
+
+const sortLabelMapUz: Record<FilterState["sort"], string> = {
+  popular: "Оммабоп",
+  relevance: "Мос",
+  price_asc: "Нарх: ўсиш бўйича",
+  price_desc: "Нарх: камайиш бўйича",
+  newest: "Янгилари аввал",
 };
 
 const toQueryString = (filters: FilterState & { cursor?: string; page?: number }) => {
@@ -81,6 +90,9 @@ export function CatalogClientPage({
   presetQuery?: string;
   pageTitle?: string;
 }) {
+  const { locale } = useLocale();
+  const isUz = locale === "uz-Cyrl-UZ";
+  const sortLabelMap = isUz ? sortLabelMapUz : sortLabelMapRu;
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -199,17 +211,17 @@ export function CatalogClientPage({
 
   const activeFilterChips = useMemo(() => {
     const chips: string[] = [];
-    if (filters.q?.trim()) chips.push(`Поиск: ${filters.q.trim()}`);
-    if (filters.sort !== DEFAULT_SORT) chips.push(`Сортировка: ${sortLabelMap[filters.sort]}`);
-    if (filters.brands.length) chips.push(`Бренды: ${filters.brands.length}`);
-    if (filters.stores.length) chips.push(`Магазины: ${filters.stores.length}`);
-    if (filters.sellers.length) chips.push(`Продавцы: ${filters.sellers.length}`);
-    if (filters.minPrice !== undefined || filters.maxPrice !== undefined) chips.push("Цена: задан диапазон");
-    if (filters.maxDeliveryDays !== undefined) chips.push(`Доставка: до ${filters.maxDeliveryDays} дн.`);
+    if (filters.q?.trim()) chips.push(isUz ? `Қидириш: ${filters.q.trim()}` : `Поиск: ${filters.q.trim()}`);
+    if (filters.sort !== DEFAULT_SORT) chips.push(isUz ? `Саралаш: ${sortLabelMap[filters.sort]}` : `Сортировка: ${sortLabelMap[filters.sort]}`);
+    if (filters.brands.length) chips.push(isUz ? `Брендлар: ${filters.brands.length}` : `Бренды: ${filters.brands.length}`);
+    if (filters.stores.length) chips.push(isUz ? `Дўконлар: ${filters.stores.length}` : `Магазины: ${filters.stores.length}`);
+    if (filters.sellers.length) chips.push(isUz ? `Сотувчилар: ${filters.sellers.length}` : `Продавцы: ${filters.sellers.length}`);
+    if (filters.minPrice !== undefined || filters.maxPrice !== undefined) chips.push(isUz ? "Нарх: диапазон белгиланган" : "Цена: задан диапазон");
+    if (filters.maxDeliveryDays !== undefined) chips.push(isUz ? `Етказиб бериш: ${filters.maxDeliveryDays} кунгача` : `Доставка: до ${filters.maxDeliveryDays} дн.`);
     const attrsCount = Object.values(filters.attrs ?? {}).reduce((acc, values) => acc + values.length, 0);
-    if (attrsCount) chips.push(`Характеристики: ${attrsCount}`);
+    if (attrsCount) chips.push(isUz ? `Хусусиятлар: ${attrsCount}` : `Характеристики: ${attrsCount}`);
     return chips.slice(0, 8);
-  }, [filters]);
+  }, [filters, isUz, sortLabelMap]);
 
   const onFiltersChange = (next: FilterState) => {
     const payload: FilterState = {
@@ -246,7 +258,7 @@ export function CatalogClientPage({
   };
 
   if (products.error) {
-    return <ErrorState title="Не удалось загрузить каталог" message="Проверьте соединение и попробуйте ещё раз." />;
+    return <ErrorState title={isUz ? "Каталогни юклаб бўлмади" : "Не удалось загрузить каталог"} message={isUz ? "Алоқани текшириб, қайта уриниб кўринг." : "Проверьте соединение и попробуйте ещё раз."} />;
   }
 
   return (
@@ -257,8 +269,8 @@ export function CatalogClientPage({
         transition={{ duration: 0.4 }}
         className="space-y-1 px-1"
       >
-        <h1 className="font-heading text-2xl font-bold text-foreground md:text-3xl">{pageTitle ?? "Каталог"}</h1>
-        <p className="text-sm text-muted-foreground">Сравнивайте цены и предложения по проверенным магазинам.</p>
+        <h1 className="font-heading text-2xl font-bold text-foreground md:text-3xl">{pageTitle ?? (isUz ? "Каталог" : "Каталог")}</h1>
+        <p className="text-sm text-muted-foreground">{isUz ? "Текширилган дўконлар бўйича нарх ва таклифларни солиштиринг." : "Сравнивайте цены и предложения по проверенным магазинам."}</p>
       </motion.section>
 
       <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)] lg:items-start">
@@ -277,18 +289,18 @@ export function CatalogClientPage({
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-md bg-secondary px-2.5 py-1 text-xs font-medium text-foreground">
-                  {products.data?.items.length ?? 0} товаров
+                  {products.data?.items.length ?? 0} {isUz ? "товар" : "товаров"}
                 </span>
                 <span className="rounded-md bg-secondary px-2.5 py-1 text-xs font-medium text-foreground">
-                  Стр. {currentPage}
+                  {isUz ? "Бет" : "Стр."} {currentPage}
                 </span>
                 {activeFilterCount ? (
                   <span className="rounded-md bg-accent/10 px-2.5 py-1 text-xs font-bold text-accent">
-                    {activeFilterCount} фильтров
+                    {activeFilterCount} {isUz ? "фильтр" : "фильтров"}
                   </span>
                 ) : null}
                 {products.isFetching && !products.isLoading ? (
-                  <p className="text-xs text-muted-foreground">Обновляем...</p>
+                  <p className="text-xs text-muted-foreground">{isUz ? "Янгиланмоқда..." : "Обновляем..."}</p>
                 ) : null}
               </div>
               <AnimatePresence>
@@ -296,7 +308,7 @@ export function CatalogClientPage({
                   <motion.div initial={{ opacity: 0, scale: 0.85 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.85 }}>
                     <Button variant="ghost" size="sm" disabled={products.isFetching} onClick={clearFilters} className="gap-1.5 text-xs">
                       <X className="h-3 w-3" />
-                      Сбросить фильтры
+                      {isUz ? "Фильтрларни тозалаш" : "Сбросить фильтры"}
                     </Button>
                   </motion.div>
                 )}
@@ -325,7 +337,7 @@ export function CatalogClientPage({
 
           {showPagination ? (
             <div className="flex flex-wrap items-center justify-between gap-3 px-1 py-2">
-              <p className="text-sm text-muted-foreground">Страница {currentPage}</p>
+              <p className="text-sm text-muted-foreground">{isUz ? "Бет" : "Страница"} {currentPage}</p>
               <div className="flex flex-wrap items-center gap-2">
                 <Button
                   variant="outline"
@@ -333,7 +345,7 @@ export function CatalogClientPage({
                   disabled={!canGoPrevPage || products.isFetching}
                   onClick={() => goToPage(currentPage - 1)}
                 >
-                  Назад
+                  {isUz ? "Орқага" : "Назад"}
                 </Button>
                 {pageButtons.map((page) => (
                   <Button
@@ -353,7 +365,7 @@ export function CatalogClientPage({
                   disabled={!hasNextPage || products.isFetching}
                   onClick={() => goToPage(currentPage + 1)}
                 >
-                  Вперёд
+                  {isUz ? "Олдинга" : "Вперёд"}
                 </Button>
               </div>
             </div>

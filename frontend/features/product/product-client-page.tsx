@@ -5,6 +5,7 @@ import { BellRing, Heart, Scale } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
+import { useLocale } from "@/components/common/locale-provider";
 import { Breadcrumbs } from "@/components/common/breadcrumbs";
 import { ErrorState } from "@/components/common/error-state";
 import { PriceAlertBadge } from "@/components/common/price-alert-badge";
@@ -49,6 +50,10 @@ const getProductMinPrice = (offersByStore: Array<{ minimal_price: number }>) => 
 };
 
 export function ProductClientPage({ productId, slug }: { productId: string; slug: string }) {
+  const { locale } = useLocale();
+  const isUz = locale === "uz-Cyrl-UZ";
+  const tr = (ru: string, uz: string) => (isUz ? uz : ru);
+
   const me = useAuthMe();
   const favorites = useFavorites();
   const product = useProduct(productId);
@@ -127,11 +132,11 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
   }, [alertMeta?.target_price]);
 
   if (product.error) {
-    return <ErrorState title="Товар недоступен" message="Этот товар был удален или временно недоступен." />;
+    return <ErrorState title={tr("Товар недоступен", "Товар мавжуд эмас")} message={tr("Этот товар был удален или временно недоступен.", "Бу товар ўчирилган ёки вақтинча мавжуд эмас.")} />;
   }
 
   if (product.isLoading || !product.data) {
-    return <div className="mx-auto max-w-7xl px-4 py-8 text-sm text-muted-foreground">Загружаем карточку товара...</div>;
+    return <div className="mx-auto max-w-7xl px-4 py-8 text-sm text-muted-foreground">{tr("Загружаем карточку товара...", "Товар карточкаси юкланмоқда...")}</div>;
   }
 
   const inCompare = compareItems.some((item) => item.id === product.data.id);
@@ -141,9 +146,9 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
   const categoryMismatch = Boolean(referenceCompareCategory && productCategory && referenceCompareCategory !== productCategory);
   const compareDisabled = !inCompare && (compareFull || categoryMismatch);
   const compareDisabledReason = compareFull
-    ? `Лимит: ${COMPARE_LIMIT} товара`
+    ? tr(`Лимит: ${COMPARE_LIMIT} товара`, `Лимит: ${COMPARE_LIMIT} та товар`)
     : categoryMismatch
-      ? "Сравнение доступно только в рамках одной категории"
+      ? tr("Сравнение доступно только в рамках одной категории", "Солиштириш фақат битта категория доирасида мумкин")
       : undefined;
   const galleryImages = product.data.gallery_images?.length ? product.data.gallery_images : product.data.main_image ? [product.data.main_image] : [];
 
@@ -235,7 +240,13 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
 
   return (
     <div className="mx-auto max-w-7xl space-y-8 px-4 py-8">
-      <Breadcrumbs items={[{ href: "/", label: "Главная" }, { href: "/catalog", label: "Каталог" }, { href: `/product/${slug}`, label: product.data.title }]} />
+      <Breadcrumbs
+        items={[
+          { href: "/", label: tr("Главная", "Бош саҳифа") },
+          { href: "/catalog", label: tr("Каталог", "Каталог") },
+          { href: `/product/${slug}`, label: product.data.title }
+        ]}
+      />
 
       <div className="grid gap-8 lg:grid-cols-2">
         <ProductGallery images={galleryImages} />
@@ -260,9 +271,9 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
 
           {/* Price */}
           <div className="rounded-2xl border border-border bg-card p-4">
-            <p className="text-xs text-muted-foreground">Минимальная цена</p>
+            <p className="text-xs text-muted-foreground">{tr("Минимальная цена", "Энг паст нарх")}</p>
             <p className="mt-1 text-3xl font-bold text-accent">
-              {currentMinPrice != null ? formatPrice(currentMinPrice) : "Нет данных"}
+              {currentMinPrice != null ? formatPrice(currentMinPrice) : tr("Нет данных", "Маълумот йўқ")}
             </p>
           </div>
 
@@ -274,7 +285,7 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
               onClick={handleFavoriteToggle}
             >
               <Heart className={`h-4 w-4 ${isFavorite ? "fill-current" : ""}`} />
-              {isFavorite ? "В избранном" : "В избранное"}
+              {isFavorite ? tr("В избранном", "Сараланганларда") : tr("В избранное", "Сараланганларга")}
             </Button>
             <Button
               className="flex-1 gap-2"
@@ -291,7 +302,7 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
               title={compareDisabled ? compareDisabledReason : undefined}
             >
               <Scale className="h-4 w-4" />
-              {inCompare ? "В сравнении" : "Сравнить"}
+              {inCompare ? tr("В сравнении", "Солиштиришда") : tr("Сравнить", "Солиштириш")}
             </Button>
           </div>
 
@@ -303,7 +314,7 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
           {/* What's new */}
           {product.data.whats_new?.length ? (
             <div className="rounded-2xl border border-border bg-card p-4">
-              <p className="mb-2 text-xs font-bold uppercase tracking-widest text-muted-foreground">Что нового</p>
+              <p className="mb-2 text-xs font-bold uppercase tracking-widest text-muted-foreground">{tr("Что нового", "Янги жиҳатлар")}</p>
               <ul className="space-y-1.5 text-sm">
                 {product.data.whats_new.map((item) => (
                   <li key={item} className="flex items-start gap-2">
@@ -327,29 +338,29 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
       >
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <BellRing className="h-4 w-4 text-accent" />
-          <h2 className="font-heading text-lg font-bold">Отслеживание цены</h2>
+          <h2 className="font-heading text-lg font-bold">{tr("Отслеживание цены", "Нарх кузатуви")}</h2>
           <PriceAlertBadge signal={alertSignal} />
         </div>
 
         {!me.data?.id ? (
           <p className="text-sm text-muted-foreground">
-            Чтобы включить отслеживание цены,{" "}
+            {tr("Чтобы включить отслеживание цены,", "Нарх кузатувини ёқиш учун")}{" "}
             <Link href="/login" className="font-semibold text-accent hover:underline">
-              войдите в аккаунт
+              {tr("войдите в аккаунт", "аккаунтга киринг")}
             </Link>
             .
           </p>
         ) : !isFavorite ? (
           <p className="text-sm text-muted-foreground">
-            Добавьте товар в избранное, чтобы отслеживать снижение цены и достижение вашей цели.
+            {tr("Добавьте товар в избранное, чтобы отслеживать снижение цены и достижение вашей цели.", "Нарх пасайиши ва мақсадга етишни кузатиш учун товарни сараланганларга қўшинг.")}
           </p>
         ) : (
           <div className="space-y-4">
             <div className="grid gap-3 md:grid-cols-3">
               {[
-                { label: "Текущая цена", value: currentMinPrice != null ? formatPrice(currentMinPrice) : "Нет данных" },
-                { label: "Базовая цена", value: alertMeta?.baseline_price != null ? formatPrice(alertMeta.baseline_price) : "Не задана" },
-                { label: "Целевая цена", value: alertMeta?.target_price != null ? formatPrice(alertMeta.target_price) : "Не задана" },
+                { label: tr("Текущая цена", "Жорий нарх"), value: currentMinPrice != null ? formatPrice(currentMinPrice) : tr("Нет данных", "Маълумот йўқ") },
+                { label: tr("Базовая цена", "Базавий нарх"), value: alertMeta?.baseline_price != null ? formatPrice(alertMeta.baseline_price) : tr("Не задана", "Белгиланмаган") },
+                { label: tr("Целевая цена", "Мақсад нархи"), value: alertMeta?.target_price != null ? formatPrice(alertMeta.target_price) : tr("Не задана", "Белгиланмаган") },
               ].map((stat) => (
                 <div key={stat.label} className="rounded-xl border border-border bg-background p-3">
                   <p className="text-xs text-muted-foreground">{stat.label}</p>
@@ -365,24 +376,24 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
                 onClick={handleToggleAlertsEnabled}
                 className={alertMeta?.alerts_enabled ? "bg-accent text-white hover:bg-accent/90" : ""}
               >
-                {alertMeta?.alerts_enabled ? "Алерты включены" : "Включить алерты"}
+                {alertMeta?.alerts_enabled ? tr("Алерты включены", "Алертлар ёқилган") : tr("Включить алерты", "Алертларни ёқиш")}
               </Button>
               <Button variant="outline" size="sm" onClick={handleResetBaseline}>
-                Обновить базу
+                {tr("Обновить базу", "Базани янгилаш")}
               </Button>
             </div>
 
             <div className="flex flex-wrap items-end gap-2">
               <div className="w-full max-w-xs space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">Целевая цена (UZS)</label>
+                <label className="text-xs font-medium text-muted-foreground">{tr("Целевая цена (UZS)", "Мақсад нархи (UZS)")}</label>
                 <Input
                   value={targetPriceInput}
                   onChange={(e) => setTargetPriceInput(e.target.value)}
-                  placeholder="Например: 12 000 000"
+                  placeholder={tr("Например: 12 000 000", "Масалан: 12 000 000")}
                 />
               </div>
               <Button size="sm" onClick={handleTargetSave}>
-                Сохранить цель
+                {tr("Сохранить цель", "Мақсадни сақлаш")}
               </Button>
             </div>
           </div>
@@ -392,11 +403,11 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
       {/* Tabs */}
       <Tabs defaultValue="offers" className="space-y-4">
         <TabsList className="flex w-full flex-wrap gap-1 rounded-xl border border-border bg-card p-1">
-          <TabsTrigger value="offers">Предложения</TabsTrigger>
-          <TabsTrigger value="history">История цены</TabsTrigger>
-          <TabsTrigger value="specs">Характеристики</TabsTrigger>
-          <TabsTrigger value="reviews">Отзывы</TabsTrigger>
-          <TabsTrigger value="qa">Вопросы и ответы</TabsTrigger>
+          <TabsTrigger value="offers">{tr("Предложения", "Таклифлар")}</TabsTrigger>
+          <TabsTrigger value="history">{tr("История цены", "Нарх тарихи")}</TabsTrigger>
+          <TabsTrigger value="specs">{tr("Характеристики", "Хусусиятлар")}</TabsTrigger>
+          <TabsTrigger value="reviews">{tr("Отзывы", "Изоҳлар")}</TabsTrigger>
+          <TabsTrigger value="qa">{tr("Вопросы и ответы", "Савол ва жавоблар")}</TabsTrigger>
         </TabsList>
         <TabsContent value="offers">
           <OfferTable offersByStore={product.data.offers_by_store ?? []} />

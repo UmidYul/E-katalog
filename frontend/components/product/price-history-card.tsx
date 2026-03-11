@@ -4,11 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
+import { useLocale } from "@/components/common/locale-provider";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { catalogKeys, useProductPriceHistory } from "@/features/catalog/use-catalog-queries";
 import { catalogApi } from "@/lib/api/openapi-client";
-import { formatPrice } from "@/lib/utils/format";
+import { formatDateTime, formatNumber, formatPrice } from "@/lib/utils/format";
 
 const PERIODS = [30, 90, 180] as const;
 type Period = (typeof PERIODS)[number];
@@ -20,28 +21,22 @@ type HistoryPoint = {
   max: number;
 };
 
-const dayFormatter = new Intl.DateTimeFormat("ru-RU", {
-  month: "short",
-  day: "numeric",
-  timeZone: "UTC",
-});
-const compactNumberFormatter = new Intl.NumberFormat("ru-RU", {
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
-
-const formatDay = (value: string) => {
+const formatDay = (value: string, locale: "uz-Cyrl-UZ" | "ru-RU") => {
   const date = new Date(`${value}T00:00:00Z`);
   if (Number.isNaN(date.getTime())) return value;
-  return dayFormatter.format(date);
+  return formatDateTime(date, locale, { month: "short", day: "numeric", timeZone: "UTC" });
 };
 
-const formatCompactNumber = (value: number) => {
+const formatCompactNumber = (value: number, locale: "uz-Cyrl-UZ" | "ru-RU") => {
   if (!Number.isFinite(value)) return "-";
-  return compactNumberFormatter.format(value);
+  return formatNumber(value, locale, { notation: "compact", maximumFractionDigits: 1 });
 };
 
 export function PriceHistoryCard({ productId }: { productId: string }) {
+  const { locale } = useLocale();
+  const isUz = locale === "uz-Cyrl-UZ";
+  const tr = (ru: string, uz: string) => (isUz ? uz : ru);
+
   const [period, setPeriod] = useState<Period>(DEFAULT_PERIOD);
   const queryClient = useQueryClient();
   const history = useProductPriceHistory(productId, period);
@@ -100,22 +95,22 @@ export function PriceHistoryCard({ productId }: { productId: string }) {
   return (
     <Card className="rounded-xl border-border">
       <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <CardTitle className="font-heading text-xl font-bold">История цены</CardTitle>
+        <CardTitle className="font-heading text-xl font-bold">{tr("История цены", "Нарх тарихи")}</CardTitle>
         <div className="flex gap-2">
           {PERIODS.map((item) => (
             <Button key={item} size="sm" variant={period === item ? "default" : "outline"} onClick={() => setPeriod(item)}>
-              {item}d
+              {item}{tr("д", "кун")}
             </Button>
           ))}
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        {history.error ? <p className="text-sm text-destructive">Не удалось загрузить историю цен.</p> : null}
+        {history.error ? <p className="text-sm text-destructive">{tr("Не удалось загрузить историю цен.", "Нарх тарихини юклаб бўлмади.")}</p> : null}
 
         {isInitialLoading ? <div className="h-64 animate-pulse rounded-xl border border-border/80 bg-muted/20" /> : null}
 
         {!isInitialLoading && !history.error && !chart ? (
-          <p className="text-sm text-muted-foreground">История пока пустая. Данные появятся после нескольких обновлений цен.</p>
+          <p className="text-sm text-muted-foreground">{tr("История пока пустая. Данные появятся после нескольких обновлений цен.", "Ҳозирча тарих бўш. Маълумотлар нарх бир неча марта янгилангач пайдо бўлади.")}</p>
         ) : null}
 
         {chart ? (
@@ -123,7 +118,7 @@ export function PriceHistoryCard({ productId }: { productId: string }) {
             <div className="relative h-64 overflow-hidden rounded-xl border border-border/80 bg-gradient-to-b from-background to-muted/20 px-2 py-3">
               {isBackgroundLoading ? (
                 <div className="absolute right-3 top-3 z-10 rounded-full border border-border bg-card px-2 py-0.5 text-[11px] text-muted-foreground">
-                  Обновляем...
+                  {tr("Обновляем...", "Янгиланмоқда...")}
                 </div>
               ) : null}
 
@@ -132,7 +127,7 @@ export function PriceHistoryCard({ productId }: { productId: string }) {
                   <CartesianGrid strokeDasharray="4 4" stroke="hsl(var(--border))" vertical={false} />
                   <XAxis
                     dataKey="date"
-                    tickFormatter={formatDay}
+                    tickFormatter={(value) => formatDay(String(value), locale)}
                     axisLine={false}
                     tickLine={false}
                     minTickGap={24}
@@ -140,7 +135,7 @@ export function PriceHistoryCard({ productId }: { productId: string }) {
                   />
                   <YAxis
                     domain={yDomain ?? ["auto", "auto"]}
-                    tickFormatter={(value) => formatCompactNumber(Number(value))}
+                    tickFormatter={(value) => formatCompactNumber(Number(value), locale)}
                     axisLine={false}
                     tickLine={false}
                     width={72}
@@ -148,7 +143,7 @@ export function PriceHistoryCard({ productId }: { productId: string }) {
                   />
                   <Tooltip
                     cursor={{ stroke: "hsl(var(--border))", strokeDasharray: "4 4" }}
-                    labelFormatter={(label) => formatDay(String(label))}
+                    labelFormatter={(label) => formatDay(String(label), locale)}
                     contentStyle={{
                       borderRadius: 12,
                       border: "1px solid hsl(var(--border))",
@@ -160,27 +155,27 @@ export function PriceHistoryCard({ productId }: { productId: string }) {
                     }}
                   />
                   <Legend verticalAlign="top" height={26} iconType="circle" wrapperStyle={{ fontSize: 12, color: "hsl(var(--muted-foreground))" }} />
-                  <Line type="monotone" dataKey="max" name="Максимум" stroke="hsl(var(--accent))" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
-                  <Line type="monotone" dataKey="min" name="Минимум" stroke="hsl(var(--success))" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
+                  <Line type="monotone" dataKey="max" name={tr("Максимум", "Максимум")} stroke="hsl(var(--accent))" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
+                  <Line type="monotone" dataKey="min" name={tr("Минимум", "Минимум")} stroke="hsl(var(--success))" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
 
             <div className="grid gap-2 md:grid-cols-4">
               <div className="rounded-xl border border-border px-3 py-2">
-                <p className="text-xs text-muted-foreground">Минимум ({period}д)</p>
+                <p className="text-xs text-muted-foreground">{tr("Минимум", "Минимум")} ({period}{tr("д", "кун")})</p>
                 <p className="text-sm font-semibold">{formatPrice(chart.minValue)}</p>
               </div>
               <div className="rounded-xl border border-border px-3 py-2">
-                <p className="text-xs text-muted-foreground">Максимум ({period}д)</p>
+                <p className="text-xs text-muted-foreground">{tr("Максимум", "Максимум")} ({period}{tr("д", "кун")})</p>
                 <p className="text-sm font-semibold">{formatPrice(chart.maxValue)}</p>
               </div>
               <div className="rounded-xl border border-border px-3 py-2">
-                <p className="text-xs text-muted-foreground">Последний минимум</p>
+                <p className="text-xs text-muted-foreground">{tr("Последний минимум", "Охирги минимум")}</p>
                 <p className="text-sm font-semibold">{chart.lastMin != null ? formatPrice(chart.lastMin) : "-"}</p>
               </div>
               <div className="rounded-xl border border-border px-3 py-2">
-                <p className="text-xs text-muted-foreground">Последний максимум</p>
+                <p className="text-xs text-muted-foreground">{tr("Последний максимум", "Охирги максимум")}</p>
                 <p className="text-sm font-semibold">{chart.lastMax != null ? formatPrice(chart.lastMax) : "-"}</p>
               </div>
             </div>

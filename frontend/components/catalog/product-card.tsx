@@ -6,6 +6,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
 
+import { useLocale } from "@/components/common/locale-provider";
 import { PriceAlertBadge } from "@/components/common/price-alert-badge";
 import { cn } from "@/lib/utils/cn";
 import { formatPrice } from "@/lib/utils/format";
@@ -40,6 +41,7 @@ export function ProductCard({
   compareDisabledReason,
   priceAlertSignal,
 }: ProductCardProps) {
+  const { locale } = useLocale();
   const productHref = `/product/${product.id}-${slugify(product.normalized_title)}`;
   const [heartBurst, setHeartBurst] = useState(false);
 
@@ -53,7 +55,13 @@ export function ProductCard({
   const displayRating = 4;
   const reviewCount = Math.max(12, Math.round((product.score ?? 0.4) * 180));
   const storeCount = product.store_count ?? 0;
-  const storeLabel = storeCount === 1 ? "магазин" : storeCount < 5 ? "магазина" : "магазинов";
+  const storeLabel = locale === "uz-Cyrl-UZ"
+    ? "дўкон"
+    : storeCount === 1
+      ? "магазин"
+      : storeCount < 5
+        ? "магазина"
+        : "магазинов";
 
   return (
     <motion.article
@@ -84,7 +92,7 @@ export function ProductCard({
           {/* Badges — top left */}
           <div className="absolute left-2 top-2 flex flex-col gap-1">
             {product.is_new && (
-              <span className="rounded-sm bg-accent px-1.5 py-0.5 text-[10px] font-bold text-white">Н</span>
+              <span className="rounded-sm bg-accent px-1.5 py-0.5 text-[10px] font-bold text-white">{locale === "uz-Cyrl-UZ" ? "Я" : "Н"}</span>
             )}
             {(product.discount_pct ?? 0) > 0 && (
               <span className="rounded-sm bg-success px-1.5 py-0.5 text-[10px] font-bold text-white">
@@ -107,7 +115,7 @@ export function ProductCard({
                   ? "bg-danger text-white"
                   : "bg-white text-muted-foreground hover:bg-danger/10 hover:text-danger"
               )}
-              aria-label={favorite ? "Удалить из избранного" : "Добавить в избранное"}
+              aria-label={favorite ? (locale === "uz-Cyrl-UZ" ? "Сараланганлардан олиб ташлаш" : "Удалить из избранного") : (locale === "uz-Cyrl-UZ" ? "Сараланганларга қўшиш" : "Добавить в избранное")}
             >
               <Heart className={cn("h-4 w-4", favorite && "fill-current")} />
             </motion.button>
@@ -125,7 +133,7 @@ export function ProductCard({
                   : "bg-white text-muted-foreground hover:bg-accent/10 hover:text-accent",
                 compareDisabled && "cursor-not-allowed opacity-50"
               )}
-              aria-label={compared ? "Убрать из сравнения" : "Добавить к сравнению"}
+              aria-label={compared ? (locale === "uz-Cyrl-UZ" ? "Солиштиришдан олиб ташлаш" : "Убрать из сравнения") : (locale === "uz-Cyrl-UZ" ? "Солиштиришга қўшиш" : "Добавить к сравнению")}
             >
               <Scale className="h-4 w-4" />
             </button>
@@ -134,7 +142,7 @@ export function ProductCard({
             <Link
               href={productHref}
               className="flex h-8 w-8 items-center justify-center rounded-md bg-white shadow-sm text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
-              aria-label="Быстрый просмотр"
+              aria-label={locale === "uz-Cyrl-UZ" ? "Тезкор кўриш" : "Быстрый просмотр"}
             >
               <Eye className="h-4 w-4" />
             </Link>
@@ -172,13 +180,13 @@ export function ProductCard({
 
           {/* Price + stores */}
           <div className="mt-auto">
-            <p className="text-xs text-muted-foreground">от</p>
+            <p className="text-xs text-muted-foreground">{locale === "uz-Cyrl-UZ" ? "дан" : "от"}</p>
             <p className="text-lg font-bold leading-tight text-accent">
               {formatPrice(product.min_price ?? 0)}
             </p>
             {storeCount > 0 && (
               <p className="mt-0.5 text-xs text-muted-foreground">
-                в {storeCount} {storeLabel}
+                {locale === "uz-Cyrl-UZ" ? `${storeCount} ${storeLabel}да` : `в ${storeCount} ${storeLabel}`}
               </p>
             )}
           </div>
@@ -187,5 +195,4 @@ export function ProductCard({
     </motion.article>
   );
 }
-
 

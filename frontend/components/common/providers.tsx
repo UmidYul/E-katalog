@@ -4,12 +4,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 import { ReactNode, useEffect, useState } from "react";
 
+import { LocaleProvider } from "@/components/common/locale-provider";
 import { useUserPriceAlerts } from "@/features/user/use-price-alerts";
 import { Toaster } from "@/components/ui/toaster";
 import { useCompareStore } from "@/store/compare.store";
 import { usePriceAlertsStore } from "@/store/priceAlerts.store";
 import { useProfileStore } from "@/store/profile.store";
 import { useRecentlyViewedStore } from "@/store/recentlyViewed.store";
+import type { Locale } from "@/lib/i18n/types";
 
 function PersistStoresHydrator() {
   useEffect(() => {
@@ -34,7 +36,7 @@ function PriceAlertsServerHydrator() {
   return null;
 }
 
-export function Providers({ children }: { children: ReactNode }) {
+export function Providers({ children, initialLocale }: { children: ReactNode; initialLocale: Locale }) {
   const [queryClient] = useState(
     () =>
       new QueryClient({
@@ -53,14 +55,16 @@ export function Providers({ children }: { children: ReactNode }) {
   );
 
   return (
-    <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
-      <QueryClientProvider client={queryClient}>
-        <PersistStoresHydrator />
-        <PriceAlertsServerHydrator />
-        {children}
-        <Toaster />
-      </QueryClientProvider>
-    </ThemeProvider>
+    <LocaleProvider initialLocale={initialLocale}>
+      <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
+        <QueryClientProvider client={queryClient}>
+          <PersistStoresHydrator />
+          <PriceAlertsServerHydrator />
+          {children}
+          <Toaster />
+        </QueryClientProvider>
+      </ThemeProvider>
+    </LocaleProvider>
   );
 }
 

@@ -5,10 +5,12 @@ import { ChevronDown, RotateCcw, SlidersHorizontal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { useLocale } from "@/components/common/locale-provider";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Slider } from "@/components/ui/slider";
+import { formatNumber } from "@/lib/utils/format";
 
 export type FilterState = {
   q?: string;
@@ -25,7 +27,6 @@ export type FilterState = {
 const PRICE_MIN = 0;
 const PRICE_MAX = 100_000_000;
 const DEFAULT_SORT: FilterState["sort"] = "popular";
-const numberFormatter = new Intl.NumberFormat("en-US");
 
 const clampPrice = (value: number, upperBound: number) => Math.min(Math.max(Math.round(value), PRICE_MIN), upperBound);
 
@@ -70,6 +71,8 @@ export function CatalogFilters({
   value: FilterState;
   onChange: (v: FilterState) => void;
 }) {
+  const { locale } = useLocale();
+  const isUz = locale === "uz-Cyrl-UZ";
   const effectivePriceMax = Math.max(PRICE_MIN + 1, Math.round(priceMaxBound ?? PRICE_MAX));
   const [mobileOpen, setMobileOpen] = useState(false);
   const [priceRange, setPriceRange] = useState<[number, number]>(
@@ -84,9 +87,9 @@ export function CatalogFilters({
 
   const priceLabel = useMemo(() => {
     const [from, to] = priceRange;
-    if (from <= PRICE_MIN && to >= effectivePriceMax) return "Любая цена";
-    return `${numberFormatter.format(from)} - ${numberFormatter.format(to)} UZS`;
-  }, [effectivePriceMax, priceRange]);
+    if (from <= PRICE_MIN && to >= effectivePriceMax) return isUz ? "Исталган нарх" : "Любая цена";
+    return `${formatNumber(from)} - ${formatNumber(to)} UZS`;
+  }, [effectivePriceMax, isUz, priceRange]);
 
   const resetFilters = () => {
     onChange({
@@ -105,32 +108,32 @@ export function CatalogFilters({
   const panel = (
     <div className="space-y-1">
       {/* Search */}
-      <FilterSection title="Поиск" defaultOpen>
+      <FilterSection title={isUz ? "Қидириш" : "Поиск"} defaultOpen>
         <Input
           value={value.q ?? ""}
           onChange={(e) => onChange({ ...value, q: e.target.value || undefined })}
-          placeholder="Название модели..."
+          placeholder={isUz ? "Модель номи..." : "Название модели..."}
         />
       </FilterSection>
 
       {/* Sort */}
-      <FilterSection title="Сортировка" defaultOpen>
+      <FilterSection title={isUz ? "Саралаш" : "Сортировка"} defaultOpen>
         <Select value={value.sort} onValueChange={(next) => onChange({ ...value, sort: next as FilterState["sort"] })}>
           <SelectTrigger>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="popular">Популярные</SelectItem>
-            <SelectItem value="relevance">Релевантные</SelectItem>
-            <SelectItem value="price_asc">Цена: по возрастанию</SelectItem>
-            <SelectItem value="price_desc">Цена: по убыванию</SelectItem>
-            <SelectItem value="newest">Сначала новые</SelectItem>
+            <SelectItem value="popular">{isUz ? "Оммабоп" : "Популярные"}</SelectItem>
+            <SelectItem value="relevance">{isUz ? "Мос" : "Релевантные"}</SelectItem>
+            <SelectItem value="price_asc">{isUz ? "Нарх: ўсиш бўйича" : "Цена: по возрастанию"}</SelectItem>
+            <SelectItem value="price_desc">{isUz ? "Нарх: камайиш бўйича" : "Цена: по убыванию"}</SelectItem>
+            <SelectItem value="newest">{isUz ? "Янгилари аввал" : "Сначала новые"}</SelectItem>
           </SelectContent>
         </Select>
       </FilterSection>
 
       {/* Price */}
-      <FilterSection title="Диапазон цен" defaultOpen>
+      <FilterSection title={isUz ? "Нарх диапазони" : "Диапазон цен"} defaultOpen>
         <Slider
           value={priceRange}
           min={PRICE_MIN}
@@ -151,7 +154,7 @@ export function CatalogFilters({
 
       {/* Brands */}
       {brands.length > 0 && (
-        <FilterSection title="Бренды" badge={value.brands.length || undefined} defaultOpen={value.brands.length > 0}>
+        <FilterSection title={isUz ? "Брендлар" : "Бренды"} badge={value.brands.length || undefined} defaultOpen={value.brands.length > 0}>
           <div className="max-h-52 space-y-0.5 overflow-y-auto pr-1">
             {brands.map((brand) => {
               const active = value.brands.includes(brand.id);
@@ -173,7 +176,7 @@ export function CatalogFilters({
 
       {/* Stores */}
       {!!stores?.length && (
-        <FilterSection title="Магазины" badge={value.stores.length || undefined}>
+        <FilterSection title={isUz ? "Дўконлар" : "Магазины"} badge={value.stores.length || undefined}>
           <div className="max-h-44 space-y-0.5 overflow-y-auto pr-1">
             {stores.map((store) => {
               const active = value.stores.includes(store.id);
@@ -195,7 +198,7 @@ export function CatalogFilters({
 
       {/* Sellers */}
       {!!sellers?.length && (
-        <FilterSection title="Продавцы" badge={value.sellers.length || undefined}>
+        <FilterSection title={isUz ? "Сотувчилар" : "Продавцы"} badge={value.sellers.length || undefined}>
           <div className="max-h-44 space-y-0.5 overflow-y-auto pr-1">
             {sellers.slice(0, 20).map((seller) => {
               const active = value.sellers.includes(seller.id);
@@ -216,14 +219,14 @@ export function CatalogFilters({
       )}
 
       {/* Delivery */}
-      <FilterSection title="Макс. дней доставки">
+      <FilterSection title={isUz ? "Макс. етказиб бериш кунлари" : "Макс. дней доставки"}>
         <Input
           type="number"
           min={0}
           max={30}
           value={value.maxDeliveryDays ?? ""}
           onChange={(e) => onChange({ ...value, maxDeliveryDays: e.target.value ? Number(e.target.value) : undefined })}
-          placeholder="Без ограничения"
+          placeholder={isUz ? "Чекловсиз" : "Без ограничения"}
         />
       </FilterSection>
 
@@ -263,7 +266,7 @@ export function CatalogFilters({
         <div className="overflow-hidden rounded-2xl border border-border bg-card">
           <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
             <div>
-              <p className="text-sm font-bold">Фильтры</p>
+              <p className="text-sm font-bold">{isUz ? "Фильтрлар" : "Фильтры"}</p>
               <AnimatePresence>
                 {hasActiveFilters && (
                   <motion.p
@@ -272,7 +275,7 @@ export function CatalogFilters({
                     exit={{ opacity: 0, y: -4 }}
                     className="text-xs text-accent"
                   >
-                    {activeFilterCount} активных
+                    {isUz ? `${activeFilterCount} фаол` : `${activeFilterCount} активных`}
                   </motion.p>
                 )}
               </AnimatePresence>
@@ -282,7 +285,7 @@ export function CatalogFilters({
                 <motion.div initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.8 }}>
                   <Button variant="ghost" size="sm" onClick={resetFilters} className="gap-1.5 text-xs text-muted-foreground hover:text-foreground">
                     <RotateCcw className="h-3 w-3" />
-                    Сбросить
+                    {isUz ? "Тозалаш" : "Сбросить"}
                   </Button>
                 </motion.div>
               )}
@@ -298,7 +301,7 @@ export function CatalogFilters({
           <SheetTrigger asChild>
             <Button variant="outline" className="w-full justify-center gap-2">
               <SlidersHorizontal className="h-4 w-4" />
-              Фильтры
+              {isUz ? "Фильтрлар" : "Фильтры"}
               {hasActiveFilters && (
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent text-[10px] font-bold text-white">
                   {activeFilterCount}
@@ -309,16 +312,16 @@ export function CatalogFilters({
           <SheetContent side="bottom" className="p-0">
             <div className="flex h-full flex-col">
               <div className="flex items-center justify-between gap-2 border-b border-border px-5 py-4">
-                <p className="font-bold">Фильтры</p>
+                <p className="font-bold">{isUz ? "Фильтрлар" : "Фильтры"}</p>
                 <Button variant="ghost" size="sm" disabled={!hasActiveFilters} onClick={resetFilters} className="gap-1.5">
                   <RotateCcw className="h-3.5 w-3.5" />
-                  Сбросить
+                  {isUz ? "Тозалаш" : "Сбросить"}
                 </Button>
               </div>
               <div className="flex-1 overflow-y-auto p-4">{panel}</div>
               <div className="border-t border-border p-4">
                 <Button className="w-full" onClick={() => setMobileOpen(false)}>
-                  Показать результаты
+                  {isUz ? "Натижаларни кўрсатиш" : "Показать результаты"}
                 </Button>
               </div>
             </div>

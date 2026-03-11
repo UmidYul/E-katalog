@@ -6,6 +6,7 @@ import { Copy, Download, History, LogOut, Mail, Save, ShieldCheck, Sparkles, Tra
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { useLocale } from "@/components/common/locale-provider";
 import { EmptyState } from "@/components/common/empty-state";
 import { ErrorState } from "@/components/common/error-state";
 import { Avatar } from "@/components/ui/avatar";
@@ -21,7 +22,7 @@ import { useAuthMe, useLogout } from "@/features/auth/use-auth";
 import { useNotificationPreferences, useUpdateNotificationPreferences, useUpdateUserProfile, useUserProfile } from "@/features/user/use-profile";
 import { useFavorites } from "@/features/user/use-favorites";
 import { authApi, userApi } from "@/lib/api/openapi-client";
-import { formatPrice } from "@/lib/utils/format";
+import { formatDateTime as formatLocalizedDateTime, formatPrice } from "@/lib/utils/format";
 import { defaultProfilePreferences, type LocalProfileDraft, type ProfilePreferences, useProfileStore } from "@/store/profile.store";
 import { useRecentlyViewedStore } from "@/store/recentlyViewed.store";
 
@@ -57,11 +58,11 @@ const formatShortAccountId = (value: string) => {
   return `${normalized.slice(0, 8)}...${normalized.slice(-4)}`;
 };
 
-const formatDateTime = (value?: string) => {
-  if (!value) return "Никогда";
+const formatDateTime = (value: string | undefined, locale: "uz-Cyrl-UZ" | "ru-RU") => {
+  if (!value) return locale === "uz-Cyrl-UZ" ? "Ҳеч қачон" : "Никогда";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Никогда";
-  return new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(date);
+  if (Number.isNaN(date.getTime())) return locale === "uz-Cyrl-UZ" ? "Ҳеч қачон" : "Никогда";
+  return formatLocalizedDateTime(date, locale);
 };
 
 const getErrorMessage = (error: unknown, fallback: string): string => {
@@ -101,6 +102,10 @@ const isHighRiskSession = (session: { ip_address: string; location: string; last
 };
 
 export function ProfileClient() {
+  const { locale } = useLocale();
+  const isUz = locale === "uz-Cyrl-UZ";
+  const tr = (ru: string, uz: string) => (isUz ? uz : ru);
+
   const queryClient = useQueryClient();
   const me = useAuthMe();
   const profileQuery = useUserProfile();
@@ -316,14 +321,14 @@ export function ProfileClient() {
     setPreference(key, value);
     void updateNotificationPreferences
       .mutateAsync({ [key]: value } as Pick<ProfilePreferences, K>)
-      .catch(() => setStatus("Не удалось синхронизировать настройки уведомлений с сервером."));
+      .catch(() => setStatus(tr("Не удалось синхронизировать настройки уведомлений с сервером.", "Хабарнома созламаларини сервер билан синхронлаб бўлмади.")));
   };
 
   const onResetPreferences = () => {
     resetPreferences();
     void updateNotificationPreferences
       .mutateAsync(defaultProfilePreferences)
-      .catch(() => setStatus("Локальные настройки сброшены, но серверную синхронизацию выполнить не удалось."));
+      .catch(() => setStatus(tr("Локальные настройки сброшены, но серверную синхронизацию выполнить не удалось.", "Локал созламалар тикланди, лекин сервер билан синхронлаб бўлмади.")));
   };
 
   const onClearRecent = () => {
@@ -335,15 +340,20 @@ export function ProfileClient() {
 
   const onChangePassword = async () => {
     if (newPassword.trim().length < 8) {
-      setStatus("New password must be at least 8 characters.");
+      setStatus(tr("Новый пароль должен содержать минимум 8 символов.", "Янги пароль камида 8 белгидан иборат бўлиши керак."));
       return;
     }
     if (newPassword !== confirmNewPassword) {
-      setStatus("New password confirmation does not match.");
+      setStatus(tr("Подтверждение нового пароля не совпадает.", "Янги пароль тасдиғи мос келмади."));
       return;
     }
     if (newPasswordStrength.score < 3) {
-      setStatus("Use a stronger password: 12+ chars, mixed case, digits and special symbols.");
+      setStatus(
+        tr(
+          "Используйте более надежный пароль: 12+ символов, разные регистры, цифры и спецсимволы.",
+          "Кучлироқ пароль ишлатинг: 12+ белги, катта-кичик ҳарфлар, рақамлар ва махсус белгилар."
+        )
+      );
       return;
     }
     try {
@@ -357,11 +367,14 @@ export function ProfileClient() {
       setConfirmNewPassword("");
       setStatus(
         result.revoked_sessions > 0
-          ? `Password changed. Revoked ${result.revoked_sessions} other sessions.`
-          : "Password changed."
+          ? tr(
+              `Пароль изменен. Завершено других сессий: ${result.revoked_sessions}.`,
+              `Пароль ўзгартирилди. Якунланган бошқа сессиялар: ${result.revoked_sessions}.`
+            )
+          : tr("Пароль изменен.", "Пароль ўзгартирилди.")
       );
     } catch (error) {
-      setStatus(getErrorMessage(error, "Failed to change password."));
+      setStatus(getErrorMessage(error, tr("Не удалось изменить пароль.", "Парольни ўзгартириб бўлмади.")));
     }
   };
 
@@ -372,15 +385,15 @@ export function ProfileClient() {
       setTwoFactorCode("");
       setLatestRecoveryCodes([]);
       setRecoveryCodesModalOpen(false);
-      setStatus("2FA setup created. Scan QR and confirm with one-time code.");
+      setStatus(tr("Настройка 2FA создана. Сканируйте QR и подтвердите одноразовым кодом.", "2FA созламаси яратилди. QR кодни скан қилинг ва бир марталик код билан тасдиқланг."));
     } catch (error) {
-      setStatus(getErrorMessage(error, "Failed to initialize 2FA setup."));
+      setStatus(getErrorMessage(error, tr("Не удалось начать настройку 2FA.", "2FA созлашни бошлаб бўлмади.")));
     }
   };
 
   const onVerifyTwoFactorSetup = async () => {
     if (!twoFactorCode.trim()) {
-      setStatus("Enter 2FA code to complete setup.");
+      setStatus(tr("Введите 2FA-код, чтобы завершить настройку.", "Созлашни якунлаш учун 2FA кодини киритинг."));
       return;
     }
     try {
@@ -392,13 +405,13 @@ export function ProfileClient() {
         setTwoFactorCode("");
         setLatestRecoveryCodes(recoveryCodes);
         setRecoveryCodesModalOpen(recoveryCodes.length > 0);
-        setStatus("2FA enabled.");
+        setStatus(tr("2FA включена.", "2FA ёқилди."));
         await queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
       } else {
-        setStatus("Unexpected 2FA verification response.");
+        setStatus(tr("Неожиданный ответ при подтверждении 2FA.", "2FA тасдиқлашда кутилмаган жавоб олинди."));
       }
     } catch (error) {
-      setStatus(getErrorMessage(error, "Invalid 2FA code."));
+      setStatus(getErrorMessage(error, tr("Неверный 2FA-код.", "2FA коди нотўғри.")));
     }
   };
 
@@ -410,28 +423,32 @@ export function ProfileClient() {
       setTwoFactorCode("");
       setLatestRecoveryCodes([]);
       setRecoveryCodesModalOpen(false);
-      setStatus("2FA disabled.");
+      setStatus(tr("2FA выключена.", "2FA ўчирилди."));
       await queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
     } catch (error) {
-      setStatus(getErrorMessage(error, "Failed to disable 2FA."));
+      setStatus(getErrorMessage(error, tr("Не удалось отключить 2FA.", "2FA ни ўчириб бўлмади.")));
     }
   };
 
   const onRevokeSession = async (sessionId: string) => {
     try {
       await revokeSessionMutation.mutateAsync(sessionId);
-      setStatus("Session revoked.");
+      setStatus(tr("Сессия завершена.", "Сессия якунланди."));
     } catch (error) {
-      setStatus(getErrorMessage(error, "Failed to revoke session."));
+      setStatus(getErrorMessage(error, tr("Не удалось завершить сессию.", "Сессияни якунлаб бўлмади.")));
     }
   };
 
   const onRevokeOtherSessions = async () => {
     try {
       const result = await revokeOtherSessionsMutation.mutateAsync();
-      setStatus(result.revoked > 0 ? `Revoked ${result.revoked} sessions.` : "No other sessions to revoke.");
+      setStatus(
+        result.revoked > 0
+          ? tr(`Завершено сессий: ${result.revoked}.`, `Якунланган сессиялар: ${result.revoked}.`)
+          : tr("Других сессий для завершения нет.", "Якунлаш учун бошқа сессия йўқ.")
+      );
     } catch (error) {
-      setStatus(getErrorMessage(error, "Failed to revoke other sessions."));
+      setStatus(getErrorMessage(error, tr("Не удалось завершить другие сессии.", "Бошқа сессияларни якунлаб бўлмади.")));
     }
   };
 
@@ -441,16 +458,16 @@ export function ProfileClient() {
       telegram: normalizeTelegram(profileForm.telegram, me.data?.email)
     };
     if (normalized.display_name.length < 2) {
-      setStatus("Имя должно содержать минимум 2 символа.");
+      setStatus(tr("Имя должно содержать минимум 2 символа.", "Исм камида 2 белгидан иборат бўлиши керак."));
       return;
     }
     try {
       await updateProfile.mutateAsync(normalized);
       saveDraft(normalized);
-      setStatus("Профиль сохранён.");
+      setStatus(tr("Профиль сохранён.", "Профиль сақланди."));
     } catch (error) {
       saveDraft(normalized);
-      setStatus(getErrorMessage(error, "Не удалось сохранить профиль на сервере. Локальная копия обновлена."));
+      setStatus(getErrorMessage(error, tr("Не удалось сохранить профиль на сервере. Локальная копия обновлена.", "Профильни серверда сақлаб бўлмади. Локал нусха янгиланди.")));
     }
   };
 
@@ -458,7 +475,7 @@ export function ProfileClient() {
     if (!hasDraftChanges) return;
     setProfileForm(baselineDraft);
     resetDraft();
-    setStatus("Изменения сброшены.");
+    setStatus(tr("Изменения сброшены.", "Ўзгаришлар бекор қилинди."));
   };
 
   const exportAccountSnapshot = () => {
@@ -481,15 +498,15 @@ export function ProfileClient() {
     anchor.click();
     anchor.remove();
     window.URL.revokeObjectURL(url);
-    setStatus("Снимок профиля экспортирован.");
+    setStatus(tr("Снимок профиля экспортирован.", "Профиль снапшоти экспорт қилинди."));
   };
 
   const copyValue = async (value: string, label: string) => {
     try {
       await navigator.clipboard.writeText(value);
-      setCopyStatus(`${label} скопирован.`);
+      setCopyStatus(tr(`${label} скопирован.`, `${label} нусхаланди.`));
     } catch {
-      setCopyStatus(`Не удалось скопировать: ${label.toLowerCase()}.`);
+      setCopyStatus(tr(`Не удалось скопировать: ${label.toLowerCase()}.`, `Нусхалаб бўлмади: ${label.toLowerCase()}.`));
     }
   };
 
@@ -506,7 +523,12 @@ export function ProfileClient() {
   }
 
   if (me.error || !me.data) {
-    return <ErrorState title="Профиль недоступен" message="Сейчас не удалось загрузить профиль. Попробуйте обновить страницу позже." />;
+    return (
+      <ErrorState
+        title={tr("Профиль недоступен", "Профиль мавжуд эмас")}
+        message={tr("Сейчас не удалось загрузить профиль. Попробуйте обновить страницу позже.", "Ҳозир профильни юклаб бўлмади. Кейинроқ саҳифани янгилаб кўринг.")}
+      />
+    );
   }
 
   return (
@@ -522,18 +544,18 @@ export function ProfileClient() {
                   <p className="text-xl font-bold text-foreground">{profileForm.display_name || me.data.full_name}</p>
                   <p className="text-sm text-muted-foreground">{me.data.email}</p>
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge className="bg-accent/10 text-accent">Аккаунт {formatShortAccountId(me.data.id)}</Badge>
-                    <Badge>{favoritesCount} в избранном</Badge>
-                    <Badge>{recentCount} недавних просмотров</Badge>
+                    <Badge className="bg-accent/10 text-accent">{tr("Аккаунт", "Аккаунт")} {formatShortAccountId(me.data.id)}</Badge>
+                    <Badge>{tr(`${favoritesCount} в избранном`, `${favoritesCount} та сараланган`)}</Badge>
+                    <Badge>{tr(`${recentCount} недавних просмотров`, `${recentCount} та яқинда кўрилган`)}</Badge>
                   </div>
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button variant="outline" className="gap-2" onClick={exportAccountSnapshot}>
-                  <Download className="h-4 w-4" /> Экспорт данных
+                  <Download className="h-4 w-4" /> {tr("Экспорт данных", "Маълумотларни экспорт қилиш")}
                 </Button>
                 <Button variant="outline" className="gap-2" onClick={() => logout.mutate()} disabled={logout.isPending}>
-                  <LogOut className="h-4 w-4" /> {logout.isPending ? "Выходим..." : "Выйти"}
+                  <LogOut className="h-4 w-4" /> {logout.isPending ? tr("Выходим...", "Чиқилмоқда...") : tr("Выйти", "Чиқиш")}
                 </Button>
               </div>
             </div>
@@ -548,9 +570,9 @@ export function ProfileClient() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="flex items-center gap-2">
-                <UserRound className="h-4 w-4 text-primary" /> Данные профиля
+                <UserRound className="h-4 w-4 text-primary" /> {tr("Данные профиля", "Профиль маълумотлари")}
               </CardTitle>
-              <Badge className="bg-secondary/80">Заполнено: {completionScore}%</Badge>
+              <Badge className="bg-secondary/80">{tr("Заполнено", "Тўлдирилган")}: {completionScore}%</Badge>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="h-2 overflow-hidden rounded-full bg-secondary">
@@ -563,19 +585,19 @@ export function ProfileClient() {
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Отображаемое имя</label>
+                  <label className="text-xs font-medium text-muted-foreground">{tr("Отображаемое имя", "Кўринадиган исм")}</label>
                   <Input value={profileForm.display_name} onChange={(e) => onDraftFieldChange("display_name", e.target.value)} />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Телефон</label>
+                  <label className="text-xs font-medium text-muted-foreground">{tr("Телефон", "Телефон")}</label>
                   <Input placeholder="+998 ..." value={profileForm.phone} onChange={(e) => onDraftFieldChange("phone", e.target.value)} />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Город</label>
+                  <label className="text-xs font-medium text-muted-foreground">{tr("Город", "Шаҳар")}</label>
                   <Input value={profileForm.city} onChange={(e) => onDraftFieldChange("city", e.target.value)} />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Telegram</label>
+                  <label className="text-xs font-medium text-muted-foreground">{tr("Telegram", "Telegram")}</label>
                   <Input
                     placeholder="@username"
                     value={profileForm.telegram}
@@ -585,17 +607,26 @@ export function ProfileClient() {
                 </div>
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">О себе</label>
-                <Textarea value={profileForm.about} onChange={(e) => onDraftFieldChange("about", e.target.value)} placeholder="Кратко о себе, интересах и любимых брендах..." />
+                <label className="text-xs font-medium text-muted-foreground">{tr("О себе", "Ўзингиз ҳақида")}</label>
+                <Textarea
+                  value={profileForm.about}
+                  onChange={(e) => onDraftFieldChange("about", e.target.value)}
+                  placeholder={tr("Кратко о себе, интересах и любимых брендах...", "Ўзингиз, қизиқишларингиз ва севимли брендлар ҳақида қисқача...")}
+                />
               </div>
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="text-xs text-muted-foreground">Изменения сохраняются через API, а локальная копия профиля хранится в этом браузере.</p>
+                <p className="text-xs text-muted-foreground">
+                  {tr(
+                    "Изменения сохраняются через API, а локальная копия профиля хранится в этом браузере.",
+                    "Ўзгаришлар API орқали сақланади, профильнинг локал нусхаси эса ушбу браузерда сақланади."
+                  )}
+                </p>
                 <div className="flex gap-2">
                   <Button variant="ghost" size="sm" onClick={resetProfileForm} disabled={!hasDraftChanges || updateProfile.isPending}>
-                    Сбросить
+                    {tr("Сбросить", "Бекор қилиш")}
                   </Button>
                   <Button size="sm" className="gap-2" onClick={saveServerProfile} disabled={!hasDraftChanges || updateProfile.isPending}>
-                    <Save className="h-4 w-4" /> {updateProfile.isPending ? "Сохраняем..." : "Сохранить"}
+                    <Save className="h-4 w-4" /> {updateProfile.isPending ? tr("Сохраняем...", "Сақланмоқда...") : tr("Сохранить", "Сақлаш")}
                   </Button>
                 </div>
               </div>
@@ -605,40 +636,40 @@ export function ProfileClient() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-primary" /> Настройки
+                <Sparkles className="h-4 w-4 text-primary" /> {tr("Настройки", "Созламалар")}
               </CardTitle>
               <Button variant="ghost" size="sm" onClick={onResetPreferences}>
-                Сбросить
+                {tr("Сбросить", "Бекор қилиш")}
               </Button>
             </CardHeader>
             <CardContent className="space-y-4">
               <PreferenceRow
-                title="Алерты снижения цены"
-                description="Показывать сигналы, когда отслеживаемые товары дешевеют."
+                title={tr("Алерты снижения цены", "Нарх пасайиши алертлари")}
+                description={tr("Показывать сигналы, когда отслеживаемые товары дешевеют.", "Кузатувдаги товарлар арзонлашганда сигнал кўрсатиш.")}
                 checked={preferences.price_drop_alerts}
                 onChange={(checked) => onPreferenceChange("price_drop_alerts", checked)}
               />
               <PreferenceRow
-                title="Алерты наличия"
-                description="Сообщать, когда товар снова доступен в наличии."
+                title={tr("Алерты наличия", "Мавжудлик алертлари")}
+                description={tr("Сообщать, когда товар снова доступен в наличии.", "Товар яна мавжуд бўлганда хабар бериш.")}
                 checked={preferences.stock_alerts}
                 onChange={(checked) => onPreferenceChange("stock_alerts", checked)}
               />
               <PreferenceRow
-                title="Еженедельная сводка"
-                description="Показывать еженедельный обзор обновлений каталога."
+                title={tr("Еженедельная сводка", "Ҳафталик жамланма")}
+                description={tr("Показывать еженедельный обзор обновлений каталога.", "Каталог янгиланишларининг ҳафталик шарҳини кўрсатиш.")}
                 checked={preferences.weekly_digest}
                 onChange={(checked) => onPreferenceChange("weekly_digest", checked)}
               />
               <PreferenceRow
-                title="Публичный профиль"
-                description="Разрешить публикацию карточки профиля."
+                title={tr("Публичный профиль", "Оммавий профиль")}
+                description={tr("Разрешить публикацию карточки профиля.", "Профиль карточкасини оммага чиқаришга рухсат бериш.")}
                 checked={preferences.public_profile}
                 onChange={(checked) => onPreferenceChange("public_profile", checked)}
               />
               <PreferenceRow
-                title="Компактный вид"
-                description="Использовать более плотный интерфейс в кабинете."
+                title={tr("Компактный вид", "Ихчам кўриниш")}
+                description={tr("Использовать более плотный интерфейс в кабинете.", "Кабинетда ихчам интерфейсдан фойдаланиш.")}
                 checked={preferences.compact_view}
                 onChange={(checked) => onPreferenceChange("compact_view", checked)}
               />
@@ -646,25 +677,25 @@ export function ProfileClient() {
           </Card>
           <Card>
             <CardHeader>
-              <CardTitle>Сводка аккаунта</CardTitle>
+              <CardTitle>{tr("Сводка аккаунта", "Аккаунт жамланмаси")}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <StatRow label="Email" value={me.data.email} />
-              <StatRow label="Полное имя" value={me.data.full_name || "-"} />
-              <StatRow label="Избранное" value={String(favoritesCount)} />
-              <StatRow label="Недавние просмотры" value={String(recentCount)} />
-              <StatRow label="Профиль на сервере обновлён" value={formatDateTime(profileQuery.data?.updated_at ?? undefined)} />
-              <StatRow label="Локальная копия обновлена" value={formatDateTime(storedDraft.updated_at)} />
-              <StatRow label="Последний просмотр" value={latestViewed ? formatDateTime(latestViewed.viewedAt) : "Нет активности"} />
+              <StatRow label={tr("Полное имя", "Тўлиқ исм")} value={me.data.full_name || "-"} />
+              <StatRow label={tr("Избранное", "Сараланганлар")} value={String(favoritesCount)} />
+              <StatRow label={tr("Недавние просмотры", "Яқинда кўрилганлар")} value={String(recentCount)} />
+              <StatRow label={tr("Профиль на сервере обновлён", "Сервердаги профиль янгиланган")} value={formatDateTime(profileQuery.data?.updated_at ?? undefined, locale)} />
+              <StatRow label={tr("Локальная копия обновлена", "Локал нусха янгиланган")} value={formatDateTime(storedDraft.updated_at, locale)} />
+              <StatRow label={tr("Последний просмотр", "Охирги кўриш")} value={latestViewed ? formatDateTime(latestViewed.viewedAt, locale) : tr("Нет активности", "Фаоллик йўқ")} />
               <div className="grid grid-cols-2 gap-2 pt-2">
                 <Link href="/favorites">
                   <Button variant="outline" className="w-full justify-center">
-                    Избранное
+                    {tr("Избранное", "Сараланганлар")}
                   </Button>
                 </Link>
                 <Link href="/recently-viewed">
                   <Button variant="outline" className="w-full justify-center">
-                    Просмотры
+                    {tr("Просмотры", "Кўришлар")}
                   </Button>
                 </Link>
               </div>
@@ -675,15 +706,15 @@ export function ProfileClient() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="flex items-center gap-2">
-                <History className="h-4 w-4 text-primary" /> Недавняя активность
+                <History className="h-4 w-4 text-primary" /> {tr("Недавняя активность", "Яқиндаги фаоллик")}
               </CardTitle>
               <Button variant="ghost" size="sm" className="gap-1" onClick={onClearRecent} disabled={!recentItems.length}>
-                <Trash2 className="h-4 w-4" /> Очистить
+                <Trash2 className="h-4 w-4" /> {tr("Очистить", "Тозалаш")}
               </Button>
             </CardHeader>
             <CardContent>
               {recentPreview.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Активности пока нет.</p>
+                <p className="text-sm text-muted-foreground">{tr("Активности пока нет.", "Ҳозирча фаоллик йўқ.")}</p>
               ) : (
                 <div className="space-y-3">
                   {recentPreview.map((item) => (
@@ -692,7 +723,7 @@ export function ProfileClient() {
                         {item.title}
                       </Link>
                       <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-xs text-muted-foreground">{formatDateTime(item.viewedAt)}</p>
+                        <p className="text-xs text-muted-foreground">{formatDateTime(item.viewedAt, locale)}</p>
                         {item.minPrice != null ? <Badge className="bg-secondary/70">{formatPrice(item.minPrice)}</Badge> : null}
                       </div>
                     </div>
@@ -709,30 +740,35 @@ export function ProfileClient() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <ShieldCheck className="h-4 w-4 text-primary" /> Безопасность
+                <ShieldCheck className="h-4 w-4 text-primary" /> {tr("Безопасность", "Хавфсизлик")}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="rounded-xl border border-border p-3">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-medium">Security posture</p>
+                  <p className="text-sm font-medium">{tr("Состояние безопасности", "Хавфсизлик ҳолати")}</p>
                   <Badge className={securityScore >= 80 ? "bg-emerald-600 text-white" : securityScore >= 55 ? "bg-warning text-warning-foreground" : "bg-destructive text-destructive-foreground"}>
                     {securityScore}/100
                   </Badge>
                 </div>
                 <div className="grid gap-2 text-xs text-muted-foreground">
-                  <p>2FA: {twoFactorEnabled ? "включена" : "выключена"}</p>
-                  <p>Активные сессии: {sessionRiskSummary.total}</p>
-                  <p>Риск-сессии: {sessionRiskSummary.highRisk}</p>
+                  <p>2FA: {twoFactorEnabled ? tr("включена", "ёқилган") : tr("выключена", "ўчирилган")}</p>
+                  <p>{tr("Активные сессии", "Фаол сессиялар")}: {sessionRiskSummary.total}</p>
+                  <p>{tr("Риск-сессии", "Хавфли сессиялар")}: {sessionRiskSummary.highRisk}</p>
                 </div>
               </div>
               <div className="flex items-center justify-between gap-2 rounded-xl border border-border p-3">
                 <div>
-                  <p className="text-sm font-medium">ID аккаунта</p>
+                  <p className="text-sm font-medium">{tr("ID аккаунта", "Аккаунт ID")}</p>
                   <p className="text-xs text-muted-foreground">{me.data.id}</p>
                 </div>
-                <Button variant="ghost" size="sm" className="gap-1" onClick={() => (me.data ? copyValue(String(me.data.id), "ID аккаунта") : undefined)}>
-                  <Copy className="h-4 w-4" /> Копировать
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1"
+                  onClick={() => (me.data ? copyValue(String(me.data.id), tr("ID аккаунта", "Аккаунт ID")) : undefined)}
+                >
+                  <Copy className="h-4 w-4" /> {tr("Копировать", "Нусхалаш")}
                 </Button>
               </div>
               <div className="flex items-center justify-between gap-2 rounded-xl border border-border p-3">
@@ -741,37 +777,41 @@ export function ProfileClient() {
                   <p className="text-xs text-muted-foreground">{me.data.email}</p>
                 </div>
                 <Button variant="ghost" size="sm" className="gap-1" onClick={() => (me.data ? copyValue(me.data.email, "Email") : undefined)}>
-                  <Mail className="h-4 w-4" /> Копировать
+                  <Mail className="h-4 w-4" /> {tr("Копировать", "Нусхалаш")}
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                В API уже доступны смена пароля, управление сессиями и 2FA. Для UI-расширения можно использовать <code>docs/PROFILE_FUTURE_FEATURES.md</code>.
+                {tr(
+                  "В API уже доступны смена пароля, управление сессиями и 2FA. Для UI-расширения можно использовать",
+                  "API да паролни алмаштириш, сессияларни бошқариш ва 2FA аллақачон мавжуд. UI ни кенгайтириш учун"
+                )}{" "}
+                <code>docs/PROFILE_FUTURE_FEATURES.md</code>.
               </p>
               <div className="rounded-xl border border-border p-3 space-y-3">
-                <p className="text-sm font-medium">Change Password</p>
+                <p className="text-sm font-medium">{tr("Смена пароля", "Паролни ўзгартириш")}</p>
                 <Input
                   type="password"
-                  placeholder="Current password"
+                  placeholder={tr("Текущий пароль", "Жорий пароль")}
                   value={currentPassword}
                   onChange={(event) => setCurrentPassword(event.target.value)}
                 />
                 <Input
                   type="password"
-                  placeholder="New password"
+                  placeholder={tr("Новый пароль", "Янги пароль")}
                   value={newPassword}
                   onChange={(event) => setNewPassword(event.target.value)}
                 />
                 <Input
                   type="password"
-                  placeholder="Confirm new password"
+                  placeholder={tr("Подтвердите новый пароль", "Янги парольни тасдиқланг")}
                   value={confirmNewPassword}
                   onChange={(event) => setConfirmNewPassword(event.target.value)}
                 />
                 <div className="rounded-lg border border-border/70 p-2">
                   <div className="mb-2 flex items-center justify-between gap-2">
-                    <span className="text-xs text-muted-foreground">Password strength</span>
+                    <span className="text-xs text-muted-foreground">{tr("Надежность пароля", "Пароль мустаҳкамлиги")}</span>
                     <Badge className={newPasswordStrength.label === "strong" ? "bg-emerald-600 text-white" : newPasswordStrength.label === "medium" ? "bg-warning text-warning-foreground" : "bg-secondary text-foreground"}>
-                      {newPasswordStrength.label}
+                      {newPasswordStrength.label === "strong" ? tr("сильный", "кучли") : newPasswordStrength.label === "medium" ? tr("средний", "ўртача") : tr("слабый", "заиф")}
                     </Badge>
                   </div>
                   <div className="grid grid-cols-5 gap-1">
@@ -784,7 +824,7 @@ export function ProfileClient() {
                   </div>
                 </div>
                 <div className="flex items-center justify-between gap-2 rounded-lg border border-border/70 p-2">
-                  <span className="text-xs text-muted-foreground">Revoke other sessions after password change</span>
+                  <span className="text-xs text-muted-foreground">{tr("Завершать другие сессии после смены пароля", "Пароль алмашганда бошқа сессияларни якунлаш")}</span>
                   <Switch checked={revokeOtherSessionsOnPasswordChange} onCheckedChange={setRevokeOtherSessionsOnPasswordChange} />
                 </div>
                 <Button
@@ -792,7 +832,7 @@ export function ProfileClient() {
                   onClick={onChangePassword}
                   disabled={changePasswordMutation.isPending || !currentPassword || !newPassword || !confirmNewPassword}
                 >
-                  {changePasswordMutation.isPending ? "Updating..." : "Update Password"}
+                  {changePasswordMutation.isPending ? tr("Обновляем...", "Янгиланмоқда...") : tr("Обновить пароль", "Паролни янгилаш")}
                 </Button>
               </div>
 
@@ -801,26 +841,26 @@ export function ProfileClient() {
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between gap-2">
-              <CardTitle className="text-sm font-semibold">Two-Factor Authentication (2FA)</CardTitle>
+              <CardTitle className="text-sm font-semibold">{tr("Двухфакторная аутентификация (2FA)", "Икки босқичли аутентификация (2FA)")}</CardTitle>
               <Badge className={twoFactorEnabled ? "bg-emerald-600 text-white" : "bg-secondary text-foreground"}>
-                {twoFactorEnabled ? "Enabled" : "Disabled"}
+                {twoFactorEnabled ? tr("Включена", "Ёқилган") : tr("Выключена", "Ўчирилган")}
               </Badge>
             </CardHeader>
             <CardContent className="space-y-3">
               {!twoFactorEnabled ? (
                 <Button size="sm" onClick={onStartTwoFactorSetup} disabled={setupTwoFactorMutation.isPending}>
-                  {setupTwoFactorMutation.isPending ? "Preparing..." : "Enable 2FA"}
+                  {setupTwoFactorMutation.isPending ? tr("Подготавливаем...", "Тайёрланмоқда...") : tr("Включить 2FA", "2FA ни ёқиш")}
                 </Button>
               ) : (
                 <Button variant="outline" size="sm" onClick={onDisableTwoFactor} disabled={disableTwoFactorMutation.isPending}>
-                  {disableTwoFactorMutation.isPending ? "Disabling..." : "Disable 2FA"}
+                  {disableTwoFactorMutation.isPending ? tr("Отключаем...", "Ўчирилмоқда...") : tr("Отключить 2FA", "2FA ни ўчириш")}
                 </Button>
               )}
               {twoFactorSetupPayload ? (
                 <div className="space-y-3">
                   <div className="space-y-2 rounded-lg border border-border/70 p-3">
-                    <p className="text-sm font-medium">1. Scan QR code</p>
-                    <p className="text-xs text-muted-foreground">Open Google/Microsoft Authenticator and scan the QR.</p>
+                    <p className="text-sm font-medium">{tr("1. Сканируйте QR-код", "1. QR кодни скан қилинг")}</p>
+                    <p className="text-xs text-muted-foreground">{tr("Откройте Google/Microsoft Authenticator и отсканируйте QR.", "Google/Microsoft Authenticator ни очиб, QR кодни скан қилинг.")}</p>
                     <div
                       className="overflow-hidden rounded-md bg-white p-2 [&>svg]:mx-auto [&>svg]:block [&>svg]:h-auto [&>svg]:max-w-full"
                       dangerouslySetInnerHTML={{ __html: twoFactorSetupPayload.qr_svg }}
@@ -828,23 +868,23 @@ export function ProfileClient() {
                   </div>
 
                   <div className="space-y-2 rounded-lg border border-border/70 p-3">
-                    <p className="text-sm font-medium">2. Enter one-time code</p>
+                    <p className="text-sm font-medium">{tr("2. Введите одноразовый код", "2. Бир марталик кодни киритинг")}</p>
                     <Input
-                      placeholder="One-time code"
+                      placeholder={tr("Одноразовый код", "Бир марталик код")}
                       inputMode="numeric"
                       value={twoFactorCode}
                       onChange={(event) => setTwoFactorCode(event.target.value)}
                     />
                     <Button size="sm" onClick={onVerifyTwoFactorSetup} disabled={verifyTwoFactorMutation.isPending || !twoFactorCode.trim()}>
-                      {verifyTwoFactorMutation.isPending ? "Verifying..." : "Verify and Enable"}
+                      {verifyTwoFactorMutation.isPending ? tr("Проверяем...", "Текширилмоқда...") : tr("Проверить и включить", "Текшириш ва ёқиш")}
                     </Button>
                   </div>
 
                   <div className="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-medium">3. Recovery codes will be shown after verification</p>
+                      <p className="text-sm font-medium">{tr("3. Коды восстановления появятся после проверки", "3. Тиклаш кодлари текширувдан кейин кўрсатилади")}</p>
                     </div>
-                    <p className="text-xs text-muted-foreground">After "Verify and Enable" you will see codes in a separate modal window.</p>
+                    <p className="text-xs text-muted-foreground">{tr('После "Проверить и включить" коды появятся в отдельном окне.', '"Текшириш ва ёқиш" дан кейин тиклаш кодлари алоҳида ойнада кўринади.')}</p>
                   </div>
                 </div>
               ) : null}
@@ -853,14 +893,14 @@ export function ProfileClient() {
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between gap-2">
-              <CardTitle className="text-sm font-semibold">Active Sessions</CardTitle>
+              <CardTitle className="text-sm font-semibold">{tr("Активные сессии", "Фаол сессиялар")}</CardTitle>
               <Button variant="outline" size="sm" onClick={onRevokeOtherSessions} disabled={revokeOtherSessionsMutation.isPending}>
-                {revokeOtherSessionsMutation.isPending ? "Revoking..." : "Revoke Others"}
+                {revokeOtherSessionsMutation.isPending ? tr("Завершаем...", "Якунланмоқда...") : tr("Завершить остальные", "Қолганларини якунлаш")}
               </Button>
             </CardHeader>
             <CardContent>
               {sessionsQuery.isLoading ? (
-                <p className="text-xs text-muted-foreground">Loading sessions...</p>
+                <p className="text-xs text-muted-foreground">{tr("Загружаем сессии...", "Сессиялар юкланмоқда...")}</p>
               ) : sessionsQuery.data && sessionsQuery.data.length ? (
                 <div className="space-y-2">
                   {sessionsQuery.data.map((session) => (
@@ -869,14 +909,14 @@ export function ProfileClient() {
                         <div>
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="text-xs font-medium">{session.device}</p>
-                            {isHighRiskSession(session) ? <Badge className="bg-warning text-warning-foreground">Risk</Badge> : <Badge className="bg-emerald-600 text-white">Safe</Badge>}
+                            {isHighRiskSession(session) ? <Badge className="bg-warning text-warning-foreground">{tr("Риск", "Хавф")}</Badge> : <Badge className="bg-emerald-600 text-white">{tr("Безопасно", "Хавфсиз")}</Badge>}
                           </div>
                           <p className="text-xs text-muted-foreground">
                             {session.ip_address} | {session.location}
                           </p>
                           <p className="text-[11px] text-muted-foreground">
-                            Last seen: {formatDateTime(session.last_seen_at)}
-                            {session.is_current ? " (current)" : ""}
+                            {tr("Последняя активность", "Охирги фаоллик")}: {formatDateTime(session.last_seen_at, locale)}
+                            {session.is_current ? tr(" (текущая)", " (жорий)") : ""}
                           </p>
                         </div>
                         {!session.is_current ? (
@@ -886,17 +926,17 @@ export function ProfileClient() {
                             onClick={() => onRevokeSession(session.id)}
                             disabled={revokeSessionMutation.isPending}
                           >
-                            Revoke
+                            {tr("Завершить", "Якунлаш")}
                           </Button>
                         ) : (
-                          <Badge>Current</Badge>
+                          <Badge>{tr("Текущая", "Жорий")}</Badge>
                         )}
                       </div>
                     </div>
                   ))}
                 </div>
               ) : (
-                <p className="text-xs text-muted-foreground">No active sessions found.</p>
+                <p className="text-xs text-muted-foreground">{tr("Активные сессии не найдены.", "Фаол сессиялар топилмади.")}</p>
               )}
             </CardContent>
           </Card>
@@ -906,16 +946,19 @@ export function ProfileClient() {
       <Modal
         open={recoveryCodesModalOpen}
         onOpenChange={setRecoveryCodesModalOpen}
-        title="Recovery codes"
+        title={tr("Коды восстановления", "Тиклаш кодлари")}
         footer={
           <Button size="sm" onClick={() => setRecoveryCodesModalOpen(false)}>
-            I saved these codes
+            {tr("Я сохранил эти коды", "Бу кодларни сақладим")}
           </Button>
         }
       >
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            Save these recovery codes in a safe place. Each code can be used once if you lose access to your authenticator app.
+            {tr(
+              "Сохраните эти коды восстановления в надежном месте. Каждый код можно использовать один раз, если вы потеряете доступ к приложению-аутентификатору.",
+              "Бу тиклаш кодларини хавфсиз жойда сақланг. Аутентификатор иловасига кириш йўқолса, ҳар бир коддан бир марта фойдаланиш мумкин."
+            )}
           </p>
           <div className="grid grid-cols-1 gap-1 text-xs sm:grid-cols-2">
             {latestRecoveryCodes.map((code) => (
@@ -925,8 +968,8 @@ export function ProfileClient() {
             ))}
           </div>
           <div className="flex justify-end">
-            <Button type="button" variant="outline" size="sm" onClick={() => copyValue(latestRecoveryCodes.join("\n"), "Recovery codes")}>
-              Copy codes
+            <Button type="button" variant="outline" size="sm" onClick={() => copyValue(latestRecoveryCodes.join("\n"), tr("Коды восстановления", "Тиклаш кодлари"))}>
+              {tr("Скопировать коды", "Кодларни нусхалаш")}
             </Button>
           </div>
         </div>
@@ -967,6 +1010,10 @@ function StatRow({ label, value }: { label: string; value: string }) {
 }
 
 export function RecentlyViewedClient() {
+  const { locale } = useLocale();
+  const isUz = locale === "uz-Cyrl-UZ";
+  const tr = (ru: string, uz: string) => (isUz ? uz : ru);
+
   const me = useAuthMe();
   const items = useRecentlyViewedStore((s) => s.items);
   const clear = useRecentlyViewedStore((s) => s.clear);
@@ -995,14 +1042,14 @@ export function RecentlyViewedClient() {
   return (
     <div className="mx-auto max-w-7xl space-y-4 px-4 py-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="font-heading text-2xl font-extrabold">Недавно просмотренные</h1>
+        <h1 className="font-heading text-2xl font-extrabold">{tr("Недавно просмотренные", "Яқинда кўрилганлар")}</h1>
         <Button variant="ghost" onClick={clearAll} disabled={items.length === 0}>
-          Очистить
+          {tr("Очистить", "Тозалаш")}
         </Button>
       </div>
 
       {items.length === 0 ? (
-        <EmptyState title="Пока нет просмотров" message="Откройте товар из каталога, и он появится в этом списке." />
+        <EmptyState title={tr("Пока нет просмотров", "Ҳозирча кўрилганлар йўқ")} message={tr("Откройте товар из каталога, и он появится в этом списке.", "Каталогдан товар очинг, у ушбу рўйхатда чиқади.")} />
       ) : (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {items.map((item) => (
@@ -1011,7 +1058,7 @@ export function RecentlyViewedClient() {
                 <Link href={`/product/${item.slug}`} className="line-clamp-2 text-sm font-semibold text-primary hover:underline">
                   {item.title}
                 </Link>
-                <p className="text-xs text-muted-foreground">Просмотрено: {formatDateTime(item.viewedAt)}</p>
+                <p className="text-xs text-muted-foreground">{tr("Просмотрено", "Кўрилган вақти")}: {formatDateTime(item.viewedAt, locale)}</p>
                 {item.minPrice != null ? <Badge className="bg-secondary/80">{formatPrice(item.minPrice)}</Badge> : null}
               </CardContent>
             </Card>
