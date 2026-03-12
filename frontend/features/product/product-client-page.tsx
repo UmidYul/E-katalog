@@ -88,6 +88,7 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
   );
   const currentProductId = product.data?.id;
   const currentProductTitle = product.data?.title;
+  const currentProductImage = product.data?.main_image ?? product.data?.gallery_images?.[0] ?? null;
   const serverAlertMap = useMemo(() => {
     const map = new Map<string, UserPriceAlert>();
     for (const alert of serverPriceAlerts.data ?? []) {
@@ -106,12 +107,13 @@ export function ProductClientPage({ productId, slug }: { productId: string; slug
       id: currentProductId,
       slug,
       title: currentProductTitle,
+      imageUrl: currentProductImage,
       minPrice: currentMinPrice,
     });
     if (me.data?.id) {
       void userApi.pushRecentlyViewed(currentProductId).catch(() => undefined);
     }
-  }, [currentMinPrice, currentProductId, currentProductTitle, me.data?.id, pushRecentlyViewed, slug]);
+  }, [currentMinPrice, currentProductId, currentProductImage, currentProductTitle, me.data?.id, pushRecentlyViewed, slug]);
 
   useEffect(() => {
     if (!currentProductId || !isFavorite) return;

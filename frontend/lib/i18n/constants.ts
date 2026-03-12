@@ -7,7 +7,7 @@ export const DEFAULT_LOCALE: Locale = "uz-Cyrl-UZ";
 export const FALLBACK_LOCALE: Locale = "ru-RU";
 
 export const LOCALE_LABELS: Record<Locale, string> = {
-  "uz-Cyrl-UZ": "Узбекча (кирилл)",
+  "uz-Cyrl-UZ": "Ўзбекча (кирилл)",
   "ru-RU": "Русский",
 };
 

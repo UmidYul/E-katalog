@@ -18,11 +18,14 @@ import {
   Tv,
   Watch,
 } from "lucide-react";
+import { useQueries } from "@tanstack/react-query";
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { useLocale, useT } from "@/components/common/locale-provider";
 import { useBrands, useCatalogProducts, useCategories } from "@/features/catalog/use-catalog-queries";
+import { catalogApi } from "@/lib/api/openapi-client";
 import { formatPrice } from "@/lib/utils/format";
 import { useRecentlyViewedStore } from "@/store/recentlyViewed.store";
 import type { ProductListItem } from "@/types/domain";
@@ -32,6 +35,13 @@ type HeroSlide = {
   subtitle: string;
   description: string;
   cta: string;
+  href: string;
+  bgClass: string;
+};
+
+type SideHeroCard = {
+  title: string;
+  subtitle: string;
   href: string;
   bgClass: string;
 };
@@ -76,18 +86,21 @@ const articles = [
     title: "Как выбрать ноутбук для учебы и работы",
     description: "Разбираем ключевые параметры: процессор, память, экран и автономность.",
     href: "/catalog?q=ноутбук",
+    image: "https://images.unsplash.com/photo-1496181133206-80ce9b88a853?auto=format&fit=crop&w=1200&q=80",
   },
   {
     category: "Подборка",
     title: "Лучшие смартфоны в популярных сегментах",
     description: "Сравниваем модели по камере, производительности и времени работы.",
     href: "/catalog?q=смартфон&sort=popular",
+    image: "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&w=1200&q=80",
   },
   {
     category: "База знаний",
     title: "С чего начать настройку умного дома",
     description: "Короткий план по стартовым устройствам и связкам экосистем.",
     href: "/catalog?q=умный дом",
+    image: "https://images.unsplash.com/photo-1558002038-1055907df827?auto=format&fit=crop&w=1200&q=80",
   },
 ];
 
@@ -130,18 +143,30 @@ const promotions = [
   },
 ];
 
-function HeroBanner() {
+function HeroBanner({
+  slides,
+  sideCards,
+  prevSlideLabel,
+  nextSlideLabel,
+  slideLabel,
+}: {
+  slides: HeroSlide[];
+  sideCards: SideHeroCard[];
+  prevSlideLabel: string;
+  nextSlideLabel: string;
+  slideLabel: (index: number) => string;
+}) {
   const [currentSlide, setCurrentSlide] = useState(0);
 
   useEffect(() => {
     const timer = setInterval(() => {
-      setCurrentSlide((prev) => (prev + 1) % heroSlides.length);
+      setCurrentSlide((prev) => (prev + 1) % slides.length);
     }, 5000);
     return () => clearInterval(timer);
-  }, []);
+  }, [slides.length]);
 
-  const prevSlide = () => setCurrentSlide((prev) => (prev - 1 + heroSlides.length) % heroSlides.length);
-  const nextSlide = () => setCurrentSlide((prev) => (prev + 1) % heroSlides.length);
+  const prevSlide = () => setCurrentSlide((prev) => (prev - 1 + slides.length) % slides.length);
+  const nextSlide = () => setCurrentSlide((prev) => (prev + 1) % slides.length);
 
   return (
     <section className="mx-auto max-w-7xl px-4 py-6">
@@ -151,7 +176,7 @@ function HeroBanner() {
             className="flex transition-transform duration-500 ease-out"
             style={{ transform: `translateX(-${currentSlide * 100}%)` }}
           >
-            {heroSlides.map((slide) => (
+            {slides.map((slide) => (
               <div
                 key={slide.title}
                 className={`flex min-w-full flex-col justify-center bg-gradient-to-br ${slide.bgClass} px-8 py-16 md:px-14 md:py-24`}
@@ -197,7 +222,7 @@ function HeroBanner() {
             type="button"
             onClick={prevSlide}
             className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-white/20 p-2 text-white backdrop-blur-sm transition-colors hover:bg-white/35"
-            aria-label="Предыдущий слайд"
+            aria-label={prevSlideLabel}
           >
             <ChevronLeft className="h-5 w-5" />
           </button>
@@ -205,26 +230,26 @@ function HeroBanner() {
             type="button"
             onClick={nextSlide}
             className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-white/20 p-2 text-white backdrop-blur-sm transition-colors hover:bg-white/35"
-            aria-label="Следующий слайд"
+            aria-label={nextSlideLabel}
           >
             <ChevronRight className="h-5 w-5" />
           </button>
 
           <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 gap-2">
-            {heroSlides.map((slide, index) => (
+            {slides.map((slide, index) => (
               <button
                 type="button"
                 key={slide.title}
                 onClick={() => setCurrentSlide(index)}
                 className={`h-2 rounded-full transition-all duration-300 ${index === currentSlide ? "w-7 bg-white" : "w-2 bg-white/40"}`}
-                aria-label={`Слайд ${index + 1}`}
+                aria-label={slideLabel(index + 1)}
               />
             ))}
           </div>
         </div>
 
         <div className="hidden w-64 flex-col gap-4 lg:flex">
-          {sideHeroCards.map((card) => (
+          {sideCards.map((card) => (
             <Link
               key={card.title}
               href={card.href}
@@ -247,7 +272,7 @@ function ProductCard({ item }: { item: ProductListItem }) {
   const slug = `${item.id}-${slugify(item.normalized_title)}`;
   const hasOldPrice = typeof item.max_price === "number" && typeof item.min_price === "number" && item.max_price > item.min_price;
   const reviews = Math.max(24, Math.round((item.score ?? 0) * 120));
-  const image = isImageUrl(item.image_url) ? item.image_url : null;
+  const image = normalizeImageUrl(item.image_url);
 
   return (
     <motion.div whileHover={{ y: -4 }} transition={{ type: "spring", stiffness: 300, damping: 24 }}>
@@ -331,6 +356,7 @@ function ProductSection({ title, items }: { title: string; items: ProductListIte
 }
 
 function NewsletterSection() {
+  const t = useT("pages.home");
   const [email, setEmail] = useState("");
   const [submitted, setSubmitted] = useState(false);
 
@@ -345,7 +371,7 @@ function NewsletterSection() {
             transition={{ duration: 0.5 }}
             className="mb-3 font-heading text-2xl font-bold text-white md:text-3xl"
           >
-            Узнавайте о скидках первыми
+            {t("newsletterTitle")}
           </motion.h2>
           <motion.p
             initial={{ opacity: 0, y: 12 }}
@@ -354,7 +380,7 @@ function NewsletterSection() {
             transition={{ duration: 0.5, delay: 0.1 }}
             className="mb-6 text-sm text-white/75"
           >
-            Подпишитесь на рассылку и получайте лучшие предложения и подборки в одном письме.
+            {t("newsletterText")}
           </motion.p>
           <AnimatePresence mode="wait">
             {submitted ? (
@@ -365,7 +391,7 @@ function NewsletterSection() {
                 exit={{ opacity: 0 }}
                 className="rounded-xl bg-white/20 px-4 py-3 text-sm font-medium text-white"
               >
-                Спасибо за подписку! 🎉
+                {t("newsletterThanks")}
               </motion.div>
             ) : (
               <motion.form
@@ -384,14 +410,14 @@ function NewsletterSection() {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Ваш email"
+                  placeholder={t("newsletterEmailPlaceholder")}
                   className="flex-1 rounded-xl bg-white/15 px-4 py-3 text-sm text-white placeholder:text-white/50 focus:outline-none focus:ring-2 focus:ring-white/40"
                 />
                 <button
                   type="submit"
                   className="rounded-xl bg-white px-6 py-3 text-sm font-bold text-accent transition-all hover:scale-[1.02] hover:shadow-lg active:scale-[0.98]"
                 >
-                  Подписаться
+                  {t("newsletterButton")}
                 </button>
               </motion.form>
             )}
@@ -416,16 +442,150 @@ const isImageUrl = (value: unknown): value is string => {
   return /^https?:\/\//i.test(normalized) || normalized.startsWith("/");
 };
 
+const normalizeImageUrl = (value: unknown): string | null => {
+  if (!isImageUrl(value)) return null;
+  const normalized = value.trim();
+  if (normalized.startsWith("/")) return normalized;
+  try {
+    const parsed = new URL(normalized);
+    const host = parsed.hostname.toLowerCase();
+    if (host === "localhost" || host === "127.0.0.1" || host === "api") {
+      return `${parsed.pathname}${parsed.search}`;
+    }
+    return normalized;
+  } catch {
+    return normalized;
+  }
+};
+
 export function HomeClient() {
+  const { locale } = useLocale();
+  const isUz = locale === "uz-Cyrl-UZ";
+  const tr = (ru: string, uz: string) => (isUz ? uz : ru);
+  const t = useT("pages.home");
   const categories = useCategories();
   const brands = useBrands();
   const popular = useCatalogProducts({ limit: 8, sort: "popular" });
   const newest = useCatalogProducts({ limit: 8, sort: "newest" });
   const recentItems = useRecentlyViewedStore((state) => state.items).slice(0, 4);
+  const recentImageQueries = useQueries({
+    queries: recentItems.map((item) => ({
+      queryKey: ["recently-viewed-image", item.id],
+      queryFn: async () => {
+        const product = await catalogApi.getProduct(item.id);
+        return product.main_image ?? product.gallery_images?.[0] ?? null;
+      },
+      enabled: Boolean(item.id) && !isImageUrl(item.imageUrl),
+      staleTime: 1000 * 60 * 10,
+    })),
+  });
 
   const topCategories = useMemo(() => (categories.data ?? []).slice(0, 8), [categories.data]);
   const topBrands = useMemo(() => (brands.data ?? []).slice(0, 16), [brands.data]);
   const tagLinks = tags.map((tag) => ({ tag, href: `/catalog?q=${encodeURIComponent(tag)}` }));
+  const localizedHeroSlides = useMemo<HeroSlide[]>(
+    () =>
+      isUz
+        ? [
+            {
+              title: "Техникалар нархини бир жойда солиштиринг",
+              subtitle: "Текширилган дўконлар",
+              description: "Долзарб таклифлар, нарх тарихи ва қулай танлов — бир неча босишда.",
+              cta: "Каталогга ўтиш",
+              href: "/catalog",
+              bgClass: "from-primary to-primary/85",
+            },
+            {
+              title: "Ноутбук ва смартфонни фойдали танланг",
+              subtitle: "Таклифларни солиштириш",
+              description: "Сотувчилар кесимида нархлар фарқини кўринг ва энг мақбул таклифни танланг.",
+              cta: "Сараламаларни кўриш",
+              href: "/catalog?sort=popular",
+              bgClass: "from-primary/90 to-primary",
+            },
+            {
+              title: "Тез танлов учун ақлли фильтрлар",
+              subtitle: "Категория ва брендлар",
+              description: "Нарх, бренд ва хусусиятлар бўйича фильтрланг ва долзарбликни йўқотманг.",
+              cta: "Фильтрларни очиш",
+              href: "/catalog",
+              bgClass: "from-primary to-accent/60",
+            },
+          ]
+        : heroSlides,
+    [isUz]
+  );
+  const localizedSideHeroCards = useMemo<SideHeroCard[]>(
+    () =>
+      isUz
+        ? [
+            { title: "Сараланганлар ва алертлар", subtitle: "Нарх тушишини кузатинг", href: "/favorites", bgClass: "from-primary/90 to-primary" },
+            { title: "1 га 1 солиштириш", subtitle: "Энг яхши вариантни танланг", href: "/compare", bgClass: "from-accent/70 to-primary" },
+          ]
+        : sideHeroCards,
+    [isUz]
+  );
+  const localizedAdvantages = useMemo(
+    () =>
+      isUz
+        ? [
+            { icon: Truck, title: "Тез етказиб бериш", description: "Сотувчиларда муддат ва мавжудлик" },
+            { icon: Shield, title: "Текширилган таклифлар", description: "Дўконлар бўйича очиқ нархлар витринаси" },
+            { icon: CreditCard, title: "Қулай танлов", description: "Нарх ва хусусиятларни битта интерфейсда солиштириш" },
+            { icon: RotateCcw, title: "Нарх тарихи", description: "Товарлар бўйича нарх динамикасини кузатинг" },
+          ]
+        : advantages,
+    [isUz]
+  );
+  const localizedPromotions = useMemo(
+    () =>
+      isUz
+        ? [
+            { title: "Кун таклифи", description: "Сўнгги суткада энг яхши нархга эга таклифлар.", href: "/catalog?sort=price_asc", badge: "Фойдали" },
+            { title: "Янги тушумлар", description: "Янги товар карточкалари ва янгиланган сотувчи таклифлари.", href: "/catalog?sort=newest", badge: "Янги" },
+            { title: "Оммавий брендлар", description: "Брендлар бўйича талабгир моделлар ва сегментларни кўринг.", href: "/catalog?sort=popular", badge: "Тренд" },
+          ]
+        : promotions,
+    [isUz]
+  );
+  const localizedArticles = useMemo(
+    () =>
+      isUz
+        ? [
+            {
+              category: "Танлов бўйича қўлланма",
+              title: "Ўқиш ва иш учун ноутбукни қандай танлаш керак",
+              description: "Асосий параметрларни кўриб чиқамиз: процессор, хотира, экран ва автономлик.",
+              href: "/catalog?q=ноутбук",
+              image: "https://images.unsplash.com/photo-1496181133206-80ce9b88a853?auto=format&fit=crop&w=1200&q=80",
+            },
+            {
+              category: "Саралама",
+              title: "Оммавий сегментлардаги энг яхши смартфонлар",
+              description: "Моделларни камера, унумдорлик ва ишлаш вақти бўйича солиштирамиз.",
+              href: "/catalog?q=смартфон&sort=popular",
+              image: "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&w=1200&q=80",
+            },
+            {
+              category: "Билимлар базаси",
+              title: "Ақлли уйни созлашни нимадан бошлаш керак",
+              description: "Бошланғич қурилмалар ва экотизим боғламалари бўйича қисқа режа.",
+              href: "/catalog?q=умный дом",
+              image: "https://images.unsplash.com/photo-1558002038-1055907df827?auto=format&fit=crop&w=1200&q=80",
+            },
+          ]
+        : articles,
+    [isUz]
+  );
+  const recentImageById = useMemo(() => {
+    const map = new Map<string, string | null>();
+    recentItems.forEach((item, index) => {
+      const fromStore = normalizeImageUrl(item.imageUrl);
+      const fromQuery = recentImageQueries[index]?.data;
+      map.set(item.id, fromStore ?? normalizeImageUrl(fromQuery));
+    });
+    return map;
+  }, [recentImageQueries, recentItems]);
 
   const fadeUp = {
     hidden: { opacity: 0, y: 24 },
@@ -434,13 +594,19 @@ export function HomeClient() {
 
   return (
     <div className="min-h-screen bg-background">
-      <HeroBanner />
+      <HeroBanner
+        slides={localizedHeroSlides}
+        sideCards={localizedSideHeroCards}
+        prevSlideLabel={t("heroPrevSlide")}
+        nextSlideLabel={t("heroNextSlide")}
+        slideLabel={(index) => t("heroSlideN", { index })}
+      />
 
       {/* Advantages strip */}
       <section className="border-y border-border bg-secondary/30">
         <div className="mx-auto max-w-7xl px-4">
           <div className="grid grid-cols-2 divide-x divide-border md:grid-cols-4">
-            {advantages.map((item, i) => (
+            {localizedAdvantages.map((item, i) => (
               <motion.div
                 key={item.title}
                 initial={{ opacity: 0, y: 12 }}
@@ -470,7 +636,7 @@ export function HomeClient() {
         viewport={{ once: true, margin: "-60px" }}
         className="mx-auto max-w-7xl px-4 py-12"
       >
-        <h2 className="mb-6 font-heading text-2xl font-bold text-foreground md:text-3xl">Выберите технику</h2>
+        <h2 className="mb-6 font-heading text-2xl font-bold text-foreground md:text-3xl">{t("categoriesTitle")}</h2>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:gap-4">
           {topCategories.map((category, index) => {
             const Icon = categoryIcons[index % categoryIcons.length] ?? Smartphone;
@@ -485,7 +651,7 @@ export function HomeClient() {
                 </div>
                 <div>
                   <h3 className="text-sm font-semibold text-foreground">{category.name}</h3>
-                  <p className="mt-0.5 text-xs text-muted-foreground">Категория каталога</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{t("categoryCardLabel")}</p>
                 </div>
               </Link>
             );
@@ -493,14 +659,14 @@ export function HomeClient() {
         </div>
       </motion.section>
 
-      <ProductSection title="Хиты продаж" items={popular.data?.items ?? []} />
-      <ProductSection title="Новинки" items={newest.data?.items ?? []} />
+      <ProductSection title={t("hitsTitle")} items={popular.data?.items ?? []} />
+      <ProductSection title={t("newArrivalsTitle")} items={newest.data?.items ?? []} />
 
       {/* Brands marquee */}
       {topBrands.length > 0 && (
         <section className="overflow-hidden border-y border-border bg-secondary/20 py-6">
           <div className="mb-4 px-4 text-center text-xs font-medium uppercase tracking-widest text-muted-foreground">
-            Популярные бренды
+            {t("popularBrandsTitle")}
           </div>
           <div className="relative flex overflow-hidden">
             {[0, 1].map((copy) => (
@@ -528,9 +694,9 @@ export function HomeClient() {
         viewport={{ once: true, margin: "-60px" }}
         className="mx-auto max-w-7xl px-4 py-12"
       >
-        <h2 className="mb-6 font-heading text-2xl font-bold text-foreground md:text-3xl">Акции</h2>
+        <h2 className="mb-6 font-heading text-2xl font-bold text-foreground md:text-3xl">{t("promotionsTitle")}</h2>
         <div className="grid gap-4 md:grid-cols-3">
-          {promotions.map((promotion, i) => (
+          {localizedPromotions.map((promotion, i) => (
             <motion.div
               key={promotion.title}
               initial={{ opacity: 0, y: 16 }}
@@ -546,7 +712,7 @@ export function HomeClient() {
                 <h3 className="font-heading text-lg font-bold text-foreground transition-colors group-hover:text-accent">{promotion.title}</h3>
                 <p className="mt-2 flex-1 text-sm text-muted-foreground">{promotion.description}</p>
                 <span className="mt-4 flex items-center gap-1 text-sm font-medium text-accent transition-all group-hover:gap-2">
-                  Перейти <ArrowRight className="h-3.5 w-3.5" />
+                  {t("goTo")} <ArrowRight className="h-3.5 w-3.5" />
                 </span>
               </Link>
             </motion.div>
@@ -562,9 +728,9 @@ export function HomeClient() {
         viewport={{ once: true, margin: "-60px" }}
         className="mx-auto max-w-7xl px-4 py-12"
       >
-        <h2 className="mb-6 font-heading text-2xl font-bold text-foreground md:text-3xl">Советы и подборки</h2>
+        <h2 className="mb-6 font-heading text-2xl font-bold text-foreground md:text-3xl">{t("articlesTitle")}</h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {articles.map((article, i) => (
+          {localizedArticles.map((article, i) => (
             <motion.div
               key={article.title}
               initial={{ opacity: 0, y: 16 }}
@@ -576,7 +742,16 @@ export function HomeClient() {
                 href={article.href}
                 className="group flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-all duration-200 hover:-translate-y-1 hover:shadow-md"
               >
-                <div className="aspect-[16/9] bg-gradient-to-br from-accent/5 to-accent/15" />
+                <div className="relative aspect-[16/9] overflow-hidden">
+                  <Image
+                    src={article.image}
+                    alt={article.title}
+                    fill
+                    sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
+                    className="object-cover transition-transform duration-300 group-hover:scale-105"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-black/5 to-transparent" />
+                </div>
                 <div className="flex flex-1 flex-col p-4">
                   <span className="mb-2 inline-block w-fit rounded-md bg-accent/10 px-2.5 py-0.5 text-xs font-bold text-accent">
                     {article.category}
@@ -586,7 +761,7 @@ export function HomeClient() {
                   </h3>
                   <p className="mb-3 line-clamp-2 text-sm leading-relaxed text-muted-foreground">{article.description}</p>
                   <span className="mt-auto flex items-center gap-1 text-sm font-medium text-accent transition-all group-hover:gap-2">
-                    Читать <ArrowRight className="h-3.5 w-3.5" />
+                    {t("readMore")} <ArrowRight className="h-3.5 w-3.5" />
                   </span>
                 </div>
               </Link>
@@ -603,7 +778,7 @@ export function HomeClient() {
         viewport={{ once: true, margin: "-60px" }}
         className="mx-auto max-w-7xl px-4 py-12"
       >
-        <h2 className="mb-6 font-heading text-2xl font-bold text-foreground md:text-3xl">Популярные запросы</h2>
+        <h2 className="mb-6 font-heading text-2xl font-bold text-foreground md:text-3xl">{t("popularQueriesTitle")}</h2>
         <div className="flex flex-wrap gap-2">
           {tagLinks.map((item) => (
             <Link
@@ -626,29 +801,36 @@ export function HomeClient() {
           viewport={{ once: true, margin: "-60px" }}
           className="mx-auto max-w-7xl px-4 py-12"
         >
-          <h2 className="mb-6 font-heading text-2xl font-bold text-foreground md:text-3xl">Недавно просмотренные</h2>
+          <h2 className="mb-6 font-heading text-2xl font-bold text-foreground md:text-3xl">{t("recentlyViewedTitle")}</h2>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:gap-4">
-            {recentItems.map((product) => (
-              <Link
-                key={product.id}
-                href={`/product/${product.slug}`}
-                className="group flex flex-col rounded-2xl border border-border bg-card shadow-sm transition-all duration-200 hover:-translate-y-1 hover:shadow-md"
-              >
-                <div className="aspect-square rounded-t-2xl bg-secondary/30 p-4">
-                  <div className="flex h-full items-center justify-center">
-                    <div className="h-16 w-16 rounded-xl bg-muted" />
+            {recentItems.map((product) => {
+              const imageUrl = normalizeImageUrl(recentImageById.get(product.id));
+              return (
+                <Link
+                  key={product.id}
+                  href={`/product/${product.slug}`}
+                  className="group flex flex-col rounded-2xl border border-border bg-card shadow-sm transition-all duration-200 hover:-translate-y-1 hover:shadow-md"
+                >
+                  <div className="relative aspect-square overflow-hidden rounded-t-2xl bg-secondary/30 p-4">
+                    {imageUrl ? (
+                      <Image src={imageUrl} alt={product.title} fill sizes="(min-width: 640px) 25vw, 50vw" className="object-cover" />
+                    ) : (
+                      <div className="flex h-full items-center justify-center">
+                        <div className="h-16 w-16 rounded-xl bg-muted" />
+                      </div>
+                    )}
                   </div>
-                </div>
-                <div className="p-3">
-                  <h3 className="mb-1 truncate text-sm font-medium text-foreground transition-colors group-hover:text-accent">
-                    {product.title}
-                  </h3>
-                  <p className="text-sm font-bold text-accent">
-                    {product.minPrice != null ? formatPrice(product.minPrice) : "Цена уточняется"}
-                  </p>
-                </div>
-              </Link>
-            ))}
+                  <div className="p-3">
+                    <h3 className="mb-1 truncate text-sm font-medium text-foreground transition-colors group-hover:text-accent">
+                      {product.title}
+                    </h3>
+                    <p className="text-sm font-bold text-accent">
+                      {product.minPrice != null ? formatPrice(product.minPrice) : t("pricePending")}
+                    </p>
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         </motion.section>
       )}

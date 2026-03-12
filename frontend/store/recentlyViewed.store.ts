@@ -5,6 +5,7 @@ type RecentlyViewedItem = {
   id: string;
   slug: string;
   title: string;
+  imageUrl?: string | null;
   minPrice?: number | null;
   viewedAt: string;
 };
@@ -12,7 +13,7 @@ type RecentlyViewedItem = {
 type RecentlyViewedState = {
   items: RecentlyViewedItem[];
   push: (item: Omit<RecentlyViewedItem, "viewedAt">) => void;
-  mergeRemote: (items: Array<{ id: string; slug: string; title: string; min_price?: number | null; viewed_at: string }>) => void;
+  mergeRemote: (items: Array<{ id: string; slug: string; title: string; image_url?: string | null; min_price?: number | null; viewed_at: string }>) => void;
   clear: () => void;
 };
 
@@ -32,10 +33,11 @@ export const useRecentlyViewedStore = create<RecentlyViewedState>()(
         const local = get().items;
         const map = new Map<string, RecentlyViewedItem>();
 
-        const toItem = (entry: { id: string; slug: string; title: string; min_price?: number | null; viewed_at: string }): RecentlyViewedItem => ({
+        const toItem = (entry: { id: string; slug: string; title: string; image_url?: string | null; min_price?: number | null; viewed_at: string }): RecentlyViewedItem => ({
           id: String(entry.id),
           slug: entry.slug,
           title: entry.title,
+          imageUrl: entry.image_url ?? null,
           minPrice: entry.min_price ?? null,
           viewedAt: entry.viewed_at,
         });
@@ -46,8 +48,9 @@ export const useRecentlyViewedStore = create<RecentlyViewedState>()(
         for (const remote of items) {
           const normalized = toItem(remote);
           const current = map.get(normalized.id);
-          if (!current || new Date(normalized.viewedAt).getTime() > new Date(current.viewedAt).getTime()) {
-            map.set(normalized.id, normalized);
+          const merged = !normalized.imageUrl && current?.imageUrl ? { ...normalized, imageUrl: current.imageUrl } : normalized;
+          if (!current || new Date(merged.viewedAt).getTime() > new Date(current.viewedAt).getTime()) {
+            map.set(merged.id, merged);
           }
         }
 

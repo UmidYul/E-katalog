@@ -5,7 +5,7 @@ export const ruMessages = {
     name: "Doxx",
   },
   locale: {
-    uzCyrillic: "Узбекча (кирилл)",
+    uzCyrillic: "Ўзбекча (кирилл)",
     russian: "Русский",
     shortUz: "ЎЗ",
     shortRu: "РУ",
@@ -76,6 +76,28 @@ export const ruMessages = {
     rights: "© {year} Doxx. Все права защищены.",
   },
   pages: {
+    home: {
+      heroPrevSlide: "Предыдущий слайд",
+      heroNextSlide: "Следующий слайд",
+      heroSlideN: "Слайд {index}",
+      categoriesTitle: "Выберите технику",
+      categoryCardLabel: "Категория каталога",
+      hitsTitle: "Хиты продаж",
+      newArrivalsTitle: "Новинки",
+      popularBrandsTitle: "Популярные бренды",
+      promotionsTitle: "Акции",
+      goTo: "Перейти",
+      articlesTitle: "Советы и подборки",
+      readMore: "Читать",
+      popularQueriesTitle: "Популярные запросы",
+      recentlyViewedTitle: "Недавно просмотренные",
+      pricePending: "Цена уточняется",
+      newsletterTitle: "Узнавайте о скидках первыми",
+      newsletterText: "Подпишитесь на рассылку и получайте лучшие предложения и подборки в одном письме.",
+      newsletterThanks: "Спасибо за подписку!",
+      newsletterEmailPlaceholder: "Ваш email",
+      newsletterButton: "Подписаться",
+    },
     catalog: {
       title: "Каталог техники",
       description: "Каталог техники с актуальными ценами, фильтрами по брендам и магазинам, сравнением характеристик и предложений.",
@@ -204,7 +226,10 @@ export const ruMessages = {
   },
 } as const;
 
-export const uzMessages: typeof ruMessages = {
+type MessageSchema<T> = T extends string ? string : T extends Record<string, unknown> ? { [K in keyof T]: MessageSchema<T[K]> } : T;
+export type I18nMessages = MessageSchema<typeof ruMessages>;
+
+export const uzMessages: I18nMessages = {
   app: {
     name: "Doxx",
   },
@@ -280,6 +305,28 @@ export const uzMessages: typeof ruMessages = {
     rights: "© {year} Doxx. Барча ҳуқуқлар ҳимояланган.",
   },
   pages: {
+    home: {
+      heroPrevSlide: "Олдинги слайд",
+      heroNextSlide: "Кейинги слайд",
+      heroSlideN: "Слайд {index}",
+      categoriesTitle: "Техникани танланг",
+      categoryCardLabel: "Каталог категорияси",
+      hitsTitle: "Сотув хитлари",
+      newArrivalsTitle: "Янги маҳсулотлар",
+      popularBrandsTitle: "Оммавий брендлар",
+      promotionsTitle: "Акциялар",
+      goTo: "Ўтиш",
+      articlesTitle: "Маслаҳатлар ва сараламалар",
+      readMore: "Ўқиш",
+      popularQueriesTitle: "Оммавий сўровлар",
+      recentlyViewedTitle: "Яқинда кўрилганлар",
+      pricePending: "Нарх аниқланмоқда",
+      newsletterTitle: "Чегирмалар ҳақида биринчи бўлиб билинг",
+      newsletterText: "Янгиликларимизга обуна бўлиб, энг яхши таклифлар ва сараламаларни бир хатда олинг.",
+      newsletterThanks: "Обуна учун раҳмат!",
+      newsletterEmailPlaceholder: "Email манзилингиз",
+      newsletterButton: "Обуна бўлиш",
+    },
     catalog: {
       title: "Техника каталоги",
       description: "Бренд ва дўкон фильтрлари, хусусиятлар солиштируви ва долзарб нархлар билан техника каталоги.",
@@ -408,7 +455,7 @@ export const uzMessages: typeof ruMessages = {
   },
 };
 
-export const messages: Record<Locale, typeof ruMessages> = {
+export const messages: Record<Locale, I18nMessages> = {
   "ru-RU": ruMessages,
   "uz-Cyrl-UZ": uzMessages,
 };

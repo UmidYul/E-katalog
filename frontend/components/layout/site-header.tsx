@@ -150,7 +150,7 @@ export function SiteHeader() {
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent shadow-sm">
             <span className="font-heading text-lg font-bold text-white">D</span>
           </div>
-          <span className="hidden font-heading text-xl font-bold text-foreground lg:block">Doxx</span>
+          <span className="font-heading text-lg font-bold text-foreground sm:text-xl">Doxx</span>
         </Link>
 
         {/* Search — center */}

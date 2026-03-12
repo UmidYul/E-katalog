@@ -80,7 +80,6 @@ async function loadCategoryIndex(): Promise<{ categories: Category[]; brands: Br
 
 export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
   const locale = getRequestLocale();
-  const t = createTranslator(locale);
   const { categories, brands } = await loadCategoryIndex();
   const canonical = `${env.appUrl}/category/${params.slug}`;
 
