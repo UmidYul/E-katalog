@@ -1,105 +1,157 @@
-"use client";
+﻿"use client";
 
+import { useQueries } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 
-import { ProductCard } from "@/components/catalog/product-card";
-import { EmptyState } from "@/components/common/empty-state";
+import { ProductCard, ProductListRow } from "@/components/catalog/product-card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useLocale } from "@/components/common/locale-provider";
 import { useFavorites, useToggleFavorite } from "@/features/user/use-favorites";
-import { buildPriceAlertSignal, toPositivePriceOrNull } from "@/lib/utils/price-alerts";
+import { catalogApi } from "@/lib/api/openapi-client";
 import { COMPARE_LIMIT, useCompareStore } from "@/store/compare.store";
-import { usePriceAlertsStore } from "@/store/priceAlerts.store";
-import type { ProductListItem } from "@/types/domain";
+import type { ProductListItem, ProductOffer } from "@/types/domain";
 
-export function CatalogGrid({ loading, items }: { loading: boolean; items: ProductListItem[] }) {
-  const { locale } = useLocale();
-  const { data: favorites } = useFavorites();
-  const toggle = useToggleFavorite();
-  const compareItems = useCompareStore((s) => s.items);
-  const toggleCompare = useCompareStore((s) => s.toggle);
-  const alertMetas = usePriceAlertsStore((s) => s.metas);
-  const ensureAlertMeta = usePriceAlertsStore((s) => s.ensureMeta);
+export type CatalogViewMode = "grid" | "list";
 
-  const favoriteSet = useMemo(() => new Set((favorites ?? []).map((x) => x.product_id)), [favorites]);
-
-  useEffect(() => {
-    items.forEach((item) => {
-      if (!favoriteSet.has(item.id)) return;
-      ensureAlertMeta(item.id, toPositivePriceOrNull(item.min_price));
-    });
-  }, [ensureAlertMeta, favoriteSet, items]);
-
-  if (loading) {
+export function ProductGridSkeleton({ count = 12, mode = "grid" }: { count?: number; mode?: CatalogViewMode }) {
+  if (mode === "list") {
     return (
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {Array.from({ length: 9 }).map((_, idx) => (
-          <Skeleton key={idx} className="h-[340px] rounded-2xl" />
+      <div className="space-y-3">
+        {Array.from({ length: Math.max(6, Math.ceil(count / 2)) }).map((_, index) => (
+          <Skeleton key={index} className="h-[180px] rounded-2xl" />
         ))}
       </div>
     );
   }
 
-  if (!items.length) {
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      {Array.from({ length: count }).map((_, index) => (
+        <Skeleton key={index} className="h-[360px] rounded-2xl" />
+      ))}
+    </div>
+  );
+}
+
+export function CatalogGrid({
+  loading,
+  items,
+  viewMode,
+}: {
+  loading: boolean;
+  items: ProductListItem[];
+  viewMode: CatalogViewMode;
+}) {
+  const { data: favorites } = useFavorites();
+  const toggleFavorite = useToggleFavorite();
+
+  const compareItems = useCompareStore((state) => state.items);
+  const toggleCompare = useCompareStore((state) => state.toggle);
+
+  const favoriteSet = useMemo(() => new Set((favorites ?? []).map((item) => item.product_id)), [favorites]);
+  const compareSet = useMemo(() => new Set(compareItems.map((item) => item.id)), [compareItems]);
+
+  const referenceCategory = useMemo(() => {
+    for (const entry of compareItems) {
+      const normalized = String(entry.category ?? "").trim().toLowerCase();
+      if (normalized) return normalized;
+    }
+    return undefined;
+  }, [compareItems]);
+
+  const offerQueries = useQueries({
+    queries:
+      viewMode === "list"
+        ? items.map((item) => ({
+            queryKey: ["catalog", "offers", item.id, "list-view"],
+            queryFn: () => catalogApi.getOffers(item.id, { sort: "price", limit: 4 }),
+            staleTime: 60_000,
+          }))
+        : [],
+  });
+
+  const offersByProductId = useMemo(() => {
+    const map = new Map<string, ProductOffer[]>();
+    if (viewMode !== "list") return map;
+    items.forEach((item, index) => {
+      map.set(item.id, offerQueries[index]?.data ?? []);
+    });
+    return map;
+  }, [items, offerQueries, viewMode]);
+
+  if (loading) {
+    return <ProductGridSkeleton count={12} mode={viewMode} />;
+  }
+
+  if (viewMode === "list") {
     return (
-      <EmptyState
-        title={locale === "uz-Cyrl-UZ" ? "Товарлар топилмади" : "Товары не найдены"}
-        message={locale === "uz-Cyrl-UZ" ? "Фильтр ёки қидирув сўровини ўзгартириб кўринг." : "Попробуйте изменить фильтры или поисковый запрос."}
-      />
+      <div className="space-y-3">
+        {items.map((item) => {
+          const inCompare = compareSet.has(item.id);
+          const normalizedCategory = String(item.category?.name ?? "").trim().toLowerCase();
+          const categoryMismatch = Boolean(referenceCategory && normalizedCategory && referenceCategory !== normalizedCategory);
+          const compareDisabled = !inCompare && (compareItems.length >= COMPARE_LIMIT || categoryMismatch);
+
+          return (
+            <ProductListRow
+              key={item.id}
+              product={item}
+              favorite={favoriteSet.has(item.id)}
+              onFavorite={(id) =>
+                toggleFavorite.mutate({
+                  productId: id,
+                  currentPrice: item.min_price ?? null,
+                })
+              }
+              compared={inCompare}
+              compareDisabled={compareDisabled}
+              compareDisabledReason={compareDisabled ? "Фақат битта категория ва максимум 4 товар" : undefined}
+              onCompare={(id) =>
+                toggleCompare({
+                  id,
+                  title: item.normalized_title,
+                  slug: `${item.id}-${slugify(item.normalized_title)}`,
+                  category: item.category?.name,
+                  image: item.image_url,
+                })
+              }
+              offers={offersByProductId.get(item.id)}
+            />
+          );
+        })}
+      </div>
     );
   }
 
-  const compareSet = new Set(compareItems.map((item) => item.id));
-  const compareFull = compareItems.length >= COMPARE_LIMIT;
-  const referenceCompareCategory = getReferenceCategory(compareItems.map((item) => item.category));
-
-  const container = {
-    hidden: {},
-    show: { transition: { staggerChildren: 0.06 } },
-  };
-
   return (
-    <motion.div
-      variants={container}
-      initial="hidden"
-      animate="show"
-      className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
-    >
+    <motion.div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       {items.map((item) => {
         const inCompare = compareSet.has(item.id);
-        const categoryMismatch = Boolean(referenceCompareCategory && normalizeCategory(item.category?.name) && normalizeCategory(item.category?.name) !== referenceCompareCategory);
-        const compareDisabled = !inCompare && (compareFull || categoryMismatch);
-        const compareDisabledReason = compareFull
-          ? locale === "uz-Cyrl-UZ"
-            ? `Лимит: ${COMPARE_LIMIT} товар`
-            : `Лимит: ${COMPARE_LIMIT} товара`
-          : categoryMismatch
-            ? locale === "uz-Cyrl-UZ"
-              ? "Фақат битта категория ичида солиштириш мумкин"
-              : "Можно сравнивать только внутри одной категории"
-            : undefined;
-        const isTracking = favoriteSet.has(item.id);
-        const alertMeta = alertMetas[item.id];
-        const signal = isTracking && alertMeta?.alerts_enabled ? buildPriceAlertSignal(alertMeta, toPositivePriceOrNull(item.min_price)) : null;
+        const normalizedCategory = String(item.category?.name ?? "").trim().toLowerCase();
+        const categoryMismatch = Boolean(referenceCategory && normalizedCategory && referenceCategory !== normalizedCategory);
+        const compareDisabled = !inCompare && (compareItems.length >= COMPARE_LIMIT || categoryMismatch);
 
         return (
           <ProductCard
             key={item.id}
             product={item}
-            favorite={isTracking}
-            onFavorite={(id) => toggle.mutate(id)}
+            favorite={favoriteSet.has(item.id)}
+            onFavorite={(id) =>
+              toggleFavorite.mutate({
+                productId: id,
+                currentPrice: item.min_price ?? null,
+              })
+            }
             compared={inCompare}
             compareDisabled={compareDisabled}
-            compareDisabledReason={compareDisabledReason}
-            isTracking={isTracking}
-            priceAlertSignal={signal}
+            compareDisabledReason={compareDisabled ? "Фақат битта категория ва максимум 4 товар" : undefined}
             onCompare={(id) =>
               toggleCompare({
                 id,
                 title: item.normalized_title,
                 slug: `${item.id}-${slugify(item.normalized_title)}`,
-                category: item.category?.name
+                category: item.category?.name,
+                image: item.image_url,
               })
             }
           />
@@ -108,20 +160,6 @@ export function CatalogGrid({ loading, items }: { loading: boolean; items: Produ
     </motion.div>
   );
 }
-
-const normalizeCategory = (value: unknown) => {
-  if (typeof value !== "string") return undefined;
-  const normalized = value.trim().toLowerCase();
-  return normalized || undefined;
-};
-
-const getReferenceCategory = (categories: Array<string | undefined>) => {
-  for (const category of categories) {
-    const normalized = normalizeCategory(category);
-    if (normalized) return normalized;
-  }
-  return undefined;
-};
 
 const slugify = (text: string) =>
   text

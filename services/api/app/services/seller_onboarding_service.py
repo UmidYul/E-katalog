@@ -74,6 +74,8 @@ def map_seller_application_payload_to_partner_lead(payload: Any) -> dict[str, An
     elif work_type == "online":
         logistics_model = "dropshipping"
 
+    raw_notes = str(getattr(payload, "notes", "") or "").strip()
+
     extra_context = {
         "legal_type": getattr(payload, "legal_type", "individual"),
         "contact_person": contact_person or None,
@@ -87,6 +89,9 @@ def map_seller_application_payload_to_partner_lead(payload: Any) -> dict[str, An
         "pickup_available": bool(getattr(payload, "pickup_available", False)),
         "product_categories": list(getattr(payload, "product_categories", []) or []),
         "documents": list(getattr(payload, "documents", []) or []),
+        "submission_method": str(getattr(payload, "submission_method", "") or "").strip() or None,
+        "estimated_product_count_range": str(getattr(payload, "estimated_product_count_range", "") or "").strip() or None,
+        "notes": raw_notes or None,
     }
 
     return {

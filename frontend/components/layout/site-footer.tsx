@@ -1,12 +1,16 @@
 ﻿"use client";
 
 import Link from "next/link";
-import { Send, Youtube } from "lucide-react";
+import { Instagram, Send } from "lucide-react";
 import { useMemo } from "react";
 
-import { useT } from "@/components/common/locale-provider";
+import { useLocale, useT } from "@/components/common/locale-provider";
 
 export function SiteFooter() {
+  const { locale } = useLocale();
+  const isUz = locale === "uz-Cyrl-UZ";
+  const tr = (ru: string, uz: string) => (isUz ? uz : ru);
+
   const t = useT("footer");
   const year = new Date().getUTCFullYear();
 
@@ -41,8 +45,7 @@ export function SiteFooter() {
   return (
     <footer style={{ backgroundColor: "#0D1117", color: "#9BA3B5" }}>
       <div className="mx-auto max-w-[1280px] px-4 py-16">
-        {/* Top: logo + tagline */}
-        <div className="mb-12 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="mb-12 flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <Link href="/" className="inline-flex items-center gap-2.5" aria-label="Doxx">
               <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent shadow-sm">
@@ -55,42 +58,54 @@ export function SiteFooter() {
             </p>
           </div>
 
-          {/* Social links */}
-          <div className="flex items-center gap-2">
-            <a
-              href="#"
-              className="flex h-9 w-9 items-center justify-center rounded-md transition-colors"
-              style={{ backgroundColor: "rgba(255,255,255,0.06)", color: "#9BA3B5" }}
-              aria-label="VK"
-              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#2563EB"; (e.currentTarget as HTMLElement).style.color = "#fff"; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#9BA3B5"; }}
-            >
-              <span className="text-xs font-bold">VK</span>
-            </a>
-            <a
-              href="#"
-              className="flex h-9 w-9 items-center justify-center rounded-md transition-colors"
-              style={{ backgroundColor: "rgba(255,255,255,0.06)", color: "#9BA3B5" }}
-              aria-label="Telegram"
-              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#2563EB"; (e.currentTarget as HTMLElement).style.color = "#fff"; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#9BA3B5"; }}
-            >
-              <Send className="h-4 w-4" />
-            </a>
-            <a
-              href="#"
-              className="flex h-9 w-9 items-center justify-center rounded-md transition-colors"
-              style={{ backgroundColor: "rgba(255,255,255,0.06)", color: "#9BA3B5" }}
-              aria-label="YouTube"
-              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#2563EB"; (e.currentTarget as HTMLElement).style.color = "#fff"; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "#9BA3B5"; }}
-            >
-              <Youtube className="h-4 w-4" />
-            </a>
+          <div className="max-w-sm">
+            <div className="flex items-center gap-2">
+              <a
+                href="https://t.me/doxx_uz"
+                target="_blank"
+                rel="noreferrer"
+                className="flex h-9 w-9 items-center justify-center rounded-md transition-colors"
+                style={{ backgroundColor: "rgba(255,255,255,0.06)", color: "#9BA3B5" }}
+                aria-label="Telegram"
+                onMouseEnter={(event) => {
+                  event.currentTarget.style.backgroundColor = "#2563EB";
+                  event.currentTarget.style.color = "#fff";
+                }}
+                onMouseLeave={(event) => {
+                  event.currentTarget.style.backgroundColor = "rgba(255,255,255,0.06)";
+                  event.currentTarget.style.color = "#9BA3B5";
+                }}
+              >
+                <Send className="h-4 w-4" />
+              </a>
+              <a
+                href="https://instagram.com/doxx.uz"
+                target="_blank"
+                rel="noreferrer"
+                className="flex h-9 w-9 items-center justify-center rounded-md transition-colors"
+                style={{ backgroundColor: "rgba(255,255,255,0.06)", color: "#9BA3B5" }}
+                aria-label="Instagram"
+                onMouseEnter={(event) => {
+                  event.currentTarget.style.backgroundColor = "#2563EB";
+                  event.currentTarget.style.color = "#fff";
+                }}
+                onMouseLeave={(event) => {
+                  event.currentTarget.style.backgroundColor = "rgba(255,255,255,0.06)";
+                  event.currentTarget.style.color = "#9BA3B5";
+                }}
+              >
+                <Instagram className="h-4 w-4" />
+              </a>
+            </div>
+            <p className="mt-3 text-sm" style={{ color: "#7A859D" }}>
+              {tr(
+                "Подпишитесь на Telegram-канал и узнавайте о скидках первыми.",
+                "Telegram-каналга обуна бўлинг ва чегирмаларни биринчи бўлиб билинг."
+              )}
+            </p>
           </div>
         </div>
 
-        {/* Links grid */}
         <div className="grid grid-cols-2 gap-8 sm:grid-cols-4">
           {Object.entries(footerLinks).map(([title, links]) => (
             <div key={title}>
@@ -98,11 +113,7 @@ export function SiteFooter() {
               <ul className="flex flex-col gap-2.5">
                 {links.map((link) => (
                   <li key={link.href}>
-                    <Link
-                      href={link.href}
-                      className="text-sm transition-colors hover:text-white"
-                      style={{ color: "#5A6478" }}
-                    >
+                    <Link href={link.href} className="text-sm transition-colors hover:text-white" style={{ color: "#5A6478" }}>
                       {link.label}
                     </Link>
                   </li>
@@ -112,7 +123,6 @@ export function SiteFooter() {
           ))}
         </div>
 
-        {/* Bottom bar */}
         <div
           className="mt-12 flex flex-col items-center justify-between gap-4 border-t pt-8 sm:flex-row"
           style={{ borderColor: "rgba(255,255,255,0.08)" }}
@@ -136,3 +146,4 @@ export function SiteFooter() {
     </footer>
   );
 }
+

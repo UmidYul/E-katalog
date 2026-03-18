@@ -3,6 +3,7 @@ import { persist } from "zustand/middleware";
 
 export const COMPARE_LIMIT = 4;
 export const COMPARE_HISTORY_LIMIT = 12;
+const COMPARE_IDS_STORAGE_KEY = "doxx_compare";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type CompareItem = {
@@ -10,6 +11,7 @@ export type CompareItem = {
   title: string;
   slug: string;
   category?: string;
+  image?: string;
   addedAt: string;
 };
 
@@ -24,13 +26,17 @@ export type CompareHistoryEntry = {
 export type CompareToggleResult = "added" | "removed" | "limit_reached" | "category_mismatch" | "already_added";
 
 type CompareState = {
+  ids: string[];
   items: CompareItem[];
   history: CompareHistoryEntry[];
   add: (item: Omit<CompareItem, "addedAt">) => CompareToggleResult;
+  addProduct: (id: string) => CompareToggleResult;
   replace: (items: Omit<CompareItem, "addedAt">[]) => void;
   remove: (id: string) => void;
+  removeProduct: (id: string) => void;
   toggle: (item: Omit<CompareItem, "addedAt">) => CompareToggleResult;
   clear: () => void;
+  clearAll: () => void;
   saveSnapshot: (sourceItems?: CompareItem[]) => void;
   restoreSnapshot: (historyId: string) => void;
   clearHistory: () => void;
@@ -84,6 +90,7 @@ const sanitizeCompareItem = (value: unknown): CompareItem | null => {
     title: normalizeText(candidate.title) ?? id,
     slug: normalizeText(candidate.slug) ?? id,
     category: normalizeCategory(candidate.category),
+    image: normalizeText(candidate.image),
     addedAt: normalizeIsoDate(candidate.addedAt)
   };
 };
@@ -146,6 +153,7 @@ const appendItem = (current: CompareItem[], next: Omit<CompareItem, "addedAt">) 
       title: normalizeText(next.title) ?? nextId,
       slug: normalizeText(next.slug) ?? nextId,
       category: nextCategory,
+      image: normalizeText(next.image),
       addedAt: new Date().toISOString()
     },
   ];
@@ -167,6 +175,7 @@ const sanitizeIncomingItems = (items: Omit<CompareItem, "addedAt">[]) => {
       title: normalizeText(raw.title) ?? id,
       slug: normalizeText(raw.slug) ?? id,
       category,
+      image: normalizeText(raw.image),
       addedAt: new Date().toISOString()
     });
     if (normalized.length >= COMPARE_LIMIT) break;
@@ -174,41 +183,74 @@ const sanitizeIncomingItems = (items: Omit<CompareItem, "addedAt">[]) => {
   return normalized;
 };
 
+const toIds = (items: CompareItem[]) => items.map((item) => item.id).slice(0, COMPARE_LIMIT);
+
+const syncIdsToStorage = (ids: string[]) => {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(COMPARE_IDS_STORAGE_KEY, JSON.stringify(ids));
+  } catch {
+    // ignore storage errors
+  }
+};
+
 export const useCompareStore = create<CompareState>()(
   persist(
     (set, get) => ({
+      ids: [],
       items: [],
       history: [],
       add: (item) => {
         const current = get().items;
         const result = appendItem(current, item);
         if (result.type === "added") {
-          set({ items: result.items });
+          const nextIds = toIds(result.items);
+          set({ items: result.items, ids: nextIds });
+          syncIdsToStorage(nextIds);
         }
         return result.type;
       },
+      addProduct: (id) => get().add({ id, title: id, slug: id }),
       replace: (items) => {
-        set({ items: sanitizeIncomingItems(items) });
+        const nextItems = sanitizeIncomingItems(items);
+        const nextIds = toIds(nextItems);
+        set({ items: nextItems, ids: nextIds });
+        syncIdsToStorage(nextIds);
       },
       remove: (id) => {
         const normalizedId = normalizeText(id);
         if (!normalizedId) return;
-        set((state) => ({ items: state.items.filter((item) => item.id !== normalizedId) }));
+        set((state) => {
+          const nextItems = state.items.filter((item) => item.id !== normalizedId);
+          const nextIds = toIds(nextItems);
+          syncIdsToStorage(nextIds);
+          return { items: nextItems, ids: nextIds };
+        });
       },
+      removeProduct: (id) => get().remove(id),
       toggle: (item) => {
         const current = get().items;
         const normalizedId = normalizeText(item.id);
         if (normalizedId && current.some((existing) => existing.id === normalizedId)) {
-          set({ items: current.filter((existing) => existing.id !== normalizedId) });
+          const nextItems = current.filter((existing) => existing.id !== normalizedId);
+          const nextIds = toIds(nextItems);
+          set({ items: nextItems, ids: nextIds });
+          syncIdsToStorage(nextIds);
           return "removed";
         }
         const result = appendItem(current, item);
         if (result.type === "added") {
-          set({ items: result.items });
+          const nextIds = toIds(result.items);
+          set({ items: result.items, ids: nextIds });
+          syncIdsToStorage(nextIds);
         }
         return result.type;
       },
-      clear: () => set({ items: [] }),
+      clear: () => {
+        set({ items: [], ids: [] });
+        syncIdsToStorage([]);
+      },
+      clearAll: () => get().clear(),
       saveSnapshot: (sourceItems) => {
         const items = sourceItems ?? get().items;
         if (items.length < 2) return;
@@ -238,13 +280,16 @@ export const useCompareStore = create<CompareState>()(
       restoreSnapshot: (historyId) => {
         const snapshot = get().history.find((entry) => entry.id === historyId);
         if (!snapshot) return;
+        const nextItems = snapshot.items.slice(0, COMPARE_LIMIT).map((item) => ({
+          ...item,
+          id: normalizeUuid(item.id) ?? item.id,
+          addedAt: new Date().toISOString()
+        }));
         set({
-          items: snapshot.items.slice(0, COMPARE_LIMIT).map((item) => ({
-            ...item,
-            id: normalizeUuid(item.id) ?? item.id,
-            addedAt: new Date().toISOString()
-          }))
+          items: nextItems,
+          ids: toIds(nextItems)
         });
+        syncIdsToStorage(toIds(nextItems));
       },
       clearHistory: () => set({ history: [] })
     }),
@@ -254,8 +299,10 @@ export const useCompareStore = create<CompareState>()(
       skipHydration: true,
       migrate: (persistedState) => {
         const state = persistedState as { items?: unknown; history?: unknown } | undefined;
+        const items = sanitizeCompareItems(state?.items);
         return {
-          items: sanitizeCompareItems(state?.items),
+          ids: toIds(items),
+          items,
           history: sanitizeCompareHistory(state?.history)
         };
       }

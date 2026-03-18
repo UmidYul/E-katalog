@@ -1,4 +1,12 @@
-export type SortOption = "relevance" | "price_asc" | "price_desc" | "popular" | "newest" | "price_drop_7d";
+export type SortOption =
+  | "relevance"
+  | "price_asc"
+  | "price_desc"
+  | "popular"
+  | "newest"
+  | "price_drop_7d"
+  | "discount"
+  | "shop_count";
 
 export type BrandListItem = {
   id: string;
@@ -19,6 +27,7 @@ export type ProductListItem = {
   category?: { id: string; name: string } | null;
   is_new?: boolean;
   discount_pct?: number;
+  price_drop_pct?: number;
 };
 
 export type ProductDetail = {
@@ -70,6 +79,7 @@ export type PriceHistoryPoint = {
 
 export type Paginated<T> = {
   items: T[];
+  total: number;
   next_cursor?: string | null;
   request_id: string;
 };

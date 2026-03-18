@@ -77,10 +77,10 @@ export function OfferTable({ offersByStore }: { offersByStore: OffersByStore[] }
               <Badge className="bg-accent/10 text-accent">{formatPrice(storeBlock.minimal_price)}</Badge>
             </div>
             <div className="space-y-2">
-              {storeBlock.offers.map((offer) => (
+              {storeBlock.offers.map((offer, index) => (
                 <div key={offer.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-3 py-3">
                   <div>
-                    <p className="font-medium">{offer.seller_name}</p>
+                    <p className="font-medium">{tr("Предложение", "Таклиф")} #{index + 1}</p>
                     <p className="text-xs text-muted-foreground">{tr("Обновлено", "Янгиланди")}: {formatScrapedAt(offer.scraped_at)}</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">

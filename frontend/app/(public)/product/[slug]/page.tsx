@@ -3,131 +3,116 @@ import { notFound } from "next/navigation";
 
 import { env } from "@/config/env";
 import { ProductClientPage } from "@/features/product/product-client-page";
+import {
+  extractProductRefFromSlug,
+  mapProductApiToPageData,
+  type ProductApiResponse,
+  type ProductReviewItem,
+} from "@/features/product/product-types";
 import { serverGet } from "@/lib/api/server";
-import { getRequestLocale } from "@/lib/i18n/server";
-import type { Locale } from "@/lib/i18n/types";
-import { buildProductFaq, toFaqJsonLd } from "@/lib/seo/content";
+import { formatPrice } from "@/lib/utils/format";
 
-type ProductSeoPayload = {
-  id: string;
-  title: string;
-  category?: string | null;
-  brand?: string | null;
-  short_description?: string | null;
-  main_image?: string | null;
+type PageParams = { slug: string };
+
+const loadProduct = async (slug: string) => {
+  const productRef = extractProductRefFromSlug(slug);
+  if (!productRef) return null;
+
+  try {
+    const [product, reviews] = await Promise.all([
+      serverGet<ProductApiResponse>(`/products/${productRef}`),
+      serverGet<ProductReviewItem[]>(`/products/${productRef}/reviews?limit=60&offset=0`).catch(() => []),
+    ]);
+
+    return mapProductApiToPageData(product, {
+      slug,
+      reviews,
+      similar: [],
+    });
+  } catch {
+    return null;
+  }
 };
 
-const UUID_PREFIX_PATTERN =
-  /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})(?:-|$)/;
-
-const parseProductRef = (slug: string) => {
-  const uuidMatch = slug.match(UUID_PREFIX_PATTERN);
-  if (uuidMatch?.[1]) {
-    return uuidMatch[1].toLowerCase();
-  }
-  return null;
-};
-
-const buildDescription = (product: ProductSeoPayload, locale: Locale) => {
-  const base = product.short_description?.trim();
-  if (base) return base.slice(0, 160);
-  const category = product.category?.trim();
-  const brand = product.brand?.trim();
-  if (locale === "uz-Cyrl-UZ") {
-    if (brand && category) return `${product.title}. ${category} категориясида ${brand} бренди бўйича нарх ва таклифларни солиштиринг.`;
-    if (category) return `${product.title}. ${category} категориясида нарх ва таклифларни солиштиринг.`;
-    return `${product.title}. Текширилган дўконлар таклифлари ва нархларини солиштиринг.`;
-  }
-
-  if (brand && category) return `${product.title}. Сравнение цен и предложений в категории ${category}, бренд ${brand}.`;
-  if (category) return `${product.title}. Сравнение цен и предложений в категории ${category}.`;
-  return `${product.title}. Сравнение цен и предложений от проверенных магазинов.`;
-};
-
-export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
-  const locale = getRequestLocale();
-  const productRef = parseProductRef(params.slug);
-  if (!productRef) {
-    return {
-      title: locale === "uz-Cyrl-UZ" ? "Товар" : "Товар",
-      robots: { index: false, follow: true }
-    };
-  }
-
+export async function generateMetadata({ params }: { params: PageParams }): Promise<Metadata> {
+  const product = await loadProduct(params.slug);
   const canonical = `${env.appUrl}/product/${params.slug}`;
 
-  try {
-    const product = await serverGet<ProductSeoPayload>(`/products/${productRef}`);
-    const description = buildDescription(product, locale);
-    const image = product.main_image || undefined;
-
+  if (!product) {
     return {
-      title: product.title,
-      description,
-      keywords: locale === "uz-Cyrl-UZ"
-        ? [product.title, product.brand ?? "", product.category ?? "", "нарх", "сотиб олиш"].filter(Boolean)
-        : [product.title, product.brand ?? "", product.category ?? "", "цена", "купить"].filter(Boolean),
-      openGraph: {
-        title: `${product.title} | ${env.siteName}`,
-        description,
-        url: canonical,
-        type: "website",
-        images: image ? [{ url: image, alt: product.title }] : undefined
-      },
-      twitter: {
-        card: image ? "summary_large_image" : "summary",
-        title: `${product.title} | ${env.siteName}`,
-        description,
-        images: image ? [image] : undefined
-      },
-      alternates: { canonical }
-    };
-  } catch {
-    return {
-      title: locale === "uz-Cyrl-UZ" ? "Товар" : "Товар",
+      title: "Маҳсулот | Doxx",
       alternates: { canonical },
-      robots: { index: false, follow: true }
+      robots: { index: false, follow: true },
     };
   }
+
+  const description = `${product.name} — Ўзбекистонда ${product.offerCount} та дўкон нархларини солиштиринг. Минимал нарх: ${formatPrice(product.minPrice)} сўм. Нарх тарихи ва хусусиятлар.`;
+  const ogImage = product.images[0];
+
+  return {
+    title: `${product.name} — Тошкентда нархлар | Doxx`,
+    description,
+    alternates: { canonical },
+    openGraph: {
+      title: product.name,
+      description: `дан ${formatPrice(product.minPrice)} сўм · ${product.offerCount} дўкон`,
+      images: ogImage ? [{ url: ogImage, alt: product.name }] : undefined,
+      url: canonical,
+      type: "website",
+    },
+  };
 }
 
-export default async function ProductPage({ params }: { params: { slug: string } }) {
-  const locale = getRequestLocale();
-  const productRef = parseProductRef(params.slug);
-  if (!productRef) {
-    notFound();
-  }
+export default async function ProductPage({ params }: { params: PageParams }) {
+  const product = await loadProduct(params.slug);
+  if (!product) notFound();
 
-  let product: ProductSeoPayload;
-  try {
-    product = await serverGet<ProductSeoPayload>(`/products/${productRef}`);
-  } catch {
-    notFound();
-  }
+  const productJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: product.name,
+    image: product.images,
+    description: product.description,
+    brand: { "@type": "Brand", name: product.brand },
+    aggregateRating: product.reviewCount
+      ? {
+        "@type": "AggregateRating",
+        ratingValue: product.rating,
+        reviewCount: product.reviewCount,
+      }
+      : undefined,
+    offers: product.offers.map((offer) => ({
+      "@type": "Offer",
+      price: offer.price,
+      priceCurrency: "UZS",
+      seller: { "@type": "Organization", name: offer.shopName },
+      availability: offer.inStock ? "https://schema.org/InStock" : "https://schema.org/PreOrder",
+      url: offer.url,
+    })),
+  };
 
-  const faq = buildProductFaq(product.title, product.category, locale);
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Бош саҳифа", item: `${env.appUrl}/` },
+      { "@type": "ListItem", position: 2, name: product.category, item: `${env.appUrl}/catalog` },
+      { "@type": "ListItem", position: 3, name: product.brand, item: `${env.appUrl}/catalog?q=${encodeURIComponent(product.brand)}` },
+      { "@type": "ListItem", position: 4, name: product.name, item: `${env.appUrl}/product/${params.slug}` },
+    ],
+  };
 
   return (
     <>
-      <ProductClientPage productId={productRef} slug={params.slug} />
-      <section className="mx-auto max-w-7xl space-y-2 px-4 pb-8 text-sm text-muted-foreground">
-        <p>
-          {locale === "uz-Cyrl-UZ"
-            ? `${product.title} турли сотувчиларда мавжуд: сотиб олишдан олдин нарх, мавжудлик ва етказиб бериш шартларини солиштиринг.`
-            : `${product.title} доступен у разных продавцов: сравните цену, наличие и условия доставки перед покупкой.`}
-        </p>
-        <p>
-          {locale === "uz-Cyrl-UZ"
-            ? "Нарх тарихи ва товар хусусиятларидан фойдаланиб, нарх ва параметрлар мувозанати бўйича энг яхши таклифни танланг."
-            : "Используйте историю цен и характеристики товара, чтобы выбрать лучшее предложение по соотношению цены и параметров."}
-        </p>
-      </section>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{
-          __html: JSON.stringify(toFaqJsonLd(faq))
-        }}
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(productJsonLd) }}
       />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+      />
+      <ProductClientPage initialProduct={product} />
     </>
   );
 }

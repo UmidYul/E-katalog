@@ -10,7 +10,7 @@ export function middleware(request: NextRequest) {
   const hasAccess = Boolean(request.cookies.get("access_token")?.value);
   const role = String(request.cookies.get("user_role")?.value ?? "").trim().toLowerCase();
 
-  if (pathname.startsWith(PROTECTED_PREFIX) || pathname.startsWith("/favorites") || pathname.startsWith("/recently-viewed")) {
+  if (pathname.startsWith(PROTECTED_PREFIX) || pathname.startsWith("/recently-viewed")) {
     if (!hasAccess) {
       const loginUrl = new URL("/login", request.url);
       loginUrl.searchParams.set("next", pathname);
@@ -38,6 +38,6 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/profile/:path*", "/favorites/:path*", "/recently-viewed/:path*", "/dashboard/:path*"]
+  matcher: ["/profile/:path*", "/recently-viewed/:path*", "/dashboard/:path*"]
 };
 

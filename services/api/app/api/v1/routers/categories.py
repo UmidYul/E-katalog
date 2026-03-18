@@ -33,10 +33,11 @@ async def list_category_products(
     if category_id is None:
         raise HTTPException(status_code=404, detail="category not found")
     repo = CatalogRepository(db, cursor_secret=settings.cursor_secret)
-    items, next_cursor = await repo.search_products(
+    items, next_cursor, total = await repo.search_products(
         q=None,
         category_id=category_id,
         brand_ids=None,
+        attr_filters=None,
         min_price=None,
         max_price=None,
         in_stock=None,
@@ -47,4 +48,4 @@ async def list_category_products(
         limit=limit,
         cursor=cursor,
     )
-    return {"items": items, "next_cursor": next_cursor, "request_id": request.state.request_id}
+    return {"items": items, "total": total, "next_cursor": next_cursor, "request_id": request.state.request_id}

@@ -7,6 +7,7 @@ import hmac
 import html
 import io
 import logging
+import re
 import secrets
 import smtplib
 from datetime import datetime, timedelta
@@ -66,12 +67,15 @@ REFRESH_COOKIE = "refresh_token"
 LEGACY_ROLE_COOKIE = "user_role"
 ACCESS_TTL_SECONDS = 60 * 15
 REFRESH_TTL_SECONDS = 60 * 60 * 24 * 30
+SHORT_REFRESH_TTL_SECONDS = 60 * 60 * 24
 TWOFA_CHALLENGE_TTL_SECONDS = 60 * 5
 OAUTH_STATE_TTL_SECONDS = 60 * 10
+LOGIN_OTP_TTL_SECONDS = 60 * 5
 NEW_LOGIN_ALERT_TTL_SECONDS = 60 * 60 * 24 * 30
 SUPPORTED_OAUTH_PROVIDERS = ("google", "facebook")
 PASSWORD_HASHER = PasswordHasher()
 LEGACY_SHA256_HEX = "0123456789abcdef"
+UZBEK_PHONE_PATTERN = re.compile(r"^\+998\d{9}$")
 
 
 class RegisterRequest(BaseModel):
@@ -85,6 +89,24 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=8, max_length=128)
     two_factor_code: str | None = Field(default=None, min_length=6, max_length=16)
     recovery_code: str | None = Field(default=None, min_length=4, max_length=64)
+    remember_me: bool = True
+
+
+class LoginOtpRequest(BaseModel):
+    contact: str = Field(min_length=3, max_length=150)
+
+
+class LoginOtpVerifyRequest(BaseModel):
+    contact: str = Field(min_length=3, max_length=150)
+    code: str = Field(min_length=4, max_length=8)
+    remember_me: bool = True
+
+
+class LoginOtpRequestResponse(BaseModel):
+    ok: bool = True
+    expires_in: int = LOGIN_OTP_TTL_SECONDS
+    masked_contact: str
+    debug_code: str | None = None
 
 
 class ChangePasswordRequest(BaseModel):
@@ -443,6 +465,48 @@ def _sanitize_code(value: str | None) -> str:
     return "".join(ch for ch in str(value or "") if ch.isdigit())
 
 
+def _normalize_phone(value: str) -> str | None:
+    digits = "".join(ch for ch in value if ch.isdigit())
+    if digits.startswith("998") and len(digits) == 12:
+        normalized = f"+{digits}"
+    elif len(digits) == 9:
+        normalized = f"+998{digits}"
+    else:
+        normalized = ""
+    if not normalized or not UZBEK_PHONE_PATTERN.match(normalized):
+        return None
+    return normalized
+
+
+def _contact_to_email_alias(contact: str) -> tuple[str, str]:
+    normalized = str(contact or "").strip().lower()
+    if "@" in normalized:
+        return normalized, normalized
+    normalized_phone = _normalize_phone(normalized)
+    if not normalized_phone:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid contact")
+    alias = f"{normalized_phone.removeprefix('+')}@phone.doxx.uz"
+    return normalized_phone, alias
+
+
+def _mask_contact(contact: str) -> str:
+    normalized = str(contact or "").strip()
+    if "@" in normalized:
+        local, _, domain = normalized.partition("@")
+        if len(local) <= 2:
+            return f"{local[:1]}***@{domain}"
+        return f"{local[:2]}***@{domain}"
+    digits = normalized.replace("+", "")
+    if len(digits) < 5:
+        return "***"
+    return f"+{digits[:3]}***{digits[-2:]}"
+
+
+def _login_otp_key(contact: str) -> str:
+    digest = hashlib.sha256(contact.encode("utf-8")).hexdigest()[:40]
+    return f"auth:login:otp:{digest}"
+
+
 def _build_totp_secret() -> str:
     return base64.b32encode(secrets.token_bytes(20)).decode("ascii").rstrip("=")
 
@@ -781,6 +845,7 @@ async def _load_user(redis: Redis, user_id: int, db: AsyncSession | None = None)
             "full_name": full_name,
             "role": str(payload.get("role", "user")),
             "password_hash": str(payload.get("password_hash", "")),
+            "is_active": str(payload.get("is_active", "1")).strip().lower() in {"1", "true", "yes"},
             "twofa_enabled": str(payload.get("twofa_enabled", "0")) == "1",
             "twofa_secret": str(payload.get("twofa_secret", "")),
             "twofa_recovery_codes_hash": str(payload.get("twofa_recovery_codes_hash", "")),
@@ -829,6 +894,7 @@ async def _create_user(
             "email": normalized_email,
             "full_name": normalized_full_name,
             "display_name": normalized_full_name,
+            "is_active": "1",
             "phone": "",
             "city": "",
             "telegram": "",
@@ -867,6 +933,7 @@ async def _create_user(
         "email": normalized_email,
         "full_name": normalized_full_name,
         "display_name": normalized_full_name,
+        "is_active": "1",
         "phone": "",
         "city": "",
         "telegram": "",
@@ -985,6 +1052,7 @@ async def _set_auth_cookies(
     db: AsyncSession | None = None,
     session_id: str | None = None,
     rotate_refresh_token: str | None = None,
+    remember_me: bool = True,
 ) -> str:
     if session_id is not None:
         if db is not None and _auth_reads_from_postgres():
@@ -1004,12 +1072,13 @@ async def _set_auth_cookies(
 
     access = _issue_token()
     refresh = _issue_token()
+    refresh_ttl_seconds = REFRESH_TTL_SECONDS if remember_me else SHORT_REFRESH_TTL_SECONDS
     encoded = _encode_token_payload(user_id, session_id)
 
     if not _auth_reads_from_postgres():
         pipe = redis.pipeline()
         pipe.setex(f"auth:access:{access}", ACCESS_TTL_SECONDS, encoded)
-        pipe.setex(f"auth:refresh:{refresh}", REFRESH_TTL_SECONDS, encoded)
+        pipe.setex(f"auth:refresh:{refresh}", refresh_ttl_seconds, encoded)
         pipe.sadd(_session_access_key(session_id), access)
         pipe.sadd(_session_refresh_key(session_id), refresh)
         pipe.hset(f"auth:user:{user_id}", mapping={"last_seen_at": _now_iso()})
@@ -1035,7 +1104,7 @@ async def _set_auth_cookies(
                 user_id=pg_user_id,
                 raw_token=refresh,
                 token_type="refresh",
-                expires_at=now_dt + timedelta(seconds=REFRESH_TTL_SECONDS),
+                expires_at=now_dt + timedelta(seconds=refresh_ttl_seconds),
             )
             if rotate_refresh_token:
                 await pg_revoke_session_token(db, raw_token=rotate_refresh_token, token_type="refresh")
@@ -1056,8 +1125,8 @@ async def _set_auth_cookies(
     if role_user is not None:
         role_value = str(role_user.get("role") or "user").strip().lower().replace("-", "_") or "user"
     response.set_cookie(ACCESS_COOKIE, access, max_age=ACCESS_TTL_SECONDS, **cookie_base)
-    response.set_cookie(REFRESH_COOKIE, refresh, max_age=REFRESH_TTL_SECONDS, **cookie_base)
-    response.set_cookie(LEGACY_ROLE_COOKIE, role_value, max_age=REFRESH_TTL_SECONDS, **cookie_base)
+    response.set_cookie(REFRESH_COOKIE, refresh, max_age=refresh_ttl_seconds, **cookie_base)
+    response.set_cookie(LEGACY_ROLE_COOKIE, role_value, max_age=refresh_ttl_seconds, **cookie_base)
     return session_id
 
 
@@ -1334,6 +1403,8 @@ async def login(
     if user is None or not _verify_password(payload.password, str(user["password_hash"])):
         await _register_failed_login_attempt(redis, email=normalized_email, client_ip=client_ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials")
+    if user.get("is_active") is False:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="account is disabled")
 
     if _password_needs_rehash(str(user["password_hash"])):
         await _patch_auth_user_fields(
@@ -1361,7 +1432,87 @@ async def login(
             return TwoFactorChallengeResponse(challenge_token=await _create_2fa_challenge(redis, user_id=int(user["id"])))
 
     await _clear_failed_login_attempts(redis, email=normalized_email, client_ip=client_ip)
-    await _set_auth_cookies(response, user_id=int(user["id"]), redis=redis, request=request, db=db)
+    await _set_auth_cookies(
+        response,
+        user_id=int(user["id"]),
+        redis=redis,
+        request=request,
+        db=db,
+        remember_me=bool(payload.remember_me),
+    )
+    await _maybe_send_new_login_notice(redis=redis, user=user, request=request)
+    return AuthUserResponse(
+        id=str(user["uuid"]),
+        email=user["email"],
+        full_name=user["full_name"],
+        role=user["role"],
+        twofa_enabled=bool(user["twofa_enabled"]),
+        email_confirmed=bool(user.get("email_confirmed")),
+    )
+
+
+@router.post("/otp/request", response_model=LoginOtpRequestResponse)
+async def request_login_otp(
+    payload: LoginOtpRequest,
+    request: Request,
+    redis: Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db_session),
+):
+    await enforce_rate_limit(request, redis, bucket="auth-login-otp-request", limit=25)
+    normalized_contact, auth_email = _contact_to_email_alias(payload.contact)
+    user = await _get_user_by_email(redis, auth_email, db)
+    if user and user.get("is_active") is False:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="account is disabled")
+
+    code = f"{secrets.randbelow(900000) + 100000:06d}"
+    payload_value = {
+        "email": auth_email,
+        "code_hash": hashlib.sha256(code.encode("utf-8")).hexdigest(),
+        "created_at": _now_iso(),
+    }
+    await redis.hset(_login_otp_key(normalized_contact), mapping=payload_value)
+    await redis.expire(_login_otp_key(normalized_contact), LOGIN_OTP_TTL_SECONDS)
+
+    response = LoginOtpRequestResponse(masked_contact=_mask_contact(normalized_contact))
+    if settings.environment != "production":
+        return response.model_copy(update={"debug_code": code})
+    return response
+
+
+@router.post("/otp/verify", response_model=AuthUserResponse)
+async def verify_login_otp(
+    payload: LoginOtpVerifyRequest,
+    request: Request,
+    response: Response,
+    redis: Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db_session),
+):
+    await enforce_rate_limit(request, redis, bucket="auth-login-otp-verify", limit=40)
+    normalized_contact, auth_email = _contact_to_email_alias(payload.contact)
+    key = _login_otp_key(normalized_contact)
+    stored = await redis.hgetall(key)
+    if not stored:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="otp expired")
+    expected_hash = str(stored.get("code_hash") or "")
+    actual_hash = hashlib.sha256(_sanitize_code(payload.code).encode("utf-8")).hexdigest()
+    if not expected_hash or not hmac.compare_digest(expected_hash, actual_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid otp code")
+
+    user = await _get_user_by_email(redis, auth_email, db)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found")
+    if user.get("is_active") is False:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="account is disabled")
+
+    await redis.delete(key)
+    await _set_auth_cookies(
+        response,
+        user_id=int(user["id"]),
+        redis=redis,
+        request=request,
+        db=db,
+        remember_me=bool(payload.remember_me),
+    )
     await _maybe_send_new_login_notice(redis=redis, user=user, request=request)
     return AuthUserResponse(
         id=str(user["uuid"]),

@@ -26,12 +26,12 @@ export default function AdminProductDetailsPage() {
           <p className="text-sm text-muted-foreground">Brand: {product.data.brand ?? "No brand"}</p>
           {product.data.short_description ? (
             <div className="mt-3 rounded-xl border border-border/70 bg-background/40 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">РљСЂР°С‚РєРѕРµ РѕРїРёСЃР°РЅРёРµ</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Краткое описание</p>
               <p className="mt-1 text-sm">{product.data.short_description}</p>
             </div>
           ) : null}
           <div className="mt-3 rounded-xl border border-border/70 bg-background/40 p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Р§С‚Рѕ РЅРѕРІРѕРіРѕ</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Что нового</p>
             {product.data.whats_new?.length ? (
               <ul className="mt-2 list-disc space-y-1 pl-4 text-sm">
                 {product.data.whats_new.map((item) => (
@@ -39,7 +39,7 @@ export default function AdminProductDetailsPage() {
                 ))}
               </ul>
             ) : (
-              <p className="mt-1 text-sm text-muted-foreground">РќРѕРІС‹Рµ РѕС‚Р»РёС‡РёСЏ РїРѕРєР° РЅРµ РѕРїСЂРµРґРµР»РµРЅС‹.</p>
+              <p className="mt-1 text-sm text-muted-foreground">Новые отличия пока не определены.</p>
             )}
           </div>
         </div>

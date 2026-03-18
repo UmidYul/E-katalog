@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import secrets
 from datetime import datetime
+from typing import Literal
 from shared.utils.time import UTC
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
@@ -16,12 +18,14 @@ from app.api.v1.routers.auth import _ensure_user_uuid, get_current_user
 from app.core.config import settings
 from app.repositories.catalog import CatalogRepository
 from app.schemas.catalog import ProductPriceAlertOut
-from shared.db.models import AuthUser, CatalogCanonicalProduct, CatalogPriceAlert
+from shared.db.models import AuthSession, AuthSessionToken, AuthUser, CatalogCanonicalProduct, CatalogPriceAlert
 
 router = APIRouter(prefix="/users", tags=["users"])
 UUID_REF_PATTERN = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
 RECENTLY_VIEWED_LIMIT = 30
 NOTIFICATION_PREFERENCES_FIELD = "notification_preferences"
+COMPARE_LIMIT = 4
+TELEGRAM_CONNECT_TTL_SECONDS = 60 * 10
 
 
 class FavoriteItem(BaseModel):
@@ -38,9 +42,12 @@ class UserProfileOut(BaseModel):
     telegram: str = ""
     about: str = ""
     updated_at: str | None = None
+    created_at: str | None = None
+    last_login_at: str | None = None
 
 
 class UserProfilePatch(BaseModel):
+    email: str | None = Field(default=None, max_length=150)
     display_name: str | None = Field(default=None, max_length=120)
     phone: str | None = Field(default=None, max_length=32)
     city: str | None = Field(default=None, max_length=120)
@@ -58,6 +65,22 @@ class NotificationChannelsPatch(BaseModel):
     telegram: bool | None = None
 
 
+class NotificationMatrix(BaseModel):
+    price_drop: NotificationChannels = Field(default_factory=lambda: NotificationChannels(email=True, telegram=True))
+    new_offers: NotificationChannels = Field(default_factory=lambda: NotificationChannels(email=True, telegram=False))
+    weekly_digest: NotificationChannels = Field(default_factory=lambda: NotificationChannels(email=True, telegram=False))
+    daily_deals: NotificationChannels = Field(default_factory=lambda: NotificationChannels(email=False, telegram=True))
+    marketing: NotificationChannels = Field(default_factory=lambda: NotificationChannels(email=False, telegram=False))
+
+
+class NotificationMatrixPatch(BaseModel):
+    price_drop: NotificationChannelsPatch | None = None
+    new_offers: NotificationChannelsPatch | None = None
+    weekly_digest: NotificationChannelsPatch | None = None
+    daily_deals: NotificationChannelsPatch | None = None
+    marketing: NotificationChannelsPatch | None = None
+
+
 class NotificationPreferences(BaseModel):
     price_drop_alerts: bool = True
     stock_alerts: bool = True
@@ -66,6 +89,10 @@ class NotificationPreferences(BaseModel):
     public_profile: bool = False
     compact_view: bool = False
     channels: NotificationChannels = Field(default_factory=NotificationChannels)
+    matrix: NotificationMatrix = Field(default_factory=NotificationMatrix)
+    digest_frequency: Literal["daily", "weekly", "monthly"] = "weekly"
+    interested_categories: list[str] = Field(default_factory=list)
+    sms_alerts: bool = False
 
 
 class NotificationPreferencesPatch(BaseModel):
@@ -76,6 +103,28 @@ class NotificationPreferencesPatch(BaseModel):
     public_profile: bool | None = None
     compact_view: bool | None = None
     channels: NotificationChannelsPatch | None = None
+    matrix: NotificationMatrixPatch | None = None
+    digest_frequency: Literal["daily", "weekly", "monthly"] | None = None
+    interested_categories: list[str] | None = None
+    sms_alerts: bool | None = None
+
+
+class UserCompareState(BaseModel):
+    ids: list[str] = Field(default_factory=list)
+
+
+class UserCompareStatePatch(BaseModel):
+    ids: list[str] = Field(default_factory=list, max_length=COMPARE_LIMIT)
+
+
+class TelegramConnectResponse(BaseModel):
+    token: str
+    expires_in: int = TELEGRAM_CONNECT_TTL_SECONDS
+    deep_link: str
+
+
+class DeleteAccountPayload(BaseModel):
+    confirmation: str = Field(min_length=1, max_length=16)
 
 
 class RecentlyViewedItem(BaseModel):
@@ -121,6 +170,8 @@ def _build_profile_response(payload: dict[str, str]) -> UserProfileOut:
         telegram=str(payload.get("telegram", "")).strip(),
         about=str(payload.get("about", "")).strip(),
         updated_at=payload.get("updated_at"),
+        created_at=payload.get("created_at"),
+        last_login_at=payload.get("last_seen_at"),
     )
 
 
@@ -183,6 +234,16 @@ def _default_notification_preferences() -> dict:
         "public_profile": False,
         "compact_view": False,
         "channels": {"email": True, "telegram": False},
+        "matrix": {
+            "price_drop": {"email": True, "telegram": True},
+            "new_offers": {"email": True, "telegram": False},
+            "weekly_digest": {"email": True, "telegram": False},
+            "daily_deals": {"email": False, "telegram": True},
+            "marketing": {"email": False, "telegram": False},
+        },
+        "digest_frequency": "weekly",
+        "interested_categories": [],
+        "sms_alerts": False,
     }
 
 
@@ -196,6 +257,24 @@ def _normalize_notification_preferences(payload: dict | None) -> NotificationPre
         if isinstance(channels_payload, dict):
             source["channels"]["email"] = bool(channels_payload.get("email", source["channels"]["email"]))
             source["channels"]["telegram"] = bool(channels_payload.get("telegram", source["channels"]["telegram"]))
+        matrix_payload = payload.get("matrix")
+        if isinstance(matrix_payload, dict):
+            for event in ("price_drop", "new_offers", "weekly_digest", "daily_deals", "marketing"):
+                event_payload = matrix_payload.get(event)
+                if not isinstance(event_payload, dict):
+                    continue
+                source["matrix"][event]["email"] = bool(event_payload.get("email", source["matrix"][event]["email"]))
+                source["matrix"][event]["telegram"] = bool(
+                    event_payload.get("telegram", source["matrix"][event]["telegram"])
+                )
+        digest_frequency = str(payload.get("digest_frequency") or "").strip().lower()
+        if digest_frequency in {"daily", "weekly", "monthly"}:
+            source["digest_frequency"] = digest_frequency
+        interested_categories = payload.get("interested_categories")
+        if isinstance(interested_categories, list):
+            source["interested_categories"] = [str(item).strip() for item in interested_categories if str(item).strip()]
+        if "sms_alerts" in payload:
+            source["sms_alerts"] = bool(payload.get("sms_alerts"))
     return NotificationPreferences.model_validate(source)
 
 
@@ -213,11 +292,55 @@ def _merge_notification_preferences(current: NotificationPreferences, patch: Not
         if patch.channels.telegram is not None:
             channels["telegram"] = patch.channels.telegram
     data["channels"] = channels
+    matrix = dict(data.get("matrix") or {})
+    if patch.matrix is not None:
+        for event in ("price_drop", "new_offers", "weekly_digest", "daily_deals", "marketing"):
+            event_patch = getattr(patch.matrix, event)
+            existing_event = dict(matrix.get(event) or {"email": False, "telegram": False})
+            if event_patch is None:
+                matrix[event] = existing_event
+                continue
+            if event_patch.email is not None:
+                existing_event["email"] = event_patch.email
+            if event_patch.telegram is not None:
+                existing_event["telegram"] = event_patch.telegram
+            matrix[event] = existing_event
+    data["matrix"] = matrix
+    if patch.digest_frequency is not None:
+        data["digest_frequency"] = patch.digest_frequency
+    if patch.interested_categories is not None:
+        data["interested_categories"] = [str(item).strip() for item in patch.interested_categories if str(item).strip()]
+    if patch.sms_alerts is not None:
+        data["sms_alerts"] = patch.sms_alerts
     return NotificationPreferences.model_validate(data)
 
 
 def _recently_viewed_key(user_id: int) -> str:
     return f"auth:recently-viewed:{user_id}"
+
+
+def _compare_state_key(user_id: int) -> str:
+    return f"auth:compare:{user_id}"
+
+
+def _telegram_connect_key(token: str) -> str:
+    return f"auth:telegram-connect:{token}"
+
+
+def _normalize_compare_ids(values: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        candidate = str(raw or "").strip().lower()
+        if not candidate or candidate in seen:
+            continue
+        if len(normalized) >= COMPARE_LIMIT:
+            break
+        if not candidate:
+            continue
+        seen.add(candidate)
+        normalized.append(candidate)
+    return normalized
 
 
 def _extract_min_price(product: dict) -> float | None:
@@ -275,6 +398,8 @@ def _build_profile_response_from_pg(user: AuthUser) -> UserProfileOut:
     full_name = str(user.full_name or "").strip()
     display_name = str(user.display_name or "").strip() or full_name
     updated_at = user.updated_at.astimezone(UTC).isoformat() if user.updated_at else None
+    created_at = user.created_at.astimezone(UTC).isoformat() if user.created_at else None
+    last_login_at = user.last_seen_at.astimezone(UTC).isoformat() if user.last_seen_at else None
     return UserProfileOut(
         id=str(user.uuid),
         email=str(user.email),
@@ -285,6 +410,8 @@ def _build_profile_response_from_pg(user: AuthUser) -> UserProfileOut:
         telegram=str(user.telegram or "").strip(),
         about=str(user.about or "").strip(),
         updated_at=updated_at,
+        created_at=created_at,
+        last_login_at=last_login_at,
     )
 
 
@@ -315,6 +442,12 @@ async def patch_my_profile(
             user = await _load_pg_user_or_404(db, user_id=current_user_id)
             updates: dict[str, str] = {}
 
+            if profile_patch.email is not None:
+                next_email = (_clean_optional_text(profile_patch.email, max_length=150) or "").lower()
+                if "@" not in next_email:
+                    raise HTTPException(status_code=422, detail="email is invalid")
+                updates["email"] = next_email
+
             if profile_patch.display_name is not None:
                 display_name = _clean_optional_text(profile_patch.display_name, max_length=120) or ""
                 if len(display_name) < 2:
@@ -342,6 +475,13 @@ async def patch_my_profile(
 
         payload = await _load_user_payload(redis, current_user_id)
         updates: dict[str, str] = {}
+        previous_email = str(payload.get("email", "")).strip().lower()
+
+        if profile_patch.email is not None:
+            next_email = (_clean_optional_text(profile_patch.email, max_length=150) or "").lower()
+            if "@" not in next_email:
+                raise HTTPException(status_code=422, detail="email is invalid")
+            updates["email"] = next_email
 
         if profile_patch.display_name is not None:
             display_name = _clean_optional_text(profile_patch.display_name, max_length=120) or ""
@@ -360,7 +500,13 @@ async def patch_my_profile(
             return _build_profile_response(payload)
 
         updates["updated_at"] = datetime.now(UTC).isoformat()
-        await redis.hset(f"auth:user:{current_user_id}", mapping=updates)
+        pipe = redis.pipeline()
+        pipe.hset(f"auth:user:{current_user_id}", mapping=updates)
+        next_email = str(updates.get("email", previous_email)).strip().lower()
+        if previous_email and previous_email != next_email:
+            pipe.delete(f"auth:user:email:{previous_email}")
+            pipe.set(f"auth:user:email:{next_email}", str(current_user_id))
+        await pipe.execute()
         payload = await _load_user_payload(redis, current_user_id)
         return _build_profile_response(payload)
 
@@ -565,6 +711,144 @@ async def delete_my_price_alert(
         return {"ok": True}
 
     return await execute_idempotent_json(request, redis, scope=f"users.alerts.delete:{user_uuid}:{alert_id.lower()}", handler=_op)
+
+
+@router.get("/me/compare", response_model=UserCompareState)
+async def get_compare_state(
+    current_user: dict = Depends(get_current_user),
+    redis: Redis = Depends(get_redis),
+):
+    user_id = _current_user_internal_id(current_user)
+    raw = await redis.get(_compare_state_key(user_id))
+    if not raw:
+        return UserCompareState(ids=[])
+    try:
+        decoded = json.loads(raw)
+    except json.JSONDecodeError:
+        return UserCompareState(ids=[])
+    if not isinstance(decoded, list):
+        return UserCompareState(ids=[])
+    return UserCompareState(ids=_normalize_compare_ids([str(item) for item in decoded]))
+
+
+@router.put("/me/compare", response_model=UserCompareState)
+async def put_compare_state(
+    request: Request,
+    payload: UserCompareStatePatch,
+    current_user: dict = Depends(get_current_user),
+    redis: Redis = Depends(get_redis),
+):
+    user_id = _current_user_internal_id(current_user)
+
+    async def _op():
+        normalized = _normalize_compare_ids(payload.ids)
+        await redis.set(_compare_state_key(user_id), json.dumps(normalized), ex=60 * 60 * 24 * 30)
+        return UserCompareState(ids=normalized)
+
+    return await execute_idempotent_json(request, redis, scope=f"users.compare.put:{user_id}", handler=_op)
+
+
+@router.post("/me/telegram-connect", response_model=TelegramConnectResponse)
+async def create_telegram_connect_token(
+    current_user: dict = Depends(get_current_user),
+    redis: Redis = Depends(get_redis),
+):
+    user_id = _current_user_internal_id(current_user)
+    user_uuid = _current_user_uuid(current_user)
+    token = secrets.token_urlsafe(24)
+    payload = {
+        "user_id": user_id,
+        "user_uuid": user_uuid,
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+    await redis.set(_telegram_connect_key(token), json.dumps(payload), ex=TELEGRAM_CONNECT_TTL_SECONDS)
+    bot_username = str(getattr(settings, "price_alerts_telegram_bot_username", "doxx_uz_alerts_bot") or "doxx_uz_alerts_bot").strip().lstrip("@")
+    return TelegramConnectResponse(
+        token=token,
+        deep_link=f"https://t.me/{bot_username}?start={token}",
+    )
+
+
+@router.delete("/me/account")
+async def soft_delete_my_account(
+    request: Request,
+    payload: DeleteAccountPayload,
+    current_user: dict = Depends(get_current_user),
+    redis: Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db_session),
+):
+    confirmation = str(payload.confirmation or "").strip().upper()
+    if confirmation not in {"ЎЧИРИШ", "OCHIRISH", "O'CHIRISH"}:
+        raise HTTPException(status_code=422, detail="invalid confirmation")
+    user_id = _current_user_internal_id(current_user)
+
+    async def _op():
+        now = datetime.now(UTC)
+        stamp = int(now.timestamp())
+        if _auth_reads_from_postgres():
+            user = await _load_pg_user_or_404(db, user_id=user_id)
+            if not user.is_active:
+                return {"ok": True}
+            tombstone_email = f"deleted+{user.id}-{stamp}@doxx.local"
+            await db.execute(
+                update(AuthUser)
+                .where(AuthUser.id == user_id)
+                .values(
+                    is_active=False,
+                    email=tombstone_email,
+                    full_name="Deleted user",
+                    display_name="Deleted user",
+                    phone="",
+                    city="",
+                    telegram="",
+                    about="",
+                    notification_preferences={},
+                    updated_at=now,
+                    last_seen_at=now,
+                )
+            )
+            await db.execute(
+                update(AuthSession)
+                .where(AuthSession.user_id == user_id)
+                .where(AuthSession.revoked_at.is_(None))
+                .values(revoked_at=now)
+            )
+            await db.execute(
+                update(AuthSessionToken)
+                .where(AuthSessionToken.user_id == user_id)
+                .where(AuthSessionToken.revoked_at.is_(None))
+                .values(revoked_at=now)
+            )
+            await db.commit()
+            return {"ok": True}
+
+        payload_user = await _load_user_payload(redis, user_id)
+        original_email = str(payload_user.get("email", "")).strip().lower()
+        tombstone_email = f"deleted+{user_id}-{stamp}@doxx.local"
+        updates = {
+            "email": tombstone_email,
+            "is_active": "0",
+            "full_name": "Deleted user",
+            "display_name": "Deleted user",
+            "phone": "",
+            "city": "",
+            "telegram": "",
+            "about": "",
+            NOTIFICATION_PREFERENCES_FIELD: json.dumps({}),
+            "updated_at": now.isoformat(),
+            "last_seen_at": now.isoformat(),
+        }
+        pipe = redis.pipeline()
+        pipe.hset(f"auth:user:{user_id}", mapping=updates)
+        pipe.delete(_compare_state_key(user_id))
+        pipe.delete(f"auth:favorites:{user_id}")
+        if original_email:
+            pipe.delete(f"auth:user:email:{original_email}")
+        pipe.set(f"auth:user:email:{tombstone_email}", str(user_id))
+        await pipe.execute()
+        return {"ok": True}
+
+    return await execute_idempotent_json(request, redis, scope=f"users.account.delete:{user_id}", handler=_op)
 
 
 @router.get("/me/recently-viewed", response_model=list[RecentlyViewedItem])

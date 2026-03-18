@@ -33,6 +33,62 @@ class ProductListItem(BaseModel):
     max_price: float | None = None
     store_count: int = 0
     score: float = 0
+    discount_pct: float | None = None
+    price_drop_pct: float | None = None
+    is_new: bool = False
+
+
+class HomePriceDropItem(BaseModel):
+    id: str
+    normalized_title: str
+    image_url: str | None = None
+    brand: BrandOut | None = None
+    category: CategoryOut
+    new_price: float
+    old_price: float
+    drop_pct: float
+    store_count: int = 0
+
+
+class HomePriceDropsOut(BaseModel):
+    items: list[HomePriceDropItem]
+
+
+class HomeLastSyncOut(BaseModel):
+    timestamp: str | None = None
+
+
+class HomeTrustStatsOut(BaseModel):
+    products_count: int = 0
+    stores_count: int = 0
+    timestamp: str | None = None
+
+
+class NewsletterSubscriptionIn(BaseModel):
+    email: str = Field(min_length=5, max_length=255)
+    categories: list[str] = Field(default_factory=list, max_length=8)
+    locale: str | None = Field(default=None, min_length=2, max_length=32)
+
+
+class NewsletterSubscriptionOut(BaseModel):
+    id: str
+    email: str
+    categories: list[str] = Field(default_factory=list)
+    locale: str
+    updated_at: str
+
+
+class ContactRequestIn(BaseModel):
+    name: str = Field(min_length=2, max_length=160)
+    contact: str = Field(min_length=3, max_length=255)
+    subject: str = Field(default="general", pattern="^(general|technical|partnership|other)$")
+    message: str = Field(min_length=8, max_length=4000)
+
+
+class ContactRequestOut(BaseModel):
+    ok: bool = True
+    id: str
+    message: str
 
 
 class OfferOut(BaseModel):
@@ -81,12 +137,24 @@ class CanonicalProductDetailOut(ProductDetailOut):
 
 class PriceHistoryPoint(BaseModel):
     date: str
+    shop_id: str | None = None
+    shop_name: str | None = None
+    price: float | None = None
     min_price: float | None = None
     max_price: float | None = None
 
 
+class SimilarProductOut(BaseModel):
+    id: str
+    normalized_title: str
+    image_url: str | None = None
+    min_price: float | None = None
+    store_count: int = 0
+
+
 class SearchResponse(BaseModel):
     items: list[ProductListItem]
+    total: int = 0
     next_cursor: str | None = None
     request_id: str
 

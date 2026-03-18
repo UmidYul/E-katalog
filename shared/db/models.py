@@ -113,6 +113,23 @@ class CatalogCanonicalProduct(CatalogUuidMixin, Base):
     )
 
 
+class CatalogProductSpec(Base):
+    __tablename__ = "catalog_product_specs"
+    __table_args__ = (
+        UniqueConstraint("product_id", "spec_key", "spec_value", name="uq_catalog_product_specs_product_key_value"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    product_id: Mapped[int] = mapped_column(
+        ForeignKey("catalog_canonical_products.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    spec_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    spec_value: Mapped[str] = mapped_column(String(512), nullable=False)
+    spec_value_num: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class CatalogScrapeSource(CatalogUuidMixin, Base):
     __tablename__ = "catalog_scrape_sources"
     __table_args__ = (UniqueConstraint("store_id", "url", name="uq_catalog_scrape_sources_store_url"),)
@@ -545,6 +562,45 @@ class CatalogPriceAlert(CatalogUuidMixin, Base):
     )
 
 
+class CatalogNewsletterSubscription(CatalogUuidMixin, Base):
+    __tablename__ = "catalog_newsletter_subscriptions"
+    __table_args__ = (
+        CheckConstraint("jsonb_typeof(categories) = 'array'", name="ck_catalog_newsletter_categories_array"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    categories: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+    locale: Mapped[str] = mapped_column(String(32), nullable=False, default="ru-RU", server_default="ru-RU")
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="homepage", server_default="homepage")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CatalogContactRequest(CatalogUuidMixin, Base):
+    __tablename__ = "catalog_contact_requests"
+    __table_args__ = (
+        CheckConstraint("subject in ('general', 'technical', 'partnership', 'other')", name="ck_catalog_contact_requests_subject"),
+        CheckConstraint("status in ('new', 'processed')", name="ck_catalog_contact_requests_status"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    contact: Mapped[str] = mapped_column(String(255), nullable=False)
+    subject: Mapped[str] = mapped_column(String(32), nullable=False, default="general", server_default="general")
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="contacts_page", server_default="contacts_page")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="new", server_default="new")
+    metadata_json: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default=dict, server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class AdminAlertEvent(CatalogUuidMixin, Base):
     __tablename__ = "admin_alert_events"
 
@@ -718,6 +774,9 @@ Index("ix_catalog_canonical_products_category_brand", CatalogCanonicalProduct.ca
 Index("ix_catalog_canonical_products_is_active", CatalogCanonicalProduct.is_active)
 Index("ix_catalog_canonical_products_merged_into_id", CatalogCanonicalProduct.merged_into_id)
 Index("ix_catalog_canonical_products_specs", CatalogCanonicalProduct.specs, postgresql_using="gin")
+Index("ix_catalog_product_specs_product_key", CatalogProductSpec.product_id, CatalogProductSpec.spec_key)
+Index("ix_catalog_product_specs_key_value", CatalogProductSpec.spec_key, CatalogProductSpec.spec_value)
+Index("ix_catalog_product_specs_key_value_num", CatalogProductSpec.spec_key, CatalogProductSpec.spec_value_num)
 Index("ix_catalog_products_category_brand", CatalogProduct.category_id, CatalogProduct.brand_id)
 Index("ix_catalog_products_status", CatalogProduct.status)
 Index("ix_catalog_products_canonical_product_id", CatalogProduct.canonical_product_id)
@@ -763,6 +822,14 @@ Index("ix_catalog_price_alert_user_channel", CatalogPriceAlert.user_uuid, Catalo
 Index("ix_catalog_price_alert_user_enabled", CatalogPriceAlert.user_uuid, CatalogPriceAlert.alerts_enabled)
 Index("ix_catalog_price_alert_product_enabled", CatalogPriceAlert.product_id, CatalogPriceAlert.alerts_enabled)
 Index("ix_catalog_price_alert_updated_at", CatalogPriceAlert.updated_at.desc())
+Index("ix_catalog_newsletter_subscriptions_updated_at", CatalogNewsletterSubscription.updated_at.desc())
+Index(
+    "ix_catalog_newsletter_subscriptions_active_updated",
+    CatalogNewsletterSubscription.is_active,
+    CatalogNewsletterSubscription.updated_at.desc(),
+)
+Index("ix_catalog_contact_requests_created_at", CatalogContactRequest.created_at.desc())
+Index("ix_catalog_contact_requests_status_created", CatalogContactRequest.status, CatalogContactRequest.created_at.desc())
 Index("ix_admin_alert_events_created_at", AdminAlertEvent.created_at.desc())
 Index("ix_admin_alert_events_status_severity_created", AdminAlertEvent.status, AdminAlertEvent.severity, AdminAlertEvent.created_at.desc())
 Index("ix_admin_alert_events_source_code", AdminAlertEvent.source, AdminAlertEvent.code)

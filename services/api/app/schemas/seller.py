@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field, field_validator
 
 
 SellerApplicationStatus = Literal["pending", "review", "approved", "rejected"]
+SellerApplicationMode = Literal["created", "already_applied"]
+SellerApplicationStep = Literal["received", "review", "approved", "rejected"]
 
 
 class SellerApplicationCreateIn(BaseModel):
@@ -32,6 +34,64 @@ class SellerApplicationCreateIn(BaseModel):
         if not value:
             raise ValueError("terms must be accepted")
         return value
+
+
+class SellerApplicationSubmitIn(BaseModel):
+    shop_name: str = Field(min_length=2, max_length=255)
+    contact_person: str = Field(min_length=2, max_length=160)
+    legal_type: Literal["individual", "llc", "other"] = "llc"
+    inn: str = Field(min_length=9, max_length=9, pattern=r"^\d{9}$")
+    legal_address: str = Field(min_length=3, max_length=400)
+    actual_address: str | None = Field(default=None, max_length=400)
+    contact_phone: str = Field(min_length=13, max_length=13, pattern=r"^\+998\d{9}$")
+    contact_email: str = Field(min_length=5, max_length=255)
+    website_url: str | None = Field(default=None, max_length=2000)
+    product_categories: list[str] = Field(default_factory=list, max_length=20)
+    accepts_terms: bool = False
+    submission_method: Literal["api", "xml", "excel", "other"] = "api"
+    estimated_product_count_range: Literal["lt100", "100_1000", "1000_10000", "10000_plus"] = "100_1000"
+    notes: str | None = Field(default=None, max_length=4000)
+
+    @field_validator("contact_email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        return str(value or "").strip().lower()
+
+    @field_validator("website_url")
+    @classmethod
+    def normalize_website_url(cls, value: str | None) -> str | None:
+        normalized = str(value or "").strip()
+        if not normalized:
+            return None
+        if not normalized.startswith("http://") and not normalized.startswith("https://"):
+            raise ValueError("website_url must start with http:// or https://")
+        return normalized
+
+    @field_validator("accepts_terms")
+    @classmethod
+    def validate_submit_accepts_terms(cls, value: bool) -> bool:
+        if not value:
+            raise ValueError("terms must be accepted")
+        return value
+
+
+class SellerApplicationSubmitOut(BaseModel):
+    ok: bool = True
+    mode: SellerApplicationMode
+    application_id: str
+    status: SellerApplicationStatus
+    review_note: str | None = None
+    message: str
+
+
+class SellerApplicationStatusOut(BaseModel):
+    ok: bool = True
+    application_id: str
+    status: SellerApplicationStatus
+    step: SellerApplicationStep
+    step_order: int = 1
+    review_note: str | None = None
+    updated_at: str
 
 
 class SellerApplicationOut(BaseModel):

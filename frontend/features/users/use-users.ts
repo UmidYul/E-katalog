@@ -6,7 +6,7 @@ import { adminApi } from "@/lib/api/openapi-client";
 import type { AdminUser } from "@/types/admin";
 import type { Paginated } from "@/types/domain";
 
-const fallbackUsers: Paginated<AdminUser> = { items: [], next_cursor: null, request_id: "admin-fallback" };
+const fallbackUsers: Paginated<AdminUser> = { items: [], total: 0, next_cursor: null, request_id: "admin-fallback" };
 
 export function useUsers(query: { q?: string; page?: number; limit?: number; sort?: string }) {
   return useQuery({

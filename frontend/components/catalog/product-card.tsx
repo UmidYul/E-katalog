@@ -1,16 +1,12 @@
-"use client";
+﻿"use client";
 
-import { motion } from "framer-motion";
-import { Eye, Heart, Scale, Star } from "lucide-react";
+import { Heart } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
 
 import { useLocale } from "@/components/common/locale-provider";
-import { PriceAlertBadge } from "@/components/common/price-alert-badge";
 import { cn } from "@/lib/utils/cn";
-import { formatPrice } from "@/lib/utils/format";
-import type { PriceAlertSignal, ProductListItem } from "@/types/domain";
+import type { ProductListItem, ProductOffer } from "@/types/domain";
 
 const slugify = (text: string) =>
   text
@@ -19,180 +15,190 @@ const slugify = (text: string) =>
     .trim()
     .replace(/\s+/g, "-");
 
-interface ProductCardProps {
+const formatSum = (value: number | null | undefined) => `${new Intl.NumberFormat("uz-Cyrl-UZ").format(Number(value ?? 0))} сум`;
+
+const normalizeImage = (value: string | undefined) => {
+  if (!value) return null;
+  const normalized = value.trim();
+  if (!normalized) return null;
+  if (/^https?:\/\//i.test(normalized) || normalized.startsWith("/")) return normalized;
+  return null;
+};
+
+type ProductCardProps = {
   product: ProductListItem;
-  favorite?: boolean;
-  onFavorite?: (id: string) => void;
-  compared?: boolean;
-  onCompare?: (id: string) => void;
+  favorite: boolean;
+  onFavorite: (id: string) => void;
+  compared: boolean;
+  onCompare: (id: string) => void;
   compareDisabled?: boolean;
   compareDisabledReason?: string;
-  isTracking?: boolean;
-  priceAlertSignal?: PriceAlertSignal | null;
-}
+};
 
-export function ProductCard({
-  product,
-  favorite,
-  onFavorite,
-  compared,
-  onCompare,
-  compareDisabled,
-  compareDisabledReason,
-  priceAlertSignal,
-}: ProductCardProps) {
+export function ProductCard({ product, favorite, onFavorite, compared, onCompare, compareDisabled, compareDisabledReason }: ProductCardProps) {
   const { locale } = useLocale();
-  const productHref = `/product/${product.id}-${slugify(product.normalized_title)}`;
-  const [heartBurst, setHeartBurst] = useState(false);
-
-  const handleFavoriteClick = () => {
-    setHeartBurst(true);
-    setTimeout(() => setHeartBurst(false), 450);
-    onFavorite?.(product.id);
-  };
-
-  // Derive a mock rating for display (real apps would pass this as prop)
-  const displayRating = 4;
-  const reviewCount = Math.max(12, Math.round((product.score ?? 0.4) * 180));
-  const storeCount = product.store_count ?? 0;
-  const storeLabel = locale === "uz-Cyrl-UZ"
-    ? "дўкон"
-    : storeCount === 1
-      ? "магазин"
-      : storeCount < 5
-        ? "магазина"
-        : "магазинов";
+  const isUz = locale === "uz-Cyrl-UZ";
+  const href = `/product/${product.id}-${slugify(product.normalized_title)}`;
+  const image = normalizeImage(product.image_url);
 
   return (
-    <motion.article
-      layout
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, ease: "easeOut" }}
-      whileHover={{ y: -4 }}
-      className="group relative"
-    >
-      <div className="flex h-full flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm transition-shadow duration-300 group-hover:shadow-md">
-        {/* Image area */}
-        <div className="relative aspect-square overflow-hidden bg-muted/30">
-          <Link href={productHref} className="absolute inset-0" aria-label={product.normalized_title} tabIndex={-1}>
-            <Image
-              src={
-                product.image_url && /^https?:\/\//.test(product.image_url)
-                  ? product.image_url
-                  : "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&w=800&q=80"
-              }
-              alt={product.normalized_title}
-              fill
-              className="object-contain p-4 transition-transform duration-500 group-hover:scale-105"
-              sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-            />
-          </Link>
+    <article className="group relative flex h-full min-w-0 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-shadow hover:shadow-md">
+      <button
+        type="button"
+        onClick={() => onFavorite(product.id)}
+        className={cn(
+          "absolute right-3 top-3 z-10 rounded-full border border-border bg-background/90 p-2 backdrop-blur transition-colors",
+          favorite ? "text-rose-600" : "text-muted-foreground hover:text-rose-600"
+        )}
+        aria-label={isUz ? "Сараланганларга" : "В избранное"}
+      >
+        <Heart className={cn("h-4 w-4", favorite ? "fill-current" : "")} />
+      </button>
 
-          {/* Badges — top left */}
-          <div className="absolute left-2 top-2 flex flex-col gap-1">
-            {product.is_new && (
-              <span className="rounded-sm bg-accent px-1.5 py-0.5 text-[10px] font-bold text-white">{locale === "uz-Cyrl-UZ" ? "Я" : "Н"}</span>
-            )}
-            {(product.discount_pct ?? 0) > 0 && (
-              <span className="rounded-sm bg-success px-1.5 py-0.5 text-[10px] font-bold text-white">
-                -{product.discount_pct}%
-              </span>
-            )}
-          </div>
+      {product.price_drop_pct && product.price_drop_pct > 0 ? (
+        <span className="absolute left-3 top-3 z-10 rounded-full bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-700">
+          ↓ {Math.round(product.price_drop_pct)}%
+        </span>
+      ) : null}
 
-          {/* Action icons — appear on hover */}
-          <div className="absolute right-2 top-2 flex flex-col gap-1.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-            {/* Favorite */}
-            <motion.button
-              type="button"
-              onClick={handleFavoriteClick}
-              animate={heartBurst ? { scale: [1, 1.4, 0.85, 1] } : {}}
-              transition={{ duration: 0.4 }}
-              className={cn(
-                "flex h-8 w-8 items-center justify-center rounded-md shadow-sm transition-colors",
-                favorite
-                  ? "bg-danger text-white"
-                  : "bg-white text-muted-foreground hover:bg-danger/10 hover:text-danger"
-              )}
-              aria-label={favorite ? (locale === "uz-Cyrl-UZ" ? "Сараланганлардан олиб ташлаш" : "Удалить из избранного") : (locale === "uz-Cyrl-UZ" ? "Сараланганларга қўшиш" : "Добавить в избранное")}
-            >
-              <Heart className={cn("h-4 w-4", favorite && "fill-current")} />
-            </motion.button>
+      <Link href={href} className="relative block aspect-square overflow-hidden bg-secondary/30 p-4">
+        {image ? (
+          <Image
+            src={image}
+            alt={product.normalized_title}
+            fill
+            sizes="(max-width: 768px) 85vw, 280px"
+            className="object-contain p-2 transition-transform duration-300 group-hover:scale-105"
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center text-xs text-muted-foreground">Rasm yo‘q</div>
+        )}
+      </Link>
 
-            {/* Compare */}
-            <button
-              type="button"
-              onClick={() => onCompare?.(product.id)}
-              disabled={compareDisabled}
-              title={compareDisabledReason}
-              className={cn(
-                "flex h-8 w-8 items-center justify-center rounded-md shadow-sm transition-colors",
-                compared
-                  ? "bg-accent text-white"
-                  : "bg-white text-muted-foreground hover:bg-accent/10 hover:text-accent",
-                compareDisabled && "cursor-not-allowed opacity-50"
-              )}
-              aria-label={compared ? (locale === "uz-Cyrl-UZ" ? "Солиштиришдан олиб ташлаш" : "Убрать из сравнения") : (locale === "uz-Cyrl-UZ" ? "Солиштиришга қўшиш" : "Добавить к сравнению")}
-            >
-              <Scale className="h-4 w-4" />
-            </button>
+      <div className="flex flex-1 flex-col p-3">
+        <Link href={href} className="line-clamp-2 text-sm font-medium leading-5 text-foreground hover:text-accent">
+          {product.normalized_title}
+        </Link>
 
-            {/* Quick view */}
-            <Link
-              href={productHref}
-              className="flex h-8 w-8 items-center justify-center rounded-md bg-white shadow-sm text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
-              aria-label={locale === "uz-Cyrl-UZ" ? "Тезкор кўриш" : "Быстрый просмотр"}
-            >
-              <Eye className="h-4 w-4" />
-            </Link>
+        <div className="mt-3 flex items-center justify-between gap-2">
+          <div>
+            <p className="text-base font-bold text-accent">{isUz ? "дан" : "от"} {formatSum(product.min_price)}</p>
+            <span className="inline-flex rounded-full bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
+              {product.store_count} {isUz ? "дўкон" : "магазина"}
+            </span>
           </div>
         </div>
 
-        {/* Content */}
-        <div className="flex flex-1 flex-col gap-2 p-3">
-          {/* Alert badge */}
-          <PriceAlertBadge signal={priceAlertSignal} />
-
-          {/* Title */}
-          <Link
-            href={productHref}
-            className="line-clamp-2 text-sm font-medium leading-snug text-foreground transition-colors hover:text-accent"
-          >
-            {product.normalized_title}
-          </Link>
-
-          {/* Rating */}
-          <div className="flex items-center gap-1.5">
-            <div className="flex items-center gap-0.5">
-              {Array.from({ length: 5 }, (_, i) => (
-                <Star
-                  key={i}
-                  className={cn(
-                    "h-3 w-3",
-                    i < displayRating ? "fill-amber-400 text-amber-400" : "fill-transparent text-border"
-                  )}
-                />
-              ))}
-            </div>
-            <span className="text-xs text-muted-foreground">({reviewCount})</span>
-          </div>
-
-          {/* Price + stores */}
-          <div className="mt-auto">
-            <p className="text-xs text-muted-foreground">{locale === "uz-Cyrl-UZ" ? "дан" : "от"}</p>
-            <p className="text-lg font-bold leading-tight text-accent">
-              {formatPrice(product.min_price ?? 0)}
-            </p>
-            {storeCount > 0 && (
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {locale === "uz-Cyrl-UZ" ? `${storeCount} ${storeLabel}да` : `в ${storeCount} ${storeLabel}`}
-              </p>
+        <div className="mt-4 flex items-center justify-between border-t border-border pt-3">
+          <label
+            title={compareDisabledReason}
+            className={cn(
+              "inline-flex items-center gap-2 text-xs",
+              compareDisabled ? "cursor-not-allowed text-muted-foreground" : "cursor-pointer text-foreground"
             )}
-          </div>
+          >
+            <input
+              type="checkbox"
+              checked={compared}
+              disabled={compareDisabled}
+              onChange={() => onCompare(product.id)}
+              className="h-4 w-4 rounded border-border"
+            />
+            {isUz ? "Солиштириш" : "Сравнить"}
+          </label>
         </div>
       </div>
-    </motion.article>
+    </article>
   );
 }
 
+type ProductListRowProps = ProductCardProps & {
+  offers?: ProductOffer[];
+};
+
+export function ProductListRow({ product, favorite, onFavorite, compared, onCompare, compareDisabled, compareDisabledReason, offers }: ProductListRowProps) {
+  const { locale } = useLocale();
+  const isUz = locale === "uz-Cyrl-UZ";
+  const href = `/product/${product.id}-${slugify(product.normalized_title)}`;
+  const image = normalizeImage(product.image_url);
+
+  return (
+    <article className="grid gap-4 rounded-2xl border border-border bg-card p-3 shadow-sm md:grid-cols-[180px_minmax(0,1fr)_280px]">
+      <Link href={href} className="relative block aspect-square overflow-hidden rounded-xl bg-secondary/30 p-3">
+        {image ? (
+          <Image src={image} alt={product.normalized_title} fill sizes="180px" className="object-contain p-2" />
+        ) : (
+          <div className="flex h-full items-center justify-center text-xs text-muted-foreground">Rasm yo‘q</div>
+        )}
+      </Link>
+
+      <div className="flex min-w-0 flex-col">
+        <div className="flex items-start justify-between gap-3">
+          <Link href={href} className="line-clamp-2 text-base font-semibold text-foreground hover:text-accent">
+            {product.normalized_title}
+          </Link>
+          <button
+            type="button"
+            onClick={() => onFavorite(product.id)}
+            className={cn(
+              "rounded-full border border-border bg-background/90 p-2 transition-colors",
+              favorite ? "text-rose-600" : "text-muted-foreground hover:text-rose-600"
+            )}
+            aria-label={isUz ? "Сараланганларга" : "В избранное"}
+          >
+            <Heart className={cn("h-4 w-4", favorite ? "fill-current" : "")} />
+          </button>
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <span className="rounded-full bg-secondary px-2 py-1 text-xs text-muted-foreground">
+            {product.store_count} {isUz ? "дўкон" : "магазина"}
+          </span>
+          {product.price_drop_pct && product.price_drop_pct > 0 ? (
+            <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">
+              ↓ {Math.round(product.price_drop_pct)}%
+            </span>
+          ) : null}
+          {product.is_new ? <span className="rounded-full bg-accent/10 px-2 py-1 text-xs font-semibold text-accent">Yangi</span> : null}
+        </div>
+
+        <div className="mt-auto pt-4">
+          <label
+            title={compareDisabledReason}
+            className={cn(
+              "inline-flex items-center gap-2 text-sm",
+              compareDisabled ? "cursor-not-allowed text-muted-foreground" : "cursor-pointer text-foreground"
+            )}
+          >
+            <input
+              type="checkbox"
+              checked={compared}
+              disabled={compareDisabled}
+              onChange={() => onCompare(product.id)}
+              className="h-4 w-4 rounded border-border"
+            />
+            {isUz ? "Солиштириш" : "Сравнить"}
+          </label>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-border bg-secondary/20 p-3">
+        <p className="text-sm text-muted-foreground">{isUz ? "Дўконлар нархи" : "Цены магазинов"}</p>
+        <p className="mt-1 text-lg font-bold text-accent">{isUz ? "дан" : "от"} {formatSum(product.min_price)}</p>
+
+        {offers?.length ? (
+          <ul className="mt-3 space-y-1.5 text-sm">
+            {offers.slice(0, 4).map((offer) => (
+              <li key={offer.id} className="flex items-center justify-between gap-3">
+                <span className="truncate text-muted-foreground">{offer.seller_name}</span>
+                <span className="font-semibold text-foreground">{formatSum(offer.price_amount)}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-3 text-sm text-muted-foreground">{isUz ? "Нархлар юкланмоқда..." : "Загрузка цен..."}</p>
+        )}
+      </div>
+    </article>
+  );
+}

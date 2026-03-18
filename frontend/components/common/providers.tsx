@@ -5,6 +5,7 @@ import { ThemeProvider } from "next-themes";
 import { ReactNode, useEffect, useState } from "react";
 
 import { LocaleProvider } from "@/components/common/locale-provider";
+import { CookieConsentBanner } from "@/components/common/cookie-consent-banner";
 import { useUserPriceAlerts } from "@/features/user/use-price-alerts";
 import { Toaster } from "@/components/ui/toaster";
 import { useCompareStore } from "@/store/compare.store";
@@ -61,6 +62,7 @@ export function Providers({ children, initialLocale }: { children: ReactNode; in
           <PersistStoresHydrator />
           <PriceAlertsServerHydrator />
           {children}
+          <CookieConsentBanner />
           <Toaster />
         </QueryClientProvider>
       </ThemeProvider>

@@ -5,13 +5,13 @@ import hashlib
 import hmac
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Literal
 from urllib.parse import unquote
 from uuid import UUID
 
-from sqlalchemy import and_, func, literal_column, or_, select, text
+from sqlalchemy import Numeric, and_, cast, func, literal_column, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.db.models import (
@@ -19,6 +19,7 @@ from shared.db.models import (
     CatalogCanonicalProduct,
     CatalogCategory,
     CatalogOffer,
+    CatalogProductSpec,
     CatalogProductSearch,
     CatalogSeller,
     CatalogStore,
@@ -98,6 +99,80 @@ _SPEC_RUNTIME_KEY_ALIASES: dict[str, str] = {
 
 _HIDDEN_SPEC_KEYS: set[str] = {"code", "\u043a\u043e\u0434"}
 _MEMORY_SPEC_KEYS: set[str] = {"ram_gb", "storage_gb"}
+
+_FILTER_SPEC_KEY_ALIASES: dict[str, tuple[str, ...]] = {
+    "ram": ("ram_gb",),
+    "storage": ("storage_gb", "storage_size"),
+    "storage_size": ("storage", "storage_gb"),
+    "screen_size": ("display_inches", "monitor_size"),
+    "monitor_size": ("screen_size", "display_inches"),
+    "screen_hz": ("refresh_rate_hz", "monitor_hz"),
+    "monitor_hz": ("screen_hz", "refresh_rate_hz"),
+    "camera_mp": ("main_camera_mp", "megapixels"),
+    "megapixels": ("camera_mp", "main_camera_mp"),
+    "battery": ("battery_mah", "battery_life"),
+    "battery_life": ("battery", "battery_mah"),
+    "charge_power": ("charging_power_w",),
+    "connector": ("charging_connector",),
+    "os": ("operating_system",),
+    "cpu": ("processor", "chipset"),
+    "gpu": ("video_card", "graphics"),
+    "screen_type": ("display_type",),
+    "matrix_type": ("display_type", "screen_type"),
+    "smart_os": ("os",),
+    "bt_version": ("bluetooth_standard", "bluetooth"),
+    "connection": ("wireless_interfaces", "charging_connector", "headphone_connector"),
+    "connectivity": ("network_standard", "wireless_interfaces", "sim_count"),
+    "video": ("video_resolution",),
+    "sensor_size": ("sensor",),
+    "mount": ("lens_mount",),
+    "waterproof": ("ip_rating",),
+    "codec": ("audio_codec", "codecs"),
+    "device_type": ("type",),
+    "platform": ("supported_platform",),
+    "switch_type": ("keyboard_switch",),
+    "subcategory": ("type", "category"),
+    "compatibility": ("supported_brands", "compatible_with"),
+    "type": ("device_type",),
+    "resolution": ("display_resolution",),
+    "has_5g": ("network_standard", "network"),
+    "has_nfc": ("wireless_interfaces", "nfc"),
+    "has_wireless_charge": ("charging_features",),
+    "has_touch": ("touchscreen",),
+    "has_backlit_kb": ("keyboard_backlight", "backlit_keyboard"),
+    "has_hdmi21": ("hdmi", "ports"),
+    "has_game_mode": ("game_mode",),
+    "is_curved": ("curved",),
+    "has_anc": ("anc",),
+    "has_mic": ("microphone", "mic"),
+    "has_stylus": ("stylus", "pen_support"),
+    "has_keyboard": ("keyboard", "keyboard_support"),
+    "has_ois": ("ois", "optical_stabilization"),
+    "has_evf": ("evf", "viewfinder"),
+    "is_weathersealed": ("weather_sealed", "weathersealed"),
+    "has_wifi": ("wifi_standard", "wireless_interfaces"),
+    "has_rgb": ("rgb", "lighting"),
+}
+
+_TOGGLE_FILTER_TOKEN_HINTS: dict[str, tuple[str, ...]] = {
+    "has_5g": ("5g",),
+    "has_nfc": ("nfc",),
+    "has_wireless_charge": ("wireless", "qi", "magsafe"),
+    "has_touch": ("touch",),
+    "has_backlit_kb": ("backlit", "\u043f\u043e\u0434\u0441\u0432\u0435\u0442"),
+    "has_hdmi21": ("hdmi 2.1", "2.1"),
+    "has_game_mode": ("game",),
+    "is_curved": ("curved", "\u0438\u0437\u043e\u0433"),
+    "has_anc": ("anc", "noise"),
+    "has_mic": ("mic", "microphone", "\u043c\u0438\u043a\u0440\u043e\u0444"),
+    "has_stylus": ("stylus", "pen"),
+    "has_keyboard": ("keyboard", "\u043a\u043b\u0430\u0432"),
+    "has_ois": ("ois", "stabil"),
+    "has_evf": ("evf", "viewfinder"),
+    "is_weathersealed": ("weather", "sealed", "\u0437\u0430\u0449\u0438\u0449"),
+    "has_wifi": ("wifi", "wi-fi", "802.11"),
+    "has_rgb": ("rgb",),
+}
 
 _HEX_COLOR_PATTERN = re.compile(r"^(?:#|0x)?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 
@@ -245,6 +320,45 @@ _VARIANT_LABELS: dict[str, str] = {
     "lite": "Lite",
     "fe": "FE",
 }
+
+_SAMSUNG_APPLIANCE_HINTS: tuple[str, ...] = (
+    "muzlat",
+    "xolodil",
+    "refriger",
+    "freezer",
+    "changyut",
+    "pylesos",
+    "vacuum",
+    "kir yuv",
+    "washing",
+    "washer",
+    "dryer",
+    "dishwash",
+    "mikro",
+    "duhov",
+    "pech",
+    "cooktop",
+    "conditioner",
+    "kondits",
+)
+_SAMSUNG_APPLIANCE_MODEL_PREFIXES: tuple[str, ...] = (
+    "rf",
+    "rb",
+    "rt",
+    "rs",
+    "rr",
+    "rl",
+    "rz",
+    "vc",
+    "vcc",
+    "ww",
+    "wd",
+    "dw",
+    "nv",
+    "na",
+    "mg",
+    "mc",
+)
 
 
 def _normalize_title_source_for_display(raw_title: str, brand_name: str | None = None) -> str:
@@ -477,7 +591,20 @@ def _extract_apple_model(text: str) -> str | None:
     return " ".join(parts).strip()
 
 
+def _looks_like_samsung_appliance_title(text: str) -> bool:
+    normalized = str(text or "").lower().strip()
+    if not normalized:
+        return False
+    if any(hint in normalized for hint in _SAMSUNG_APPLIANCE_HINTS):
+        return True
+    prefix_pattern = r"|".join(re.escape(prefix) for prefix in _SAMSUNG_APPLIANCE_MODEL_PREFIXES)
+    return re.search(rf"\b(?:{prefix_pattern})\s*\d{{2,4}}\b", normalized, flags=re.IGNORECASE) is not None
+
+
 def _extract_samsung_model(text: str) -> str | None:
+    if "galaxy" not in text and _looks_like_samsung_appliance_title(text):
+        return None
+
     z_match = re.search(
         r"\b(?:galaxy\s*)?z\s*(fold|flip)\s*(\d{1,2})(?:\s*(fe))?\b",
         text,
@@ -711,6 +838,187 @@ def _parse_first_float(value: str) -> float | None:
         return float(token)
     except ValueError:
         return None
+
+
+def _parse_numeric_range_filter(value: str) -> tuple[float, float] | None:
+    match = re.match(r"^\s*(-?\d+(?:[.,]\d+)?)\s*-\s*(-?\d+(?:[.,]\d+)?)\s*$", str(value))
+    if not match:
+        return None
+    left = _parse_first_float(match.group(1))
+    right = _parse_first_float(match.group(2))
+    if left is None or right is None:
+        return None
+    return min(left, right), max(left, right)
+
+
+def _parse_numeric_min_filter(value: str) -> float | None:
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return None
+    if normalized.endswith("_plus"):
+        return _parse_first_float(normalized[: -len("_plus")])
+    if normalized.endswith("plus"):
+        return _parse_first_float(normalized[: -len("plus")])
+    if normalized.endswith("+"):
+        return _parse_first_float(normalized[:-1])
+    return None
+
+
+def _normalize_attr_option_value(value: str) -> str:
+    normalized = str(value).strip().lower()
+    if re.fullmatch(r"\d+_\d+", normalized):
+        return normalized.replace("_", ".")
+    return normalized
+
+
+def _resolve_filter_spec_keys(filter_key: str) -> tuple[str, ...]:
+    aliases = _FILTER_SPEC_KEY_ALIASES.get(filter_key, ())
+    ordered = dict.fromkeys([filter_key, *aliases])
+    return tuple(key for key in ordered if key)
+
+
+def _build_attr_filter_condition(raw_key: str, raw_values: list[str]):
+    filter_key = _normalize_spec_key(raw_key) or str(raw_key).strip().lower()
+    if not filter_key:
+        return None
+
+    target_keys = _resolve_filter_spec_keys(filter_key)
+    if not target_keys:
+        return None
+
+    json_key = target_keys[0]
+    values = [str(value).strip() for value in raw_values if str(value).strip()]
+    if not values:
+        return None
+
+    spec_exists_expr = CatalogCanonicalProduct.specs.op("?")(json_key)
+    spec_text_expr = func.lower(func.coalesce(CatalogCanonicalProduct.specs[json_key].astext, ""))
+    spec_compact_expr = func.replace(func.replace(spec_text_expr, " ", ""), "-", "")
+    spec_numeric_expr = cast(
+        func.nullif(
+            func.replace(
+                func.substring(func.coalesce(CatalogCanonicalProduct.specs[json_key].astext, ""), r"(-?\d+(?:[.,]\d+)?)"),
+                ",",
+                ".",
+            ),
+            "",
+        ),
+        Numeric,
+    )
+    table_text_expr = func.lower(func.coalesce(CatalogProductSpec.spec_value, ""))
+    table_compact_expr = func.replace(func.replace(table_text_expr, " ", ""), "-", "")
+    table_numeric_expr = CatalogProductSpec.spec_value_num
+
+    def _table_exists(condition):
+        return (
+            select(literal_column("1"))
+            .select_from(CatalogProductSpec)
+            .where(
+                CatalogProductSpec.product_id == CatalogCanonicalProduct.id,
+                CatalogProductSpec.spec_key.in_(target_keys),
+                condition,
+            )
+            .exists()
+        )
+
+    def _table_has_any_key():
+        return (
+            select(literal_column("1"))
+            .select_from(CatalogProductSpec)
+            .where(
+                CatalogProductSpec.product_id == CatalogCanonicalProduct.id,
+                CatalogProductSpec.spec_key.in_(target_keys),
+            )
+            .exists()
+        )
+
+    option_conditions = []
+    for raw_value in values:
+        normalized_value = _normalize_attr_option_value(raw_value)
+        if not normalized_value:
+            continue
+
+        if normalized_value in {"true", "yes", "1"}:
+            toggle_tokens = _TOGGLE_FILTER_TOKEN_HINTS.get(filter_key, ())
+            table_true_conditions = [table_text_expr.notin_(["", "no", "false", "0", "none", "null", "-", "n/a"])]
+            json_true_conditions = [and_(spec_exists_expr, spec_text_expr.notin_(["", "no", "false", "0", "none", "null", "-", "n/a"]))]
+            if toggle_tokens:
+                table_true_conditions.extend([table_text_expr.like(f"%{token}%") for token in toggle_tokens])
+                json_true_conditions.extend([spec_text_expr.like(f"%{token}%") for token in toggle_tokens])
+            option_conditions.append(
+                or_(
+                    _table_exists(or_(*table_true_conditions)),
+                    or_(*json_true_conditions),
+                )
+            )
+            continue
+
+        if normalized_value in {"false", "no", "0"}:
+            option_conditions.append(
+                or_(
+                    ~_table_has_any_key(),
+                    _table_exists(table_text_expr.in_(["", "no", "false", "0", "none", "null", "-", "n/a"])),
+                    spec_exists_expr.is_(False),
+                    and_(spec_exists_expr, spec_text_expr.in_(["", "no", "false", "0", "none", "null", "-", "n/a"])),
+                )
+            )
+            continue
+
+        range_filter = _parse_numeric_range_filter(normalized_value)
+        if range_filter is not None:
+            left, right = range_filter
+            option_conditions.append(
+                or_(
+                    _table_exists(and_(table_numeric_expr.is_not(None), table_numeric_expr >= left, table_numeric_expr <= right)),
+                    and_(spec_numeric_expr.is_not(None), spec_numeric_expr >= left, spec_numeric_expr <= right),
+                )
+            )
+            continue
+
+        minimum_filter = _parse_numeric_min_filter(normalized_value)
+        if minimum_filter is not None:
+            option_conditions.append(
+                or_(
+                    _table_exists(and_(table_numeric_expr.is_not(None), table_numeric_expr >= minimum_filter)),
+                    and_(spec_numeric_expr.is_not(None), spec_numeric_expr >= minimum_filter),
+                )
+            )
+            continue
+
+        numeric_filter = _parse_first_float(normalized_value)
+        if numeric_filter is not None and re.fullmatch(r"-?\d+(?:[.,]\d+)?", normalized_value):
+            option_conditions.append(
+                or_(
+                    _table_exists(and_(table_numeric_expr.is_not(None), table_numeric_expr == numeric_filter)),
+                    and_(spec_numeric_expr.is_not(None), spec_numeric_expr == numeric_filter),
+                )
+            )
+            continue
+
+        text_candidate = re.sub(r"[_-]+", " ", normalized_value)
+        text_candidate = re.sub(r"\s+", " ", text_candidate).strip()
+        compact_candidate = re.sub(r"[\s_-]+", "", normalized_value)
+        escaped_text = text_candidate.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        escaped_compact = compact_candidate.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+        option_conditions.append(
+            or_(
+                _table_exists(
+                    or_(
+                        table_text_expr == text_candidate,
+                        table_text_expr.like(f"%{escaped_text}%", escape="\\"),
+                        table_compact_expr.like(f"%{escaped_compact}%", escape="\\"),
+                    )
+                ),
+                spec_text_expr == text_candidate,
+                and_(spec_exists_expr, spec_text_expr.like(f"%{escaped_text}%", escape="\\")),
+                and_(spec_exists_expr, spec_compact_expr.like(f"%{escaped_compact}%", escape="\\")),
+            )
+        )
+
+    if not option_conditions:
+        return None
+    return or_(*option_conditions)
 
 
 def _token_count(value: str) -> int:
@@ -2277,12 +2585,102 @@ class CatalogRepository:
             "store_count": int(row.store_count or 0),
         }
 
+    async def similar_products(self, *, product_id: int, limit: int = 6) -> list[dict]:
+        effective_limit = max(1, min(int(limit), 20))
+        seed_row = (
+            await self.session.execute(
+                select(
+                    CatalogCanonicalProduct.id,
+                    CatalogCanonicalProduct.category_id,
+                    CatalogCanonicalProduct.brand_id,
+                    CatalogProductSearch.min_price,
+                )
+                .join(CatalogProductSearch, CatalogProductSearch.product_id == CatalogCanonicalProduct.id)
+                .where(CatalogCanonicalProduct.id == product_id)
+            )
+        ).one_or_none()
+        if seed_row is None:
+            return []
+
+        seed_price = float(seed_row.min_price) if seed_row.min_price is not None else None
+        base_filters = [
+            CatalogCanonicalProduct.id != int(seed_row.id),
+            CatalogCanonicalProduct.category_id == int(seed_row.category_id),
+            CatalogCanonicalProduct.is_active.is_(True),
+            CatalogProductSearch.store_count > 0,
+        ]
+        if seed_price is not None and seed_price > 0:
+            base_filters.extend(
+                [
+                    CatalogProductSearch.min_price >= Decimal(str(seed_price * 0.7)),
+                    CatalogProductSearch.min_price <= Decimal(str(seed_price * 1.3)),
+                ]
+            )
+
+        def _build_stmt(*, same_brand_only: bool):
+            filters = list(base_filters)
+            if same_brand_only and seed_row.brand_id is not None:
+                filters.append(CatalogCanonicalProduct.brand_id == int(seed_row.brand_id))
+            if seed_price is not None and seed_price > 0:
+                distance_order = func.abs(CatalogProductSearch.min_price - Decimal(str(seed_price))).asc()
+            else:
+                distance_order = CatalogProductSearch.store_count.desc()
+            return (
+                select(
+                    CatalogCanonicalProduct.uuid.label("product_uuid"),
+                    CatalogCanonicalProduct.normalized_title,
+                    CatalogCanonicalProduct.main_image,
+                    CatalogCanonicalProduct.specs,
+                    CatalogBrand.name.label("brand_name"),
+                    CatalogProductSearch.min_price,
+                    CatalogProductSearch.store_count,
+                )
+                .join(CatalogProductSearch, CatalogProductSearch.product_id == CatalogCanonicalProduct.id)
+                .outerjoin(CatalogBrand, CatalogBrand.id == CatalogCanonicalProduct.brand_id)
+                .where(*filters)
+                .order_by(
+                    distance_order,
+                    CatalogProductSearch.store_count.desc(),
+                    CatalogCanonicalProduct.id.asc(),
+                )
+                .limit(effective_limit)
+            )
+
+        rows = (await self.session.execute(_build_stmt(same_brand_only=True))).all()
+        if len(rows) < effective_limit:
+            seen_ids = {str(row.product_uuid) for row in rows}
+            fallback_rows = (await self.session.execute(_build_stmt(same_brand_only=False))).all()
+            for row in fallback_rows:
+                row_id = str(row.product_uuid)
+                if row_id in seen_ids:
+                    continue
+                rows.append(row)
+                seen_ids.add(row_id)
+                if len(rows) >= effective_limit:
+                    break
+
+        return [
+            {
+                "id": str(row.product_uuid),
+                "normalized_title": format_product_title(
+                    row.normalized_title,
+                    brand_name=row.brand_name,
+                    specs=row.specs if isinstance(row.specs, dict) else {},
+                ),
+                "image_url": str(row.main_image).strip() if row.main_image else None,
+                "min_price": float(row.min_price) if row.min_price is not None else None,
+                "store_count": int(row.store_count or 0),
+            }
+            for row in rows[:effective_limit]
+        ]
+
     async def search_products(
         self,
         *,
         q: str | None,
         category_id: int | None,
         brand_ids: list[int] | None,
+        attr_filters: dict[str, list[str]] | None,
         min_price: Decimal | None,
         max_price: Decimal | None,
         in_stock: bool | None,
@@ -2292,8 +2690,12 @@ class CatalogRepository:
         sort: str,
         limit: int,
         cursor: str | None,
-    ) -> tuple[list[dict], str | None]:
+    ) -> tuple[list[dict], str | None, int]:
         rank_expr = func.ts_rank_cd(CatalogProductSearch.tsv, func.websearch_to_tsquery("simple", q or ""))
+        discount_expr = (
+            (CatalogProductSearch.max_price - CatalogProductSearch.min_price)
+            / func.nullif(CatalogProductSearch.max_price, 0)
+        )
         stmt = (
             select(
                 CatalogCanonicalProduct.id,
@@ -2312,6 +2714,7 @@ class CatalogRepository:
                 CatalogProductSearch.max_price,
                 CatalogProductSearch.store_count,
                 rank_expr.label("rank"),
+                discount_expr.label("discount_score"),
             )
             .join(CatalogProductSearch, CatalogProductSearch.product_id == CatalogCanonicalProduct.id)
             .join(CatalogCategory, CatalogCategory.id == CatalogCanonicalProduct.category_id)
@@ -2371,8 +2774,17 @@ class CatalogRepository:
                     )
                 )
             )
+        if attr_filters:
+            for raw_key, raw_values in attr_filters.items():
+                condition = _build_attr_filter_condition(raw_key, raw_values)
+                if condition is None:
+                    continue
+                filters.append(condition)
         if filters:
             stmt = stmt.where(and_(*filters))
+
+        total_stmt = stmt.with_only_columns(func.count(CatalogCanonicalProduct.id)).order_by(None)
+        total = int((await self.session.execute(total_stmt)).scalar_one() or 0)
 
         sort_map = {
             "relevance": [literal_column("rank").desc(), CatalogCanonicalProduct.id.asc()],
@@ -2380,27 +2792,30 @@ class CatalogRepository:
             "price_desc": [CatalogProductSearch.min_price.desc().nulls_last(), CatalogCanonicalProduct.id.asc()],
             "newest": [CatalogCanonicalProduct.created_at.desc(), CatalogCanonicalProduct.id.asc()],
             "popular": [CatalogProductSearch.store_count.desc(), CatalogCanonicalProduct.id.asc()],
+            "shop_count": [CatalogProductSearch.store_count.desc(), CatalogCanonicalProduct.id.asc()],
+            "discount": [literal_column("discount_score").desc().nulls_last(), CatalogCanonicalProduct.id.asc()],
         }
-        stmt = stmt.order_by(*sort_map.get(sort, sort_map["relevance"]))
+        sort_key = sort if sort in sort_map else "relevance"
+        stmt = stmt.order_by(*sort_map[sort_key])
 
         decoded = self.decode_cursor(cursor)
-        if decoded and decoded.get("sort") and decoded.get("sort") != sort:
+        if decoded and decoded.get("sort") and decoded.get("sort") != sort_key:
             decoded = None
         if decoded:
             last_id = int(decoded["last_id"])
-            if sort == "price_asc":
+            if sort_key == "price_asc":
                 last_price = Decimal(decoded["last_price"]) if "last_price" in decoded else None
                 stmt = stmt.where(
                     (CatalogProductSearch.min_price > last_price)
                     | ((CatalogProductSearch.min_price == last_price) & (CatalogCanonicalProduct.id > last_id))
                 )
-            elif sort == "price_desc":
+            elif sort_key == "price_desc":
                 last_price = Decimal(decoded["last_price"]) if "last_price" in decoded else None
                 stmt = stmt.where(
                     (CatalogProductSearch.min_price < last_price)
                     | ((CatalogProductSearch.min_price == last_price) & (CatalogCanonicalProduct.id > last_id))
                 )
-            elif sort == "popular":
+            elif sort_key in {"popular", "shop_count"}:
                 last_store_count = int(decoded.get("last_store_count", 0))
                 stmt = stmt.where(
                     or_(
@@ -2411,7 +2826,25 @@ class CatalogRepository:
                         ),
                     )
                 )
-            elif sort == "newest":
+            elif sort_key == "discount":
+                last_discount_raw = decoded.get("last_discount")
+                try:
+                    last_discount = float(last_discount_raw)
+                except (TypeError, ValueError):
+                    last_discount = None
+                if last_discount is not None:
+                    stmt = stmt.where(
+                        or_(
+                            discount_expr < last_discount,
+                            and_(
+                                discount_expr == last_discount,
+                                CatalogCanonicalProduct.id > last_id,
+                            ),
+                        )
+                    )
+                else:
+                    stmt = stmt.where(CatalogCanonicalProduct.id > last_id)
+            elif sort_key == "newest":
                 last_created_at_raw = decoded.get("last_created_at")
                 last_created_at = None
                 if isinstance(last_created_at_raw, str):
@@ -2431,7 +2864,7 @@ class CatalogRepository:
                     )
                 else:
                     stmt = stmt.where(CatalogCanonicalProduct.id > last_id)
-            elif sort == "relevance":
+            elif sort_key == "relevance":
                 last_rank_raw = decoded.get("last_rank")
                 try:
                     last_rank = float(last_rank_raw)
@@ -2459,6 +2892,8 @@ class CatalogRepository:
         fallback_specs_map = await self._load_store_specs_for_products(product_ids)
         fallback_image_ids = [int(row.id) for row in rows if _needs_catalog_image_fallback(str(row.main_image or ""))]
         fallback_images_map = await self._load_store_image_candidates_for_products(fallback_image_ids)
+        price_drop_map = await self._load_price_drop_pct_for_products(product_ids, days=7)
+        fresh_cutoff = datetime.now(timezone.utc) - timedelta(days=30)
 
         items: list[dict[str, object]] = []
         for r in rows:
@@ -2475,6 +2910,21 @@ class CatalogRepository:
                 fallback_candidates=fallback_images_map.get(product_id),
                 target_color=preferred_color,
             )
+            min_price_value = float(r.min_price) if r.min_price is not None else None
+            max_price_value = float(r.max_price) if r.max_price is not None else None
+            discount_pct = None
+            if (
+                min_price_value is not None
+                and max_price_value is not None
+                and max_price_value > 0
+                and max_price_value > min_price_value
+            ):
+                discount_pct = round(((max_price_value - min_price_value) / max_price_value) * 100, 1)
+
+            is_new = False
+            if isinstance(r.created_at, datetime):
+                created_at = r.created_at.astimezone(timezone.utc) if r.created_at.tzinfo else r.created_at.replace(tzinfo=timezone.utc)
+                is_new = created_at >= fresh_cutoff
 
             items.append(
                 {
@@ -2487,47 +2937,300 @@ class CatalogRepository:
                     "image_url": image_url,
                     "brand": {"id": r.brand_uuid, "name": r.brand_name} if r.brand_id else None,
                     "category": {"id": r.category_uuid, "name": r.category_name},
-                    "min_price": float(r.min_price) if r.min_price is not None else None,
-                    "max_price": float(r.max_price) if r.max_price is not None else None,
-                    "store_count": r.store_count,
+                    "min_price": min_price_value,
+                    "max_price": max_price_value,
+                    "store_count": int(r.store_count or 0),
                     "score": float(r.rank or 0),
+                    "discount_pct": discount_pct,
+                    "price_drop_pct": price_drop_map.get(product_id),
+                    "is_new": is_new,
                 }
             )
 
         next_cursor = None
         if has_next and rows:
             last = rows[-1]
-            payload = {"last_id": last.id, "sort": sort}
-            if sort in {"price_asc", "price_desc"}:
+            payload = {"last_id": last.id, "sort": sort_key}
+            if sort_key in {"price_asc", "price_desc"}:
                 payload["last_price"] = str(last.min_price or "0")
-            elif sort == "popular":
+            elif sort_key in {"popular", "shop_count"}:
                 payload["last_store_count"] = int(last.store_count or 0)
-            elif sort == "newest" and last.created_at is not None:
+            elif sort_key == "discount":
+                payload["last_discount"] = float(last.discount_score or 0)
+            elif sort_key == "newest" and last.created_at is not None:
                 payload["last_created_at"] = last.created_at.isoformat()
-            elif sort == "relevance":
+            elif sort_key == "relevance":
                 payload["last_rank"] = float(last.rank or 0)
             next_cursor = self._encode_cursor(payload)
 
-        return items, next_cursor
+        return items, next_cursor, total
+
+    async def _load_price_drop_pct_for_products(self, product_ids: list[int], *, days: int = 7) -> dict[int, float]:
+        if not product_ids:
+            return {}
+
+        stmt = text(
+            """
+            select
+                o.canonical_product_id as product_id,
+                max(ph.price_amount) as old_price,
+                min(ph.price_amount) as new_price
+            from catalog_price_history ph
+            join catalog_offers o on o.id = ph.offer_id
+            where
+                o.canonical_product_id = any(:product_ids)
+                and ph.captured_at >= now() - make_interval(days => :days)
+            group by o.canonical_product_id
+            having max(ph.price_amount) > min(ph.price_amount)
+            """
+        )
+        rows = (
+            await self.session.execute(
+                stmt,
+                {
+                    "product_ids": product_ids,
+                    "days": max(1, int(days)),
+                },
+            )
+        ).all()
+
+        result: dict[int, float] = {}
+        for row in rows:
+            try:
+                old_price = float(row.old_price)
+                new_price = float(row.new_price)
+            except (TypeError, ValueError):
+                continue
+            if old_price <= 0 or old_price <= new_price:
+                continue
+            result[int(row.product_id)] = round(((old_price - new_price) / old_price) * 100, 1)
+        return result
 
     async def list_categories(self) -> list[dict]:
         rows = (
             await self.session.execute(
-                select(CatalogCategory.id, CatalogCategory.uuid, CatalogCategory.slug, CatalogCategory.name_uz, CatalogCategory.parent_id)
+                select(
+                    CatalogCategory.id,
+                    CatalogCategory.uuid,
+                    CatalogCategory.slug,
+                    CatalogCategory.name_uz,
+                    CatalogCategory.name_ru,
+                    CatalogCategory.parent_id,
+                )
                 .where(CatalogCategory.is_active.is_(True))
                 .order_by(CatalogCategory.lft.asc(), CatalogCategory.id.asc())
             )
         ).all()
+        category_counts_rows = (
+            await self.session.execute(
+                select(
+                    CatalogCanonicalProduct.category_id,
+                    func.count(CatalogCanonicalProduct.id).label("products_count"),
+                )
+                .join(
+                    CatalogProductSearch,
+                    and_(
+                        CatalogProductSearch.product_id == CatalogCanonicalProduct.id,
+                        CatalogProductSearch.store_count > 0,
+                    ),
+                )
+                .where(CatalogCanonicalProduct.is_active.is_(True))
+                .group_by(CatalogCanonicalProduct.category_id)
+            )
+        ).all()
+        category_counts = {int(row.category_id): int(row.products_count or 0) for row in category_counts_rows}
         id_to_uuid = {int(r.id): r.uuid for r in rows}
         return [
             {
                 "id": r.uuid,
                 "slug": r.slug,
-                "name": r.name_uz,
+                "name": r.name_ru or r.name_uz or r.slug,
+                "name_ru": r.name_ru,
+                "name_uz": r.name_uz,
                 "parent_id": id_to_uuid.get(int(r.parent_id)) if r.parent_id is not None else None,
+                "products_count": int(category_counts.get(int(r.id), 0)),
             }
             for r in rows
         ]
+
+    async def get_last_sync_timestamp(self) -> str | None:
+        timestamp = (
+            await self.session.execute(
+                select(func.max(CatalogOffer.scraped_at)).where(CatalogOffer.is_valid.is_(True))
+            )
+        ).scalar_one_or_none()
+        if timestamp is None:
+            return None
+        return timestamp.isoformat()
+
+    async def get_home_trust_stats(self) -> dict[str, int | str | None]:
+        products_count = (
+            await self.session.execute(
+                select(func.count(CatalogProductSearch.product_id)).where(CatalogProductSearch.store_count > 0)
+            )
+        ).scalar_one()
+        stores_count = (
+            await self.session.execute(
+                select(func.count(CatalogStore.id)).where(CatalogStore.is_active.is_(True))
+            )
+        ).scalar_one()
+        return {
+            "products_count": int(products_count or 0),
+            "stores_count": int(stores_count or 0),
+            "timestamp": await self.get_last_sync_timestamp(),
+        }
+
+    async def list_price_drops(self, *, limit: int = 8, hours: int = 24) -> list[dict]:
+        stmt = text(
+            """
+            with window_prices as (
+                select
+                    o.canonical_product_id as product_id,
+                    min(ph.price_amount) as new_price,
+                    max(ph.price_amount) as old_price
+                from catalog_price_history ph
+                join catalog_offers o on o.id = ph.offer_id
+                where ph.captured_at >= now() - make_interval(hours => :hours)
+                group by o.canonical_product_id
+                having max(ph.price_amount) > min(ph.price_amount)
+            )
+            select
+                cp.id as product_id,
+                cp.uuid as product_uuid,
+                cp.normalized_title,
+                cp.main_image,
+                cp.specs,
+                b.id as brand_id,
+                b.uuid as brand_uuid,
+                b.name as brand_name,
+                c.uuid as category_uuid,
+                coalesce(c.name_ru, c.name_uz, c.slug) as category_name,
+                wp.new_price,
+                wp.old_price,
+                ((wp.old_price - wp.new_price) / nullif(wp.old_price, 0)) * 100 as drop_pct,
+                cps.store_count
+            from window_prices wp
+            join catalog_canonical_products cp on cp.id = wp.product_id
+            join catalog_product_search cps on cps.product_id = cp.id
+            join catalog_categories c on c.id = cp.category_id
+            left join catalog_brands b on b.id = cp.brand_id
+            where
+                cps.store_count > 0
+                and cp.is_active = true
+            order by drop_pct desc, (wp.old_price - wp.new_price) desc, cp.id asc
+            limit :limit
+            """
+        )
+        rows = (await self.session.execute(stmt, {"hours": max(1, int(hours)), "limit": max(1, min(int(limit), 16))})).all()
+
+        fallback_image_ids = [int(row.product_id) for row in rows if _needs_catalog_image_fallback(str(row.main_image or ""))]
+        fallback_images_map = await self._load_store_image_candidates_for_products(fallback_image_ids)
+
+        items: list[dict[str, object]] = []
+        for row in rows:
+            product_id = int(row.product_id)
+            image_url = _select_catalog_card_image(
+                row.main_image,
+                fallback_candidates=fallback_images_map.get(product_id),
+                target_color=None,
+            )
+            specs_payload = row.specs if isinstance(row.specs, dict) else {}
+            items.append(
+                {
+                    "id": row.product_uuid,
+                    "normalized_title": format_product_title(
+                        str(row.normalized_title or ""),
+                        brand_name=row.brand_name,
+                        specs=specs_payload,
+                    ),
+                    "image_url": image_url,
+                    "brand": {"id": row.brand_uuid, "name": row.brand_name} if row.brand_id else None,
+                    "category": {"id": row.category_uuid, "name": row.category_name},
+                    "new_price": float(row.new_price),
+                    "old_price": float(row.old_price),
+                    "drop_pct": round(float(row.drop_pct or 0), 1),
+                    "store_count": int(row.store_count or 0),
+                }
+            )
+        return items
+
+    async def upsert_newsletter_subscription(
+        self,
+        *,
+        email: str,
+        categories: list[str],
+        locale: str | None,
+        source: str = "homepage",
+    ) -> dict[str, object]:
+        normalized_email = str(email or "").strip().lower()
+        if not normalized_email:
+            raise ValueError("email is required")
+
+        normalized_categories: list[str] = []
+        for category in categories:
+            normalized = str(category or "").strip()
+            if not normalized:
+                continue
+            if normalized in normalized_categories:
+                continue
+            normalized_categories.append(normalized)
+        if not normalized_categories:
+            normalized_categories = ["all"]
+
+        normalized_locale = str(locale or "").strip() or "ru-RU"
+        normalized_source = str(source or "").strip() or "homepage"
+
+        row = (
+            await self.session.execute(
+                text(
+                    """
+                    insert into catalog_newsletter_subscriptions (
+                        email,
+                        categories,
+                        locale,
+                        source,
+                        is_active,
+                        created_at,
+                        updated_at
+                    )
+                    values (
+                        :email,
+                        cast(:categories as jsonb),
+                        :locale,
+                        :source,
+                        true,
+                        now(),
+                        now()
+                    )
+                    on conflict (email) do update
+                    set
+                        categories = excluded.categories,
+                        locale = excluded.locale,
+                        source = excluded.source,
+                        is_active = true,
+                        updated_at = now()
+                    returning uuid, email, categories, locale, updated_at
+                    """
+                ),
+                {
+                    "email": normalized_email,
+                    "categories": json.dumps(normalized_categories),
+                    "locale": normalized_locale,
+                    "source": normalized_source,
+                },
+            )
+        ).one()
+        await self.session.commit()
+
+        updated_at = row.updated_at.isoformat() if isinstance(row.updated_at, datetime) else str(row.updated_at)
+        categories_payload = row.categories if isinstance(row.categories, list) else normalized_categories
+        return {
+            "id": str(row.uuid),
+            "email": str(row.email),
+            "categories": [str(item) for item in categories_payload],
+            "locale": str(row.locale),
+            "updated_at": updated_at,
+        }
 
     async def list_stores(self, active_only: bool) -> list[dict]:
         stmt = select(CatalogStore.id, CatalogStore.uuid, CatalogStore.slug, CatalogStore.name, CatalogStore.is_active)
@@ -2604,19 +3307,34 @@ class CatalogRepository:
             "total_products": count,
         }
 
-    async def price_history(self, product_id: int, days: int) -> list[dict]:
+    async def price_history(self, product_id: int, days: int, *, shop_id: int | None = None) -> list[dict]:
         stmt = text(
             """
-            select date_trunc('day', ph.captured_at) as day,
+            select
+                   date_trunc('day', ph.captured_at) as day,
+                   s.uuid as shop_id,
+                   s.name as shop_name,
                    min(ph.price_amount) as min_price,
                    max(ph.price_amount) as max_price
             from catalog_price_history ph
             join catalog_offers o on o.id = ph.offer_id
+            join catalog_stores s on s.id = o.store_id
             where o.canonical_product_id = :product_id
               and ph.captured_at >= now() - make_interval(days => :days)
-            group by 1
-            order by 1 asc
+              and (:shop_id is null or s.id = :shop_id)
+            group by 1, 2, 3
+            order by 1 asc, 3 asc
             """
         )
-        rows = (await self.session.execute(stmt, {"product_id": product_id, "days": days})).all()
-        return [{"date": r.day.date().isoformat(), "min_price": r.min_price, "max_price": r.max_price} for r in rows]
+        rows = (await self.session.execute(stmt, {"product_id": product_id, "days": days, "shop_id": shop_id})).all()
+        return [
+            {
+                "date": r.day.date().isoformat(),
+                "shop_id": str(r.shop_id) if r.shop_id is not None else None,
+                "shop_name": str(r.shop_name) if r.shop_name is not None else None,
+                "price": float(r.min_price) if r.min_price is not None else None,
+                "min_price": float(r.min_price) if r.min_price is not None else None,
+                "max_price": float(r.max_price) if r.max_price is not None else None,
+            }
+            for r in rows
+        ]

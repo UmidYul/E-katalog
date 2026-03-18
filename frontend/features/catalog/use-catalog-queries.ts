@@ -11,8 +11,12 @@ export const catalogKeys = {
   offers: (id: string) => ["catalog", "offers", id] as const,
   priceHistory: (id: string, days: number) => ["catalog", "price-history", id, days] as const,
   categories: ["catalog", "categories"] as const,
-  brands: ["catalog", "brands"] as const,
-  filters: (categoryId?: string) => ["catalog", "filters", categoryId] as const
+  brands: (query?: { q?: string; categoryId?: string; limit?: number }) =>
+    ["catalog", "brands", query?.q ?? "", query?.categoryId ?? "", query?.limit ?? 100] as const,
+  filters: (categoryId?: string) => ["catalog", "filters", categoryId] as const,
+  homeTrust: ["home", "trust"] as const,
+  homeLastSync: ["home", "last-sync"] as const,
+  homePriceDrops: (limit: number) => ["home", "price-drops", limit] as const,
 };
 
 export const useCatalogProducts = (query: CatalogQuery) =>
@@ -60,15 +64,37 @@ export const useCategories = () =>
     queryFn: () => catalogApi.getCategories()
   });
 
-export const useBrands = () =>
+export const useBrands = (query?: { q?: string; categoryId?: string; limit?: number; enabled?: boolean }) =>
   useQuery({
-    queryKey: catalogKeys.brands,
-    queryFn: () => catalogApi.getBrands()
+    queryKey: catalogKeys.brands(query),
+    queryFn: () => catalogApi.getBrands({ q: query?.q, category_id: query?.categoryId, limit: query?.limit }),
+    enabled: query?.enabled ?? true
   });
 
 export const useDynamicFilters = (categoryId?: string) =>
   useQuery({
     queryKey: catalogKeys.filters(categoryId),
     queryFn: () => catalogApi.getFilters(categoryId)
+  });
+
+export const useHomeTrustStats = () =>
+  useQuery({
+    queryKey: catalogKeys.homeTrust,
+    queryFn: () => catalogApi.getHomeTrustStats(),
+    staleTime: 2 * 60_000,
+  });
+
+export const useLastSync = () =>
+  useQuery({
+    queryKey: catalogKeys.homeLastSync,
+    queryFn: () => catalogApi.getLastSync(),
+    staleTime: 60_000,
+  });
+
+export const usePriceDrops = (limit: number = 8) =>
+  useQuery({
+    queryKey: catalogKeys.homePriceDrops(limit),
+    queryFn: () => catalogApi.getPriceDrops(limit),
+    staleTime: 2 * 60_000,
   });
 

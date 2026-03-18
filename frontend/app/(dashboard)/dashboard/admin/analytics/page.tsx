@@ -95,8 +95,8 @@ export default function AdminAnalyticsPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="day">РџРѕ РґРЅСЏРј</SelectItem>
-              <SelectItem value="week">РџРѕ РЅРµРґРµР»СЏРј</SelectItem>
+              <SelectItem value="day">По дням</SelectItem>
+              <SelectItem value="week">По неделям</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -122,12 +122,12 @@ export default function AdminAnalyticsPage() {
           <div className="grid gap-4 xl:grid-cols-2">
             <AreaTimeseriesChart
               title="Revenue trend"
-              description="Р’С‹СЂСѓС‡РєР° Р·Р° РІС‹Р±СЂР°РЅРЅС‹Р№ РїРµСЂРёРѕРґ"
+              description="Выручка за выбранный период"
               data={(revenue.data?.series ?? []) as Array<Record<string, string | number>>}
               dataKey="revenue"
               valueFormatter={(value) => formatPrice(value)}
             />
-            <DonutChartWidget title="Orders by status" description="РЎС‚Р°С‚СѓСЃС‹ Р·Р°РєР°Р·РѕРІ" data={revenueStatusDonut} />
+            <DonutChartWidget title="Orders by status" description="Статусы заказов" data={revenueStatusDonut} />
           </div>
           <div className="grid gap-4 xl:grid-cols-3">
             <Card>
@@ -181,7 +181,7 @@ export default function AdminAnalyticsPage() {
           </div>
           <MultiLineChartWidget
             title="Quality timeline"
-            description="РўСЂРµРЅРґ РєР»СЋС‡РµРІС‹С… quality РјРµС‚СЂРёРє"
+            description="Тренд ключевых quality-метрик"
             data={(quality.data?.timeline ?? []) as Array<Record<string, string | number>>}
             lines={[
               { key: "active_without_valid_offers_ratio", label: "No valid offers", color: "#ef4444" },
@@ -236,14 +236,14 @@ export default function AdminAnalyticsPage() {
           <div className="grid gap-4 xl:grid-cols-2">
             <AreaTimeseriesChart
               title="Avg duration"
-              description="РЎСЂРµРґРЅСЏСЏ РґР»РёС‚РµР»СЊРЅРѕСЃС‚СЊ crawl-Р·Р°РґР°С‡"
+              description="Средняя длительность crawl-задач"
               data={(operations.data?.duration_series ?? []) as Array<Record<string, string | number>>}
               dataKey="avg_duration_sec"
               valueFormatter={(value) => `${Math.round(value)}s`}
             />
             <DonutChartWidget
               title="Runs by status"
-              description="РЎС‚Р°С‚СѓСЃС‹ pipeline Р·Р°РїСѓСЃРєРѕРІ"
+              description="Статусы pipeline-запусков"
               data={(operations.data?.status_breakdown ?? []).map((item, index) => ({
                 name: item.status,
                 value: item.count,
@@ -263,7 +263,7 @@ export default function AdminAnalyticsPage() {
           <div className="grid gap-4 xl:grid-cols-2">
             <StackedBarChartWidget
               title="Moderation series"
-              description="Published/Pending/Rejected РґРёРЅР°РјРёРєР°"
+              description="Published/Pending/Rejected динамика"
               data={(moderation.data?.series ?? []) as Array<Record<string, string | number>>}
               bars={[
                 { key: "pending", label: "Pending", color: "#f59e0b" },
@@ -271,7 +271,7 @@ export default function AdminAnalyticsPage() {
                 { key: "rejected", label: "Rejected", color: "#ef4444" },
               ]}
             />
-            <DonutChartWidget title="Status split" description="Р Р°СЃРїСЂРµРґРµР»РµРЅРёРµ РјРѕРґРµСЂР°С†РёРё" data={moderationStatusDonut} />
+            <DonutChartWidget title="Status split" description="Распределение модерации" data={moderationStatusDonut} />
           </div>
         </TabsContent>
 
@@ -285,13 +285,13 @@ export default function AdminAnalyticsPage() {
           <div className="grid gap-4 xl:grid-cols-2">
             <AreaTimeseriesChart
               title="New users trend"
-              description="Р РµРіРёСЃС‚СЂР°С†РёРё Р·Р° РїРµСЂРёРѕРґ"
+              description="Регистрации за период"
               data={(users.data?.created_series ?? []) as Array<Record<string, string | number>>}
               dataKey="value"
             />
             <AreaTimeseriesChart
               title="Activity trend"
-              description="РђРєС‚РёРІРЅРѕСЃС‚СЊ РїРѕ last_seen"
+              description="Активность по last_seen"
               data={(users.data?.activity_series ?? []) as Array<Record<string, string | number>>}
               dataKey="value"
             />
@@ -353,7 +353,7 @@ export default function AdminAnalyticsPage() {
               </Select>
             </div>
             <Button variant="secondary" onClick={() => evaluateAlerts.mutate()} disabled={evaluateAlerts.isPending}>
-              {evaluateAlerts.isPending ? "Р—Р°РїСѓСЃРє..." : "Evaluate alerts"}
+              {evaluateAlerts.isPending ? "Запуск..." : "Evaluate alerts"}
             </Button>
           </div>
 
@@ -387,7 +387,7 @@ export default function AdminAnalyticsPage() {
                   </div>
                 ))
               ) : (
-                <p className="text-sm text-muted-foreground">РЎРѕР±С‹С‚РёСЏ РїРѕ С„РёР»СЊС‚СЂСѓ РЅРµ РЅР°Р№РґРµРЅС‹.</p>
+                <p className="text-sm text-muted-foreground">События по фильтру не найдены.</p>
               )}
             </CardContent>
           </Card>

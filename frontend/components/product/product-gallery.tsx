@@ -1,108 +1,154 @@
-"use client";
+﻿"use client";
 
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
-import { useLocale } from "@/components/common/locale-provider";
+import { Modal } from "@/components/ui/modal";
+import { cn } from "@/lib/utils/cn";
 
-const UI_ICON_URL_PATTERNS: RegExp[] = [
-  /(^|[\/_.-])(icon|icons|sprite|glyph|pictogram|logo)([\/_.-]|$)/i,
-  /(^|[\/_.-])(cart|basket|shopping-cart|shopping-card|phone|call|location|map-marker|marker|pin)([\/_.-]|$)/i,
-  /(^|[\/_.-])(telegram|whatsapp)([\/_.-]|$)/i,
-];
-
-const isLikelyUiIconAsset = (url: string) => {
-  let normalized = String(url || "").trim();
-  if (!normalized) return true;
-  try {
-    normalized = decodeURIComponent(normalized);
-  } catch {
-    // Keep raw URL if it cannot be decoded.
-  }
-  const lowered = normalized.toLowerCase();
-  return UI_ICON_URL_PATTERNS.some((pattern) => pattern.test(lowered));
+type ProductGalleryProps = {
+  images: string[];
+  priceDrop?: number;
+  isNew?: boolean;
+  categoryLabel?: string;
+  actions?: ReactNode;
 };
 
-export function ProductGallery({ images }: { images: string[] }) {
-  const { locale } = useLocale();
-  const imageAlt = locale === "uz-Cyrl-UZ" ? "Товар расми" : "Изображение товара";
-  const thumbAlt = locale === "uz-Cyrl-UZ" ? "Товар миниатюраси" : "Миниатюра товара";
+const CategoryFallbackIcon = ({ label }: { label?: string }) => (
+  <div className="flex h-full w-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border/80 bg-secondary/20 text-center">
+    <svg viewBox="0 0 48 48" className="h-16 w-16 text-muted-foreground" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+      <rect x="13" y="4" width="22" height="40" rx="4" stroke="currentColor" strokeWidth="2" />
+      <rect x="19" y="9" width="10" height="1.5" rx="0.75" fill="currentColor" />
+      <circle cx="24" cy="37" r="2" fill="currentColor" />
+    </svg>
+    <p className="px-3 text-sm text-muted-foreground">{label ? `${label} расми` : "Товар расми мавжуд эмас"}</p>
+  </div>
+);
 
-  const sourceList = useMemo(() => {
-    const unique = new Set<string>();
-    for (const raw of images) {
-      const value = String(raw ?? "").trim();
-      if (!value) continue;
-      if (!/^https?:\/\//i.test(value)) continue;
-      if (/\.svg(?:[?#].*)?$/i.test(value)) continue;
-      if (isLikelyUiIconAsset(value)) continue;
-      unique.add(value);
-    }
-    return Array.from(unique);
-  }, [images]);
+const normalizeImages = (images: string[]) => {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const image of images) {
+    const value = String(image ?? "").trim();
+    if (!value || seen.has(value)) continue;
+    if (!/^https?:\/\//i.test(value) && !value.startsWith("/")) continue;
+    seen.add(value);
+    normalized.push(value);
+  }
+  return normalized;
+};
 
-  const [failed, setFailed] = useState<Set<string>>(new Set());
-  const [active, setActive] = useState<string | null>(sourceList[0] ?? null);
+export function ProductGallery({ images, priceDrop = 0, isNew = false, categoryLabel, actions }: ProductGalleryProps) {
+  const gallery = useMemo(() => normalizeImages(images), [images]);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const touchStart = useRef<number | null>(null);
 
-  useEffect(() => {
-    setFailed(new Set());
-    setActive(sourceList[0] ?? null);
-  }, [sourceList]);
+  const safeIndex = Math.min(activeIndex, Math.max(gallery.length - 1, 0));
+  const activeImage = gallery[safeIndex] ?? null;
 
-  const visibleList = useMemo(() => sourceList.filter((src) => !failed.has(src)), [sourceList, failed]);
-
-  useEffect(() => {
-    if (!visibleList.length) {
-      if (active !== null) setActive(null);
-      return;
-    }
-    if (!active || !visibleList.includes(active)) {
-      setActive(visibleList[0] ?? null);
-    }
-  }, [active, visibleList]);
-
-  const markFailed = useCallback((src: string) => {
-    setFailed((previous) => {
-      if (previous.has(src)) return previous;
-      const next = new Set(previous);
-      next.add(src);
+  const move = (direction: 1 | -1) => {
+    if (gallery.length <= 1) return;
+    setActiveIndex((current) => {
+      const next = current + direction;
+      if (next < 0) return gallery.length - 1;
+      if (next >= gallery.length) return 0;
       return next;
     });
-  }, []);
+  };
 
   return (
-    <div className="space-y-3">
-      <div className="relative aspect-square overflow-hidden rounded-xl border border-border bg-card">
-        {active ? (
-          <Image
-            src={active}
-            alt={imageAlt}
-            fill
-            className="object-contain p-3"
-            sizes="(max-width: 768px) 100vw, 40vw"
-            onError={() => markFailed(active)}
-          />
+    <section className="space-y-3">
+      <div
+        className="relative h-[300px] overflow-hidden rounded-2xl border border-border bg-white"
+        onTouchStart={(event) => {
+          touchStart.current = event.touches[0]?.clientX ?? null;
+        }}
+        onTouchEnd={(event) => {
+          if (touchStart.current == null) return;
+          const delta = (event.changedTouches[0]?.clientX ?? touchStart.current) - touchStart.current;
+          touchStart.current = null;
+          if (Math.abs(delta) < 40) return;
+          move(delta < 0 ? 1 : -1);
+        }}
+      >
+        {priceDrop > 0 ? (
+          <span className="absolute left-3 top-3 z-10 rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">
+            ↓ {priceDrop}%
+          </span>
+        ) : null}
+
+        {isNew ? (
+          <span className="absolute left-3 top-10 z-10 rounded-full bg-accent/10 px-2 py-1 text-xs font-semibold text-accent">Янги</span>
+        ) : null}
+
+        {activeImage ? (
+          <button
+            type="button"
+            className="relative block h-full w-full cursor-zoom-in"
+            onClick={() => setLightboxOpen(true)}
+            aria-label="Расмни катта очиш"
+          >
+            <Image
+              src={activeImage}
+              alt="Товар расми"
+              fill
+              className="object-contain p-3"
+              sizes="(max-width: 768px) 100vw, 260px"
+              priority
+            />
+          </button>
         ) : (
-          <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-            <p className="text-sm font-medium text-muted-foreground">{locale === "uz-Cyrl-UZ" ? "Товар расми мавжуд эмас" : "Фото товара недоступно"}</p>
-            <p className="text-xs text-muted-foreground/80">
-              {locale === "uz-Cyrl-UZ" ? "Маълумот янгилангандан кейин карточкани қайта очиб кўринг." : "Попробуйте открыть карточку позже, когда данные обновятся."}
-            </p>
-          </div>
+          <CategoryFallbackIcon label={categoryLabel} />
         )}
       </div>
-      <div className="grid grid-cols-5 gap-2">
-        {visibleList.slice(0, 5).map((src) => (
-          <button
-            key={src}
-            type="button"
-            className={`relative aspect-square overflow-hidden rounded-lg border ${active === src ? "border-accent" : "border-border"}`}
-            onClick={() => setActive(src)}
-          >
-            <Image src={src} alt={thumbAlt} fill className="object-contain p-1" sizes="120px" onError={() => markFailed(src)} />
-          </button>
-        ))}
-      </div>
-    </div>
+
+      {gallery.length > 1 ? (
+        <div className="grid grid-cols-5 gap-2">
+          {gallery.slice(0, 5).map((image, index) => (
+            <button
+              key={image}
+              type="button"
+              className={cn(
+                "relative h-14 overflow-hidden rounded-lg border bg-white",
+                safeIndex === index ? "border-accent" : "border-border"
+              )}
+              onClick={() => setActiveIndex(index)}
+              aria-label={`Расм ${index + 1}`}
+            >
+              <Image src={image} alt="Миниатюра" fill className="object-contain p-1" sizes="72px" />
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {actions ? <div className="grid grid-cols-2 gap-2">{actions}</div> : null}
+
+      <Modal
+        open={lightboxOpen}
+        onOpenChange={setLightboxOpen}
+        title="Товар галереяси"
+      >
+        <div className="space-y-3">
+          <div className="relative h-[340px] overflow-hidden rounded-xl border border-border bg-white">
+            {activeImage ? <Image src={activeImage} alt="Товар" fill className="object-contain p-4" sizes="80vw" /> : <CategoryFallbackIcon />}
+          </div>
+          {gallery.length > 1 ? (
+            <div className="flex items-center justify-between gap-2">
+              <button type="button" onClick={() => move(-1)} className="rounded-md border border-border px-3 py-1 text-sm">
+                Олдинги
+              </button>
+              <span className="text-xs text-muted-foreground">
+                {safeIndex + 1} / {gallery.length}
+              </span>
+              <button type="button" onClick={() => move(1)} className="rounded-md border border-border px-3 py-1 text-sm">
+                Кейинги
+              </button>
+            </div>
+          ) : null}
+        </div>
+      </Modal>
+    </section>
   );
 }

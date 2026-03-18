@@ -76,6 +76,88 @@ export type CatalogQuery = {
   cursor?: string;
 };
 
+export type CatalogCategory = {
+  id: string;
+  slug: string;
+  name: string;
+  name_ru?: string | null;
+  name_uz?: string | null;
+  parent_id?: string | null;
+  products_count?: number;
+};
+
+export type HomeTrustStats = {
+  products_count: number;
+  stores_count: number;
+  timestamp: string | null;
+};
+
+export type HomePriceDropItem = {
+  id: string;
+  normalized_title: string;
+  image_url?: string | null;
+  brand?: { id: string; name: string } | null;
+  category: { id: string; name: string };
+  new_price: number;
+  old_price: number;
+  drop_pct: number;
+  store_count: number;
+};
+
+export type HomePriceDropsResponse = {
+  items: HomePriceDropItem[];
+};
+
+export type LastSyncResponse = {
+  timestamp: string | null;
+};
+
+export type NewsletterSubscriptionPayload = {
+  email: string;
+  categories: string[];
+  locale?: string;
+};
+
+const LATIN_MOJIBAKE_PATTERN = /[\u00D0\u00D1]/;
+const MOJIBAKE_SUSPICIOUS_CHARS = /[\u0402\u0403\u0405\u0408\u0409\u040A\u040B\u040C\u040E\u0452\u0453\u0455\u0458\u0459\u045A\u045B\u045C\u045E\u045F\u201A\u201E\u2026\u2030\u2039\u203A\u2122]/g;
+
+const UTF8_DECODER = new TextDecoder("utf-8");
+const WINDOWS_1251_REVERSE_MAP: Map<string, number> | null = (() => {
+  try {
+    const cp1251Decoder = new TextDecoder("windows-1251");
+    const reverseMap = new Map<string, number>();
+    for (let i = 0; i < 256; i += 1) {
+      const decodedChar = cp1251Decoder.decode(Uint8Array.from([i]));
+      if (!reverseMap.has(decodedChar)) reverseMap.set(decodedChar, i);
+    }
+    return reverseMap;
+  } catch {
+    return null;
+  }
+})();
+
+const decodeCyrillicMojibake = (value: string | null | undefined): string | null | undefined => {
+  if (!value || !WINDOWS_1251_REVERSE_MAP) return value;
+
+  const sourceSuspiciousCount = value.match(MOJIBAKE_SUSPICIOUS_CHARS)?.length ?? 0;
+  if (sourceSuspiciousCount < 2 && !LATIN_MOJIBAKE_PATTERN.test(value)) return value;
+
+  const bytes: number[] = [];
+  for (const ch of value) {
+    const byte = WINDOWS_1251_REVERSE_MAP.get(ch);
+    if (byte == null) return value;
+    bytes.push(byte);
+  }
+
+  try {
+    const decoded = UTF8_DECODER.decode(Uint8Array.from(bytes));
+    const decodedSuspiciousCount = decoded.match(MOJIBAKE_SUSPICIOUS_CHARS)?.length ?? 0;
+    return decodedSuspiciousCount < sourceSuspiciousCount ? decoded : value;
+  } catch {
+    return value;
+  }
+};
+
 export const catalogApi = {
   async search(query: CatalogQuery): Promise<Paginated<ProductListItem>> {
     const { attrs, ...rest } = query;
@@ -108,18 +190,51 @@ export const catalogApi = {
     });
     return data;
   },
-  async getCategories(): Promise<Array<{ id: string; slug: string; name: string }>> {
-    const { data } = await apiClient.get<Array<{ id: string; slug: string; name: string }>>("/categories");
-    return data;
+  async getCategories(): Promise<CatalogCategory[]> {
+    const { data } = await apiClient.get<CatalogCategory[]>("/categories");
+    return (data ?? []).map((item) => ({
+      ...item,
+      name: decodeCyrillicMojibake(item.name) ?? item.name,
+      name_ru: decodeCyrillicMojibake(item.name_ru) ?? item.name_ru,
+      name_uz: decodeCyrillicMojibake(item.name_uz) ?? item.name_uz,
+    }));
   },
-  async getBrands(): Promise<BrandListItem[]> {
-    const { data } = await apiClient.get<BrandListItem[]>("/brands");
+  async getBrands(query?: { q?: string; category_id?: string; limit?: number }): Promise<BrandListItem[]> {
+    const { data } = await apiClient.get<BrandListItem[]>("/brands", { params: query });
     return data;
   },
   async getFilters(categoryId?: string): Promise<{ attributes?: FilterBucket[]; stores?: Array<{ id: string; name: string }>; sellers?: Array<{ id: string; name: string }> }> {
     const { data } = await apiClient.get<{ attributes?: FilterBucket[]; stores?: Array<{ id: string; name: string }>; sellers?: Array<{ id: string; name: string }> }>("/filters", {
       params: { category_id: categoryId }
     });
+    return data;
+  },
+  async getHomeTrustStats(): Promise<HomeTrustStats> {
+    const { data } = await apiClient.get<HomeTrustStats>("/home/trust");
+    return data;
+  },
+  async getLastSync(): Promise<LastSyncResponse> {
+    const { data } = await apiClient.get<LastSyncResponse>("/last-sync");
+    return data;
+  },
+  async getPriceDrops(limit: number = 8): Promise<HomePriceDropsResponse> {
+    const { data } = await apiClient.get<HomePriceDropsResponse>("/home/price-drops", { params: { limit } });
+    return data;
+  },
+  async subscribeNewsletter(payload: NewsletterSubscriptionPayload): Promise<{
+    id: string;
+    email: string;
+    categories: string[];
+    locale: string;
+    updated_at: string;
+  }> {
+    const { data } = await apiClient.post<{
+      id: string;
+      email: string;
+      categories: string[];
+      locale: string;
+      updated_at: string;
+    }>("/home/newsletter-subscriptions", payload);
     return data;
   },
   async compareProducts(productIds: string[]): Promise<CompareMatrixResponse> {
@@ -194,7 +309,7 @@ export type OAuthProviderInfo = {
 };
 
 export const authApi = {
-  login: (payload: { email: string; password: string; two_factor_code?: string; recovery_code?: string }) =>
+  login: (payload: { email: string; password: string; two_factor_code?: string; recovery_code?: string; remember_me?: boolean }) =>
     apiClient.post<LoginResponse>("/auth/login", payload),
   register: (payload: { email: string; password: string; full_name: string }) => apiClient.post<AuthUser>("/auth/register", payload),
   logout: () => apiClient.post("/auth/logout"),
@@ -219,6 +334,8 @@ export type UserProfile = {
   telegram: string;
   about: string;
   updated_at?: string | null;
+  created_at?: string | null;
+  last_login_at?: string | null;
 };
 
 export type UserProfilePatch = {

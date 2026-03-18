@@ -14,19 +14,37 @@ router = APIRouter(tags=["search"])
 UUID_REF_PATTERN = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
 
 
+def _parse_attr_filters(values: list[str] | None) -> dict[str, list[str]] | None:
+    if not values:
+        return None
+    parsed: dict[str, list[str]] = {}
+    for entry in values:
+        normalized = str(entry or "").strip()
+        if ":" not in normalized:
+            continue
+        key, value = normalized.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key or not value:
+            continue
+        parsed[key] = [*(parsed.get(key) or []), value]
+    return parsed or None
+
+
 @router.get("/search", response_model=SearchResponse)
 async def search(
     request: Request,
     q: str | None = Query(default=None, min_length=1, max_length=200),
     category_id: str | None = Query(default=None, pattern=UUID_REF_PATTERN),
     brand_id: list[str] | None = Query(default=None),
+    attr: list[str] | None = Query(default=None),
     store_id: list[str] | None = Query(default=None),
     seller_id: list[str] | None = Query(default=None),
     min_price: float | None = None,
     max_price: float | None = None,
     max_delivery_days: int | None = Query(default=None, ge=0, le=30),
     in_stock: bool | None = None,
-    sort: str = Query(default="relevance", pattern="^(relevance|price_asc|price_desc|popular|newest)$"),
+    sort: str = Query(default="relevance", pattern="^(relevance|price_asc|price_desc|popular|newest|discount|shop_count)$"),
     limit: int = Query(default=24, ge=1, le=100),
     cursor: str | None = None,
     db: AsyncSession = Depends(get_db_session),
@@ -41,6 +59,7 @@ async def search(
             "q": q,
             "category_id": category_id,
             "brand_id": brand_id,
+            "attr": attr,
             "min_price": min_price,
             "max_price": max_price,
             "max_delivery_days": max_delivery_days,
@@ -54,27 +73,31 @@ async def search(
     )
     cached = await cache.get_json(cache_key)
     if cached is not None:
+        if "total" not in cached:
+            cached["total"] = len(cached.get("items") or [])
         cached["request_id"] = request.state.request_id
         return cached
 
     repo = CatalogRepository(db, cursor_secret=settings.cursor_secret)
     resolved_category_id = await repo.resolve_entity_ref("category", category_id)
     if category_id is not None and resolved_category_id is None:
-        return {"items": [], "next_cursor": None, "request_id": request.state.request_id}
+        return {"items": [], "total": 0, "next_cursor": None, "request_id": request.state.request_id}
     resolved_brand_ids = await repo.resolve_entity_refs("brand", brand_id)
     if brand_id is not None and not resolved_brand_ids:
-        return {"items": [], "next_cursor": None, "request_id": request.state.request_id}
+        return {"items": [], "total": 0, "next_cursor": None, "request_id": request.state.request_id}
+    attr_filters = _parse_attr_filters(attr)
     resolved_store_ids = await repo.resolve_entity_refs("store", store_id)
     if store_id is not None and not resolved_store_ids:
-        return {"items": [], "next_cursor": None, "request_id": request.state.request_id}
+        return {"items": [], "total": 0, "next_cursor": None, "request_id": request.state.request_id}
     resolved_seller_ids = await repo.resolve_entity_refs("seller", seller_id)
     if seller_id is not None and not resolved_seller_ids:
-        return {"items": [], "next_cursor": None, "request_id": request.state.request_id}
+        return {"items": [], "total": 0, "next_cursor": None, "request_id": request.state.request_id}
 
-    items, next_cursor = await repo.search_products(
+    items, next_cursor, total = await repo.search_products(
         q=q,
         category_id=resolved_category_id,
         brand_ids=resolved_brand_ids,
+        attr_filters=attr_filters,
         min_price=min_price,
         max_price=max_price,
         in_stock=in_stock,
@@ -88,6 +111,7 @@ async def search(
 
     result = {
         "items": items,
+        "total": total,
         "next_cursor": next_cursor,
         "request_id": request.state.request_id,
     }

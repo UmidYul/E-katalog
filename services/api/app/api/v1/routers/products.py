@@ -16,6 +16,7 @@ from app.schemas.catalog import (
     CanonicalProductDetailOut,
     OfferOut,
     PriceHistoryPoint,
+    SimilarProductOut,
     ProductPriceAlertOut,
     ProductPriceAlertUpsertIn,
     SearchResponse,
@@ -27,6 +28,23 @@ from shared.db.models import CatalogPriceAlert
 
 router = APIRouter(prefix="/products", tags=["products"])
 UUID_REF_PATTERN = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+
+
+def _parse_attr_filters(values: list[str] | None) -> dict[str, list[str]] | None:
+    if not values:
+        return None
+    parsed: dict[str, list[str]] = {}
+    for entry in values:
+        normalized = str(entry or "").strip()
+        if ":" not in normalized:
+            continue
+        key, value = normalized.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key or not value:
+            continue
+        parsed[key] = [*(parsed.get(key) or []), value]
+    return parsed or None
 
 
 def _as_decimal(value: float | None) -> Decimal | None:
@@ -68,13 +86,14 @@ async def list_products(
     request: Request,
     category_id: str | None = Query(default=None, pattern=UUID_REF_PATTERN),
     brand_id: list[str] | None = Query(default=None),
+    attr: list[str] | None = Query(default=None),
     store_id: list[str] | None = Query(default=None),
     seller_id: list[str] | None = Query(default=None),
     min_price: float | None = None,
     max_price: float | None = None,
     max_delivery_days: int | None = Query(default=None, ge=0, le=30),
     in_stock: bool | None = None,
-    sort: str = Query(default="popular", pattern="^(relevance|price_asc|price_desc|popular|newest)$"),
+    sort: str = Query(default="popular", pattern="^(relevance|price_asc|price_desc|popular|newest|discount|shop_count)$"),
     limit: int = Query(default=24, ge=1, le=100),
     cursor: str | None = None,
     db: AsyncSession = Depends(get_db_session),
@@ -88,6 +107,7 @@ async def list_products(
         {
             "category_id": category_id,
             "brand_id": brand_id,
+            "attr": attr,
             "min_price": min_price,
             "max_price": max_price,
             "max_delivery_days": max_delivery_days,
@@ -101,6 +121,8 @@ async def list_products(
     )
     cached = await cache.get_json(cache_key)
     if cached is not None:
+        if "total" not in cached:
+            cached["total"] = len(cached.get("items") or [])
         cached["request_id"] = request.state.request_id
         return cached
 
@@ -110,18 +132,20 @@ async def list_products(
         raise HTTPException(status_code=422, detail="category_id is invalid")
     resolved_brand_ids = await repo.resolve_entity_refs("brand", brand_id)
     if brand_id is not None and not resolved_brand_ids:
-        return {"items": [], "next_cursor": None, "request_id": request.state.request_id}
+        return {"items": [], "total": 0, "next_cursor": None, "request_id": request.state.request_id}
+    attr_filters = _parse_attr_filters(attr)
     resolved_store_ids = await repo.resolve_entity_refs("store", store_id)
     if store_id is not None and not resolved_store_ids:
-        return {"items": [], "next_cursor": None, "request_id": request.state.request_id}
+        return {"items": [], "total": 0, "next_cursor": None, "request_id": request.state.request_id}
     resolved_seller_ids = await repo.resolve_entity_refs("seller", seller_id)
     if seller_id is not None and not resolved_seller_ids:
-        return {"items": [], "next_cursor": None, "request_id": request.state.request_id}
+        return {"items": [], "total": 0, "next_cursor": None, "request_id": request.state.request_id}
 
-    items, next_cursor = await repo.search_products(
+    items, next_cursor, total = await repo.search_products(
         q=None,
         category_id=resolved_category_id,
         brand_ids=resolved_brand_ids,
+        attr_filters=attr_filters,
         min_price=min_price,
         max_price=max_price,
         in_stock=in_stock,
@@ -133,7 +157,7 @@ async def list_products(
         cursor=cursor,
     )
 
-    result = {"items": items, "next_cursor": next_cursor, "request_id": request.state.request_id}
+    result = {"items": items, "total": total, "next_cursor": next_cursor, "request_id": request.state.request_id}
     await cache.set_json(cache_key, result, ttl_seconds=120)
     return result
 
@@ -293,11 +317,30 @@ async def get_product_offers(
     )
 
 
+@router.get("/{product_id}/similar", response_model=list[SimilarProductOut])
+async def get_similar_products(
+    request: Request,
+    product_id: str = Path(..., pattern=UUID_REF_PATTERN),
+    limit: int = Query(default=6, ge=1, le=20),
+    db: AsyncSession = Depends(get_db_session),
+):
+    redis = get_redis()
+    await enforce_rate_limit(request, redis, bucket="products", limit=120)
+
+    repo = CatalogRepository(db, cursor_secret=settings.cursor_secret)
+    resolved_product_id = await repo.resolve_product_with_offers(product_id)
+    if resolved_product_id is None:
+        raise HTTPException(status_code=404, detail="product not found")
+
+    return await repo.similar_products(product_id=resolved_product_id, limit=limit)
+
+
 @router.get("/{product_id}/price-history", response_model=list[PriceHistoryPoint])
 async def get_product_history(
     request: Request,
     product_id: str = Path(..., pattern=UUID_REF_PATTERN),
     days: int = Query(default=30, ge=1, le=365),
+    shop_id: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db_session),
 ):
     redis = get_redis()
@@ -307,5 +350,11 @@ async def get_product_history(
     resolved_product_id = await repo.resolve_product_with_offers(product_id)
     if resolved_product_id is None:
         raise HTTPException(status_code=404, detail="product not found")
-    return await repo.price_history(product_id=resolved_product_id, days=days)
+    resolved_shop_id: int | None = None
+    normalized_shop_ref = str(shop_id or "").strip().lower()
+    if normalized_shop_ref and normalized_shop_ref != "all":
+        resolved_shop_id = await repo.resolve_entity_ref("store", normalized_shop_ref)
+        if resolved_shop_id is None:
+            raise HTTPException(status_code=422, detail="shop_id is invalid")
+    return await repo.price_history(product_id=resolved_product_id, days=days, shop_id=resolved_shop_id)
 

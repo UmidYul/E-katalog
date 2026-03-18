@@ -1,377 +1,637 @@
 "use client";
 
-import { AnimatePresence, motion } from "framer-motion";
-import { X } from "lucide-react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Grid3X3, List, X } from "lucide-react";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { CatalogFilters, type FilterState } from "@/components/catalog/catalog-filters";
-import { CatalogGrid } from "@/components/catalog/catalog-grid";
-import { ErrorState } from "@/components/common/error-state";
+import { CatalogGrid, ProductGridSkeleton, type CatalogViewMode } from "@/components/catalog/catalog-grid";
+import { Breadcrumb } from "@/components/common/breadcrumbs";
+import { EmptyState } from "@/components/common/empty-state";
 import { useLocale } from "@/components/common/locale-provider";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useCatalogFiltersFromUrl } from "@/features/catalog/use-catalog-filters";
-import { useBrands, useCatalogProducts, useDynamicFilters } from "@/features/catalog/use-catalog-queries";
-import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
-import { debounceMs } from "@/lib/utils/format";
+import { useBrands, useCatalogProducts, useCategories, useDynamicFilters } from "@/features/catalog/use-catalog-queries";
+import {
+  COMMON_DELIVERY_OPTIONS,
+  COMMON_MIN_RATING_OPTIONS,
+  getCategoryFilterGroupByKey,
+  getCategoryFilterGroups,
+  parseRangeValue,
+} from "@/lib/filters/categoryFilters";
+import { useCompareStore } from "@/store/compare.store";
 
-const PRICE_MIN = 0;
-const PRICE_MAX = 100_000_000;
 const DEFAULT_SORT: FilterState["sort"] = "popular";
-const EMPTY_FILTERS: FilterState = { sort: DEFAULT_SORT, brands: [], stores: [], sellers: [] };
-const mergeUnique = (values: string[]) => Array.from(new Set(values));
-const sortLabelMapRu: Record<FilterState["sort"], string> = {
-  popular: "Популярные",
-  relevance: "Релевантные",
-  price_asc: "Цена: по возрастанию",
-  price_desc: "Цена: по убыванию",
-  newest: "Сначала новые",
+const CATALOG_ROOT_PATH = "/catalog";
+
+const CATEGORY_CHIPS = [
+  { label: "Барчаси", value: null },
+  { label: "Смартфонлар", value: "smartphones" },
+  { label: "Ноутбуклар", value: "laptops" },
+  { label: "Телевизорлар", value: "tv" },
+  { label: "Қулоқчинлар", value: "headphones" },
+  { label: "Планшетлар", value: "tablets" },
+  { label: "Камералар", value: "cameras" },
+  { label: "Гейминг", value: "gaming" },
+  { label: "Аксессуарлар", value: "accessories" },
+] as const;
+
+const SORT_OPTIONS: Array<{ value: FilterState["sort"]; label: string }> = [
+  { value: "popular", label: "Оммабоплиги бўйича" },
+  { value: "price_asc", label: "Аввал арзон" },
+  { value: "price_desc", label: "Аввал қиммат" },
+  { value: "newest", label: "Янгиликлар" },
+  { value: "discount", label: "Чегирма ҳажми бўйича" },
+  { value: "shop_count", label: "Таклифлар сони бўйича" },
+  { value: "relevance", label: "Мослиги бўйича" },
+];
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const normalize = (value: unknown) => String(value ?? "").trim();
+const formatNumber = (value: number) => new Intl.NumberFormat("uz-Cyrl-UZ").format(value);
+const buildCatalogPath = (category?: string | null) => (category ? `${CATALOG_ROOT_PATH}/${category}` : CATALOG_ROOT_PATH);
+
+const uniqueValues = (values: string[]) => [...new Set(values.filter(Boolean))];
+
+const normalizeDeliveryValues = (values?: string[]) => {
+  const normalized = (values ?? [])
+    .map((entry) => entry.trim().toLowerCase())
+    .flatMap((entry) => {
+      if (entry === "today" || entry === "days_1_3" || entry === "week") return [entry];
+      const numeric = Number(entry);
+      if (!Number.isFinite(numeric)) return [];
+      if (numeric <= 0) return ["today"];
+      if (numeric <= 3) return ["days_1_3"];
+      if (numeric <= 7) return ["week"];
+      return [];
+    });
+  return uniqueValues(normalized);
 };
 
-const sortLabelMapUz: Record<FilterState["sort"], string> = {
-  popular: "Оммабоп",
-  relevance: "Мос",
-  price_asc: "Нарх: ўсиш бўйича",
-  price_desc: "Нарх: камайиш бўйича",
-  newest: "Янгилари аввал",
+const normalizeRatings = (values?: string[]) => {
+  const normalized = (values ?? [])
+    .map((entry) => String(entry ?? "").trim())
+    .filter((entry) => entry === "3" || entry === "4");
+  return uniqueValues(normalized);
 };
 
-const toQueryString = (filters: FilterState & { cursor?: string; page?: number }) => {
-  const params = new URLSearchParams();
-  if (filters.q) params.set("q", filters.q);
-  if (filters.sort) params.set("sort", filters.sort);
-  if (filters.minPrice !== undefined) params.set("min_price", String(filters.minPrice));
-  if (filters.maxPrice !== undefined) params.set("max_price", String(filters.maxPrice));
-  if (filters.maxDeliveryDays !== undefined) params.set("max_delivery_days", String(filters.maxDeliveryDays));
-  if (filters.page && filters.page > 1) params.set("page", String(filters.page));
-  if (filters.cursor) params.set("cursor", filters.cursor);
-  filters.brands.forEach((brand) => params.append("brand", String(brand)));
-  filters.stores.forEach((store) => params.append("store", String(store)));
-  filters.sellers.forEach((seller) => params.append("seller", String(seller)));
-  Object.entries(filters.attrs ?? {}).forEach(([key, values]) => {
-    values.forEach((value) => params.append("attr", `${key}:${value}`));
+const deliveryValuesToMaxDays = (values: string[]) => {
+  const mapped: number[] = [];
+  values.forEach((entry) => {
+    if (entry === "today") mapped.push(0);
+    else if (entry === "days_1_3") mapped.push(3);
+    else if (entry === "week") mapped.push(7);
   });
-  return params.toString();
+  if (!mapped.length) return undefined;
+  return Math.max(...mapped);
 };
 
-const getActiveFilterCount = (filters: FilterState, priceMaxBound: number = PRICE_MAX) => {
-  const attrCount = Object.values(filters.attrs ?? {}).reduce((acc, values) => acc + values.length, 0);
-  const hasMinPrice = filters.minPrice !== undefined && filters.minPrice > PRICE_MIN;
-  const hasMaxPrice = filters.maxPrice !== undefined && filters.maxPrice < priceMaxBound;
-
-  return (
-    (filters.q?.trim() ? 1 : 0) +
-    (filters.sort !== DEFAULT_SORT ? 1 : 0) +
-    filters.brands.length +
-    filters.stores.length +
-    filters.sellers.length +
-    (hasMinPrice ? 1 : 0) +
-    (hasMaxPrice ? 1 : 0) +
-    (filters.maxDeliveryDays !== undefined ? 1 : 0) +
-    attrCount
-  );
+const sanitizeAttrsForCategory = (attrs: Record<string, string[]> | undefined, categoryToken?: string) => {
+  if (!attrs || !categoryToken) return undefined;
+  const allowedKeys = new Set(getCategoryFilterGroups(categoryToken).map((group) => group.key));
+  const next = Object.entries(attrs).reduce<Record<string, string[]>>((acc, [key, values]) => {
+    if (!allowedKeys.has(key)) return acc;
+    if (!values.length) return acc;
+    acc[key] = uniqueValues(values);
+    return acc;
+  }, {});
+  return Object.keys(next).length ? next : undefined;
 };
 
-const getProductTopPrice = (item?: { min_price?: number | null; max_price?: number | null }) => {
-  if (!item) return undefined;
-  const candidates = [item.max_price, item.min_price].filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0);
-  if (!candidates.length) return undefined;
-  return Math.max(...candidates);
+const appendJoinedParam = (params: URLSearchParams, key: string, values: string[]) => {
+  if (!values.length) return;
+  params.set(key, uniqueValues(values).join(","));
+};
+
+const filterDeliveryLabelMap = new Map(COMMON_DELIVERY_OPTIONS.map((item) => [item.value, item.label]));
+const minRatingLabelMap = new Map(COMMON_MIN_RATING_OPTIONS.map((item) => [item.value, item.label]));
+
+type FacetsPayload = {
+  brands: Array<{ id: string; name: string; count: number }>;
+  stores: Array<{ id: string; name: string; count: number }>;
+  sellers: Array<{ id: string; name: string; count: number }>;
+  category_counts: Record<string, Record<string, number>>;
 };
 
 export function CatalogClientPage({
   categoryId,
+  categorySlug,
   presetBrandId,
   presetQuery,
   pageTitle,
+  showCategoryHeading = false,
 }: {
   categoryId?: string;
+  categorySlug?: string;
   presetBrandId?: string;
   presetQuery?: string;
   pageTitle?: string;
+  showCategoryHeading?: boolean;
 }) {
   const { locale } = useLocale();
   const isUz = locale === "uz-Cyrl-UZ";
-  const sortLabelMap = isUz ? sortLabelMapUz : sortLabelMapRu;
+
   const router = useRouter();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const fromUrl = useCatalogFiltersFromUrl();
-  const currentPage = Math.max(fromUrl.page ?? 1, 1);
-  const [cursorByPage, setCursorByPage] = useState<Record<number, string | undefined>>({ 1: undefined });
 
-  const paginationKey = useMemo(() => {
-    const params = new URLSearchParams(searchParams.toString());
-    params.delete("cursor");
-    params.delete("page");
-    if (categoryId !== undefined) params.set("category_id", String(categoryId));
-    if (presetBrandId !== undefined) params.set("preset_brand_id", String(presetBrandId));
-    return params.toString();
-  }, [categoryId, presetBrandId, searchParams]);
+  const fromUrl = useCatalogFiltersFromUrl();
+  const categories = useCategories();
+
+  const categoryIdFromUrl = fromUrl.category_id;
+  const selectedCategoryToken = categorySlug ?? fromUrl.category ?? undefined;
+  const categoryGroups = useMemo(() => getCategoryFilterGroups(selectedCategoryToken), [selectedCategoryToken]);
+
+  const resolvedCategoryId = useMemo(() => {
+    if (categoryId) return categoryId;
+    if (categoryIdFromUrl) return categoryIdFromUrl;
+    if (!selectedCategoryToken) return undefined;
+    if (UUID_PATTERN.test(selectedCategoryToken)) return selectedCategoryToken;
+
+    const normalizedCategory = selectedCategoryToken.toLowerCase();
+    const list = categories.data ?? [];
+
+    const exact = list.find((item) => normalize(item.slug).toLowerCase() === normalizedCategory);
+    if (exact) return exact.id;
+
+    const findBy = (matcher: (slug: string, name: string) => boolean) =>
+      list.find((item) => matcher(normalize(item.slug).toLowerCase(), normalize(item.name).toLowerCase()))?.id;
+
+    if (normalizedCategory === "smartphones") {
+      return findBy((slug, name) => slug.includes("phone") || slug.includes("smart") || name.includes("смартфон") || name.includes("smart"));
+    }
+    if (normalizedCategory === "laptops") {
+      return findBy((slug, name) => slug.includes("laptop") || slug.includes("nout") || name.includes("ноут"));
+    }
+    if (normalizedCategory === "tv") {
+      return findBy((slug, name) => slug.includes("tv") || slug.includes("telev") || name.includes("телев"));
+    }
+    if (normalizedCategory === "headphones") {
+      return findBy((slug, name) => slug.includes("head") || slug.includes("ear") || name.includes("науш") || name.includes("қулоқ"));
+    }
+    if (normalizedCategory === "tablets") {
+      return findBy((slug, name) => slug.includes("tablet") || slug.includes("plan") || name.includes("планш"));
+    }
+    if (normalizedCategory === "cameras" || normalizedCategory === "photo") {
+      return findBy((slug, name) => slug.includes("photo") || slug.includes("camera") || name.includes("фото") || name.includes("камера"));
+    }
+    if (normalizedCategory === "gaming") {
+      return findBy((slug, name) => slug.includes("game") || name.includes("игр") || name.includes("ўйин"));
+    }
+    if (normalizedCategory === "accessories") {
+      return findBy((slug, name) => slug.includes("accessor") || name.includes("аксесс") || name.includes("аксуар"));
+    }
+
+    return undefined;
+  }, [categories.data, categoryId, categoryIdFromUrl, selectedCategoryToken]);
 
   const filters = useMemo<FilterState>(
     () => ({
       q: fromUrl.q ?? presetQuery,
-      sort: fromUrl.sort,
+      sort: fromUrl.sort ?? DEFAULT_SORT,
+      brands: uniqueValues([...(fromUrl.brand_id ?? []), ...(presetBrandId ? [presetBrandId] : [])]),
+      stores: uniqueValues(fromUrl.shop_id ?? fromUrl.store_id ?? []),
+      sellers: uniqueValues(fromUrl.seller_id ?? []),
       minPrice: fromUrl.min_price,
       maxPrice: fromUrl.max_price,
-      maxDeliveryDays: fromUrl.max_delivery_days,
-      brands: mergeUnique([...(fromUrl.brand_id ?? []), ...(presetBrandId ? [presetBrandId] : [])]),
-      stores: fromUrl.store_id ?? [],
-      sellers: fromUrl.seller_id ?? [],
-      attrs: fromUrl.attrs,
+      deliveryDays: normalizeDeliveryValues(fromUrl.delivery_days),
+      inStock: Boolean(fromUrl.in_stock),
+      hasDiscount: Boolean(fromUrl.has_discount),
+      minRating: normalizeRatings(fromUrl.min_rating),
+      attrs: sanitizeAttrsForCategory(fromUrl.attrs, selectedCategoryToken),
     }),
-    [
-      fromUrl.attrs,
-      fromUrl.brand_id,
-      fromUrl.max_delivery_days,
-      fromUrl.max_price,
-      fromUrl.min_price,
-      fromUrl.q,
-      fromUrl.seller_id,
-      fromUrl.sort,
-      fromUrl.store_id,
-      presetBrandId,
-      presetQuery,
-    ]
+    [fromUrl, presetBrandId, presetQuery, selectedCategoryToken]
   );
 
-  useEffect(() => {
-    setCursorByPage({ 1: undefined });
-  }, [paginationKey]);
+  const toSearchParams = useCallback(
+    (next: FilterState, categoryToken?: string | null, categoryIdRef?: string) => {
+      const params = new URLSearchParams();
+      if (next.q?.trim()) params.set("q", next.q.trim());
+      if (next.sort !== DEFAULT_SORT) params.set("sort", next.sort);
+      if (categoryIdRef && !categoryToken) params.set("category_id", categoryIdRef);
+      if (next.minPrice !== undefined) params.set("priceMin", String(next.minPrice));
+      if (next.maxPrice !== undefined) params.set("priceMax", String(next.maxPrice));
+      if (next.inStock) params.set("in_stock", "true");
+      if (next.hasDiscount) params.set("has_discount", "true");
+      appendJoinedParam(params, "brand", next.brands);
+      appendJoinedParam(params, "shop", next.stores);
+      appendJoinedParam(params, "seller", next.sellers);
+      appendJoinedParam(params, "delivery_days", next.deliveryDays);
+      appendJoinedParam(params, "min_rating", next.minRating);
 
-  useEffect(() => {
-    if (currentPage <= 1 || !fromUrl.cursor) return;
-    setCursorByPage((prev) => (prev[currentPage] === fromUrl.cursor ? prev : { ...prev, [currentPage]: fromUrl.cursor }));
-  }, [currentPage, fromUrl.cursor]);
+      const groups = getCategoryFilterGroups(categoryToken ?? undefined);
+      groups.forEach((group) => {
+        const values = next.attrs?.[group.key] ?? [];
+        if (!values.length) return;
+        if (group.type === "toggle") {
+          if (values.includes("true")) params.set(group.key, "true");
+          return;
+        }
+        appendJoinedParam(params, group.key, values);
+      });
 
-  const debounced = useDebouncedValue(filters, debounceMs.filters);
+      return params;
+    },
+    []
+  );
 
-  const queryPayload = useMemo(
+  const catalogQuery = useMemo(
     () => ({
-      q: debounced.q,
-      sort: debounced.sort,
-      min_price: debounced.minPrice,
-      max_price: debounced.maxPrice,
-      max_delivery_days: debounced.maxDeliveryDays,
-      brand_id: mergeUnique([...(debounced.brands ?? []), ...(presetBrandId ? [presetBrandId] : [])]),
-      store_id: debounced.stores,
-      seller_id: debounced.sellers,
-      attrs: debounced.attrs,
-      category_id: categoryId,
-      cursor: fromUrl.cursor,
+      q: filters.q,
+      sort: filters.sort,
+      min_price: filters.minPrice,
+      max_price: filters.maxPrice,
+      max_delivery_days: deliveryValuesToMaxDays(filters.deliveryDays),
+      in_stock: filters.inStock || undefined,
+      brand_id: filters.brands,
+      store_id: filters.stores,
+      seller_id: filters.sellers,
+      attrs: filters.attrs,
+      category_id: resolvedCategoryId,
       limit: 24,
     }),
-    [categoryId, debounced, fromUrl.cursor, presetBrandId]
+    [filters, resolvedCategoryId]
   );
 
-  const priceBoundsQueryPayload = useMemo(
-    () => ({
-      q: debounced.q,
-      sort: "price_desc" as const,
-      max_delivery_days: debounced.maxDeliveryDays,
-      brand_id: mergeUnique([...(debounced.brands ?? []), ...(presetBrandId ? [presetBrandId] : [])]),
-      store_id: debounced.stores,
-      seller_id: debounced.sellers,
-      attrs: debounced.attrs,
-      category_id: categoryId,
-      limit: 1,
-    }),
-    [categoryId, debounced, presetBrandId]
-  );
+  const products = useCatalogProducts(catalogQuery);
+  const brands = useBrands({ categoryId: resolvedCategoryId });
+  const dynamicFilters = useDynamicFilters(resolvedCategoryId);
 
-  const products = useCatalogProducts(queryPayload);
-  const priceBoundsProbe = useCatalogProducts(priceBoundsQueryPayload);
-  const brands = useBrands();
-  const dynamicFilters = useDynamicFilters(categoryId);
-  const priceMaxBound = useMemo(() => {
-    const probeMax = getProductTopPrice(priceBoundsProbe.data?.items?.[0]);
-    const pageMax = Math.max(...(products.data?.items ?? []).map((item) => getProductTopPrice(item) ?? 0), 0);
-    const upperBound = probeMax ?? pageMax;
-    return upperBound > PRICE_MIN ? Math.max(PRICE_MIN + 1, Math.ceil(upperBound)) : PRICE_MAX;
-  }, [priceBoundsProbe.data?.items, products.data?.items]);
-  const activeFilterCount = useMemo(() => getActiveFilterCount(filters, priceMaxBound), [filters, priceMaxBound]);
-  const hasNextPage = Boolean(products.data?.next_cursor);
-  const canGoPrevPage = currentPage > 1 && (currentPage === 2 || Boolean(cursorByPage[currentPage - 1]));
-  const showPagination = (products.data?.items?.length ?? 0) > 0 || currentPage > 1;
+  const facetsParams = useMemo(() => {
+    const params = toSearchParams(filters, selectedCategoryToken, resolvedCategoryId);
+    if (selectedCategoryToken) params.set("category", selectedCategoryToken);
+    else if (resolvedCategoryId) params.set("category", resolvedCategoryId);
+    return params.toString();
+  }, [filters, resolvedCategoryId, selectedCategoryToken, toSearchParams]);
+
+  const facets = useQuery({
+    queryKey: ["catalog", "facets", facetsParams],
+    queryFn: async () => {
+      const response = await fetch(`/api/catalog/facets${facetsParams ? `?${facetsParams}` : ""}`, { cache: "no-store" });
+      if (!response.ok) {
+        return {
+          brands: [],
+          stores: [],
+          sellers: [],
+          category_counts: {},
+        } satisfies FacetsPayload;
+      }
+      return (await response.json()) as FacetsPayload;
+    },
+    staleTime: 60_000,
+  });
+
+  const brandOptions = useMemo(() => {
+    const counts = new Map((facets.data?.brands ?? []).map((item) => [item.id, item.count]));
+    return (brands.data ?? []).map((item) => ({ id: item.id, name: item.name, count: counts.get(item.id) ?? item.products_count ?? 0 }));
+  }, [brands.data, facets.data?.brands]);
+
+  const storeOptions = useMemo(() => {
+    const fallback = dynamicFilters.data?.stores ?? [];
+    if (facets.data?.stores?.length) return facets.data.stores;
+    return fallback.map((item) => ({ id: item.id, name: item.name, count: 0 }));
+  }, [dynamicFilters.data?.stores, facets.data?.stores]);
+
+  const [viewMode, setViewMode] = useState<CatalogViewMode>("grid");
 
   useEffect(() => {
-    const nextCursor = products.data?.next_cursor ?? undefined;
-    if (!nextCursor) return;
-    setCursorByPage((prev) => (prev[currentPage + 1] === nextCursor ? prev : { ...prev, [currentPage + 1]: nextCursor }));
-  }, [currentPage, products.data?.next_cursor]);
+    try {
+      const stored = window.localStorage.getItem("doxx_catalog_view");
+      if (stored === "grid" || stored === "list") setViewMode(stored);
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
 
-  const pageButtons = useMemo(() => {
-    const pages = new Set<number>([currentPage]);
-    if (currentPage > 1) pages.add(1);
-    if (canGoPrevPage) pages.add(currentPage - 1);
-    if (hasNextPage) pages.add(currentPage + 1);
-    return Array.from(pages).sort((a, b) => a - b);
-  }, [canGoPrevPage, currentPage, hasNextPage]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("doxx_catalog_view", viewMode);
+    } catch {
+      // ignore storage errors
+    }
+  }, [viewMode]);
 
-  const activeFilterChips = useMemo(() => {
-    const chips: string[] = [];
-    if (filters.q?.trim()) chips.push(isUz ? `Қидириш: ${filters.q.trim()}` : `Поиск: ${filters.q.trim()}`);
-    if (filters.sort !== DEFAULT_SORT) chips.push(isUz ? `Саралаш: ${sortLabelMap[filters.sort]}` : `Сортировка: ${sortLabelMap[filters.sort]}`);
-    if (filters.brands.length) chips.push(isUz ? `Брендлар: ${filters.brands.length}` : `Бренды: ${filters.brands.length}`);
-    if (filters.stores.length) chips.push(isUz ? `Дўконлар: ${filters.stores.length}` : `Магазины: ${filters.stores.length}`);
-    if (filters.sellers.length) chips.push(isUz ? `Сотувчилар: ${filters.sellers.length}` : `Продавцы: ${filters.sellers.length}`);
-    if (filters.minPrice !== undefined || filters.maxPrice !== undefined) chips.push(isUz ? "Нарх: диапазон белгиланган" : "Цена: задан диапазон");
-    if (filters.maxDeliveryDays !== undefined) chips.push(isUz ? `Етказиб бериш: ${filters.maxDeliveryDays} кунгача` : `Доставка: до ${filters.maxDeliveryDays} дн.`);
-    const attrsCount = Object.values(filters.attrs ?? {}).reduce((acc, values) => acc + values.length, 0);
-    if (attrsCount) chips.push(isUz ? `Хусусиятлар: ${attrsCount}` : `Характеристики: ${attrsCount}`);
-    return chips.slice(0, 8);
-  }, [filters, isUz, sortLabelMap]);
+  const applyFilters = useCallback(
+    (next: FilterState, nextCategoryToken?: string | null) => {
+      const explicitCategoryChange = nextCategoryToken !== undefined;
+      const categoryValue = categoryId
+        ? selectedCategoryToken
+        : explicitCategoryChange
+        ? (nextCategoryToken ?? undefined)
+        : selectedCategoryToken;
+      const categoryIdRef = categoryId
+        ? undefined
+        : explicitCategoryChange && nextCategoryToken === null
+        ? undefined
+        : categoryValue
+        ? undefined
+        : resolvedCategoryId;
+      const params = toSearchParams(next, categoryValue, categoryIdRef);
+      const targetPath = categoryId ? pathname : categoryValue ? buildCatalogPath(categoryValue) : CATALOG_ROOT_PATH;
+      router.replace(`${targetPath}${params.toString() ? `?${params.toString()}` : ""}`, { scroll: false });
+    },
+    [categoryId, pathname, resolvedCategoryId, router, selectedCategoryToken, toSearchParams]
+  );
 
-  const onFiltersChange = (next: FilterState) => {
-    const payload: FilterState = {
-      ...next,
-      q: next.q ?? presetQuery,
-      brands: mergeUnique([...(next.brands ?? []), ...(presetBrandId ? [presetBrandId] : [])]),
-    };
-    const query = toQueryString(payload);
-    router.replace(`${pathname}${query ? `?${query}` : ""}`, { scroll: false });
-  };
+  const resetFilters = useCallback(() => {
+    applyFilters(
+      {
+        q: presetQuery,
+        sort: DEFAULT_SORT,
+        brands: presetBrandId ? [presetBrandId] : [],
+        stores: [],
+        sellers: [],
+        minPrice: undefined,
+        maxPrice: undefined,
+        deliveryDays: [],
+        inStock: false,
+        hasDiscount: false,
+        minRating: [],
+        attrs: undefined,
+      }
+    );
+  }, [applyFilters, presetBrandId, presetQuery]);
 
-  const clearFilters = () =>
-    onFiltersChange({
-      ...EMPTY_FILTERS,
-      q: presetQuery,
-      brands: presetBrandId ? [presetBrandId] : [],
-    });
+  const handleCategoryChange = useCallback(
+    (nextCategory: string | null) => {
+      const current = selectedCategoryToken ?? null;
+      if (current === nextCategory) return;
 
-  const goToPage = (targetPage: number) => {
-    if (targetPage < 1 || targetPage === currentPage) return;
+      applyFilters(
+        {
+          ...filters,
+          sellers: [],
+          attrs: undefined,
+        },
+        nextCategory
+      );
+    },
+    [applyFilters, filters, selectedCategoryToken]
+  );
 
-    const params = new URLSearchParams(searchParams.toString());
-    if (targetPage === 1) {
-      params.delete("page");
-      params.delete("cursor");
-    } else {
-      const targetCursor = targetPage === currentPage + 1 ? (products.data?.next_cursor ?? cursorByPage[targetPage]) : cursorByPage[targetPage];
-      if (!targetCursor) return;
-      params.set("page", String(targetPage));
-      params.set("cursor", targetCursor);
+  const currentCategoryLabel = useMemo(() => {
+    if (pageTitle) return pageTitle;
+    if (selectedCategoryToken) {
+      const chip = CATEGORY_CHIPS.find((item) => item.value === selectedCategoryToken);
+      if (chip) return chip.label;
+      const category = (categories.data ?? []).find((item) => item.slug === selectedCategoryToken || item.id === resolvedCategoryId);
+      if (category?.name) return category.name;
+      return selectedCategoryToken;
+    }
+    return "Каталог";
+  }, [pageTitle, selectedCategoryToken, categories.data, resolvedCategoryId]);
+
+  const activeFilters = useMemo(() => {
+    const tags: Array<{ key: string; label: string; remove: () => void }> = [];
+
+    if (filters.q?.trim()) {
+      tags.push({ key: "q", label: `Қидирув: ${filters.q.trim()}`, remove: () => applyFilters({ ...filters, q: undefined }) });
     }
 
-    router.push(`${pathname}${params.toString() ? `?${params.toString()}` : ""}`, { scroll: false });
-  };
+    filters.brands.forEach((id) => {
+      const label = brandOptions.find((item) => item.id === id)?.name ?? id;
+      tags.push({
+        key: `brand:${id}`,
+        label,
+        remove: () => applyFilters({ ...filters, brands: filters.brands.filter((entry) => entry !== id) }),
+      });
+    });
 
-  if (products.error) {
-    return <ErrorState title={isUz ? "Каталогни юклаб бўлмади" : "Не удалось загрузить каталог"} message={isUz ? "Алоқани текшириб, қайта уриниб кўринг." : "Проверьте соединение и попробуйте ещё раз."} />;
-  }
+    filters.stores.forEach((id) => {
+      const label = storeOptions.find((item) => item.id === id)?.name ?? id;
+      tags.push({
+        key: `shop:${id}`,
+        label,
+        remove: () => applyFilters({ ...filters, stores: filters.stores.filter((entry) => entry !== id) }),
+      });
+    });
+
+    if (filters.minPrice !== undefined || filters.maxPrice !== undefined) {
+      const from = filters.minPrice !== undefined ? formatNumber(filters.minPrice) : "0";
+      const to = filters.maxPrice !== undefined ? formatNumber(filters.maxPrice) : "∞";
+      tags.push({
+        key: "price",
+        label: `${from} - ${to}`,
+        remove: () => applyFilters({ ...filters, minPrice: undefined, maxPrice: undefined }),
+      });
+    }
+
+    filters.deliveryDays.forEach((value) => {
+      const label = filterDeliveryLabelMap.get(value) ?? value;
+      tags.push({
+        key: `delivery:${value}`,
+        label,
+        remove: () => applyFilters({ ...filters, deliveryDays: filters.deliveryDays.filter((entry) => entry !== value) }),
+      });
+    });
+
+    if (filters.inStock) {
+      tags.push({
+        key: "in_stock",
+        label: "Фақат мавжудлари",
+        remove: () => applyFilters({ ...filters, inStock: false }),
+      });
+    }
+
+    if (filters.hasDiscount) {
+      tags.push({
+        key: "has_discount",
+        label: "Фақат чегирмадаги",
+        remove: () => applyFilters({ ...filters, hasDiscount: false }),
+      });
+    }
+
+    filters.minRating.forEach((value) => {
+      tags.push({
+        key: `min_rating:${value}`,
+        label: minRatingLabelMap.get(value) ?? `★${value}`,
+        remove: () => applyFilters({ ...filters, minRating: filters.minRating.filter((entry) => entry !== value) }),
+      });
+    });
+
+    Object.entries(filters.attrs ?? {}).forEach(([key, values]) => {
+      const group = getCategoryFilterGroupByKey(selectedCategoryToken, key);
+      values.forEach((value) => {
+        let label = `${key}: ${value}`;
+        if (group?.type === "toggle") label = group.label;
+        if (group?.type === "checkbox") {
+          label = group.options?.find((option) => option.value === value)?.label ?? label;
+        }
+        if (group?.type === "range") {
+          const parsed = parseRangeValue(value);
+          if (parsed) {
+            const unit = group.unit ? ` ${group.unit}` : "";
+            label = `${group.label}: ${parsed.min}${unit} - ${parsed.max}${unit}`;
+          }
+        }
+
+        tags.push({
+          key: `attr:${key}:${value}`,
+          label,
+          remove: () => {
+            const nextAttrs = { ...(filters.attrs ?? {}) };
+            const nextValues = (nextAttrs[key] ?? []).filter((entry) => entry !== value);
+            if (nextValues.length) nextAttrs[key] = nextValues;
+            else delete nextAttrs[key];
+            applyFilters({ ...filters, attrs: Object.keys(nextAttrs).length ? nextAttrs : undefined });
+          },
+        });
+      });
+    });
+
+    return tags;
+  }, [applyFilters, brandOptions, filters, isUz, selectedCategoryToken, storeOptions]);
+
+  const compareItems = useCompareStore((state) => state.items);
+  const clearCompare = useCompareStore((state) => state.clear);
+
+  const total = products.data?.total ?? 0;
+  const hasActiveFilters = activeFilters.length > 0;
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6 px-4 py-8">
-      <motion.section
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-        className="space-y-1 px-1"
-      >
-        <h1 className="font-heading text-2xl font-bold text-foreground md:text-3xl">{pageTitle ?? (isUz ? "Каталог" : "Каталог")}</h1>
-        <p className="text-sm text-muted-foreground">{isUz ? "Текширилган дўконлар бўйича нарх ва таклифларни солиштиринг." : "Сравнивайте цены и предложения по проверенным магазинам."}</p>
-      </motion.section>
+    <div className="mx-auto max-w-7xl space-y-5 px-4 py-8">
+      <div className="space-y-2">
+        <Breadcrumb items={[{ label: isUz ? "Бош саҳифа" : "Главная", href: "/" }, { label: currentCategoryLabel }]} />
+        {showCategoryHeading ? <h1 className="font-heading text-2xl font-bold text-foreground md:text-3xl">{currentCategoryLabel}</h1> : null}
+      </div>
 
-      <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)] lg:items-start">
+      <div className="grid gap-6 md:grid-cols-[280px_minmax(0,1fr)] md:items-start">
         <CatalogFilters
-          brands={brands.data ?? []}
-          stores={dynamicFilters.data?.stores}
-          sellers={dynamicFilters.data?.sellers}
-          dynamicAttributes={dynamicFilters.data?.attributes}
-          priceMaxBound={priceMaxBound}
+          categoryToken={selectedCategoryToken}
+          categoryFilters={categoryGroups}
+          categoryFacetCounts={facets.data?.category_counts}
+          brands={brandOptions}
+          stores={storeOptions}
           value={filters}
-          onChange={onFiltersChange}
+          onChange={(next) => applyFilters(next)}
+          onReset={resetFilters}
         />
 
         <div className="space-y-4">
-          <div className="space-y-3 px-1 py-1">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-md bg-secondary px-2.5 py-1 text-xs font-medium text-foreground">
-                  {products.data?.items.length ?? 0} {isUz ? "товар" : "товаров"}
-                </span>
-                <span className="rounded-md bg-secondary px-2.5 py-1 text-xs font-medium text-foreground">
-                  {isUz ? "Бет" : "Стр."} {currentPage}
-                </span>
-                {activeFilterCount ? (
-                  <span className="rounded-md bg-accent/10 px-2.5 py-1 text-xs font-bold text-accent">
-                    {activeFilterCount} {isUz ? "фильтр" : "фильтров"}
-                  </span>
-                ) : null}
-                {products.isFetching && !products.isLoading ? (
-                  <p className="text-xs text-muted-foreground">{isUz ? "Янгиланмоқда..." : "Обновляем..."}</p>
-                ) : null}
-              </div>
-              <AnimatePresence>
-                {activeFilterCount > 0 && (
-                  <motion.div initial={{ opacity: 0, scale: 0.85 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.85 }}>
-                    <Button variant="ghost" size="sm" disabled={products.isFetching} onClick={clearFilters} className="gap-1.5 text-xs">
-                      <X className="h-3 w-3" />
-                      {isUz ? "Фильтрларни тозалаш" : "Сбросить фильтры"}
-                    </Button>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={filters.sort} onValueChange={(sort) => applyFilters({ ...filters, sort: sort as FilterState["sort"] })}>
+                <SelectTrigger className="w-[250px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SORT_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <span className="text-sm text-muted-foreground">{isUz ? `Топилди ${formatNumber(total)} та товар` : `Найдено ${formatNumber(total)} товаров`}</span>
             </div>
 
-            {activeFilterChips.length > 0 && (
-              <motion.div
-                initial={{ opacity: 0, y: -6 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="flex flex-wrap gap-2"
+            <div className="inline-flex rounded-xl border border-border bg-card p-1">
+              <button
+                type="button"
+                onClick={() => setViewMode("grid")}
+                className={`rounded-lg px-3 py-1.5 ${viewMode === "grid" ? "bg-accent text-white" : "text-muted-foreground"}`}
+                aria-label="Grid view"
               >
-                {activeFilterChips.map((chip) => (
-                  <span
-                    key={chip}
-                    className="rounded-full border border-accent/20 bg-accent/5 px-3 py-1 text-xs font-medium text-accent"
-                  >
-                    {chip}
-                  </span>
-                ))}
-              </motion.div>
-            )}
+                <Grid3X3 className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("list")}
+                className={`rounded-lg px-3 py-1.5 ${viewMode === "list" ? "bg-accent text-white" : "text-muted-foreground"}`}
+                aria-label="List view"
+              >
+                <List className="h-4 w-4" />
+              </button>
+            </div>
           </div>
 
-          <CatalogGrid loading={products.isLoading} items={products.data?.items ?? []} />
-
-          {showPagination ? (
-            <div className="flex flex-wrap items-center justify-between gap-3 px-1 py-2">
-              <p className="text-sm text-muted-foreground">{isUz ? "Бет" : "Страница"} {currentPage}</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={!canGoPrevPage || products.isFetching}
-                  onClick={() => goToPage(currentPage - 1)}
-                >
-                  {isUz ? "Орқага" : "Назад"}
-                </Button>
-                {pageButtons.map((page) => (
-                  <Button
-                    key={page}
-                    variant={page === currentPage ? "default" : "outline"}
-                    size="sm"
-                    disabled={products.isFetching}
-                    onClick={() => goToPage(page)}
-                    className={page === currentPage ? "bg-accent text-white hover:bg-accent/90" : ""}
+          {!categoryId ? (
+            <div className="scrollbar-hide -mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+              {CATEGORY_CHIPS.map((chip) => {
+                const active = (selectedCategoryToken ?? null) === chip.value;
+                return (
+                  <button
+                    key={chip.label}
+                    type="button"
+                    onClick={() => handleCategoryChange(chip.value)}
+                    className={`shrink-0 rounded-full border px-3 py-1.5 text-sm transition-colors ${
+                      active ? "border-accent bg-accent text-white" : "border-border bg-card text-foreground"
+                    }`}
                   >
-                    {page}
-                  </Button>
-                ))}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={!hasNextPage || products.isFetching}
-                  onClick={() => goToPage(currentPage + 1)}
-                >
-                  {isUz ? "Олдинга" : "Вперёд"}
-                </Button>
-              </div>
+                    {chip.label}
+                  </button>
+                );
+              })}
             </div>
           ) : null}
+
+          {activeFilters.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {activeFilters.map((filter) => (
+                <span key={filter.key} className="inline-flex items-center gap-1 rounded-full border border-accent/30 bg-accent/5 px-3 py-1 text-xs text-accent">
+                  {filter.label}
+                  <button type="button" onClick={filter.remove} className="rounded p-0.5 hover:bg-accent/10" aria-label="Remove filter">
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              ))}
+              <button type="button" onClick={resetFilters} className="text-xs font-semibold text-accent hover:underline">
+                Барчасини тозалаш
+              </button>
+            </div>
+          ) : null}
+
+          {products.isLoading ? (
+            <ProductGridSkeleton count={12} mode={viewMode} />
+          ) : total === 0 && hasActiveFilters ? (
+            <EmptyState
+              icon={<span className="text-2xl">🔍</span>}
+              title={isUz ? "Ҳеч нарса топилмади" : "Ничего не найдено"}
+              description={isUz ? "Фильтрларни ўзгартириб кўринг" : "Попробуйте изменить фильтры"}
+              action={<Button onClick={resetFilters}>Фильтрларни тозалаш</Button>}
+            />
+          ) : total === 0 ? (
+            <EmptyState icon={<span className="text-2xl">📦</span>} title={isUz ? "Товарлар тез орада қўшилади" : "Товары скоро появятся"} />
+          ) : (
+            <CatalogGrid loading={products.isFetching && !products.data} items={products.data?.items ?? []} viewMode={viewMode} />
+          )}
         </div>
       </div>
+
+      {compareItems.length >= 2 ? (
+        <div className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-background/95 backdrop-blur">
+          <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3">
+            <div className="flex -space-x-2">
+              {compareItems.slice(0, 4).map((item) => (
+                <div key={item.id} className="h-9 w-9 overflow-hidden rounded-full border border-border bg-card">
+                  {item.image ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={item.image} alt={item.title} className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-[10px] text-muted-foreground">#{item.id.slice(0, 2)}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="text-sm font-medium text-foreground">{isUz ? `Солиштириляпти: ${compareItems.length} та товар` : `Сравниваю: ${compareItems.length} товара`}</div>
+            <div className="ml-auto flex items-center gap-2">
+              <Link
+                href="/compare"
+                className="inline-flex items-center rounded-md bg-accent px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-accent/90"
+              >
+                {isUz ? "Солиштириш →" : "Сравнить →"}
+              </Link>
+              <button type="button" onClick={clearCompare} className="rounded-md border border-border px-2 py-1 text-sm text-muted-foreground hover:text-foreground">
+                ✕
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

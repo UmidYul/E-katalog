@@ -1,680 +1,892 @@
-"use client";
+﻿"use client";
 
-import { motion } from "framer-motion";
+import { useQuery } from "@tanstack/react-query";
+import { Copy, Heart, Search, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
+import { toast } from "sonner";
 
-import { useLocale } from "@/components/common/locale-provider";
-import { EmptyState } from "@/components/common/empty-state";
-import { ErrorState } from "@/components/common/error-state";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { useCompareProducts, useCreateCompareShare, useResolveCompareShare } from "@/features/compare/use-compare";
-import type { Locale } from "@/lib/i18n/types";
-import { catalogApi } from "@/lib/api/openapi-client";
-import { formatColorValue } from "@/lib/utils/color-name";
+import { useFavorites, useToggleFavorite } from "@/features/user/use-favorites";
 import { cn } from "@/lib/utils/cn";
-import { formatDateTime as formatLocalizedDateTime, formatNumber } from "@/lib/utils/format";
-import { formatSpecLabel, normalizeSpecsMap } from "@/lib/utils/specs";
-import { COMPARE_LIMIT, useCompareStore } from "@/store/compare.store";
+import { formatPrice } from "@/lib/utils/format";
+import { COMPARE_LIMIT, type CompareToggleResult, useCompareStore } from "@/store/compare.store";
 
-const normalizeValue = (value: unknown, locale: Locale): string => {
-  if (value === null || value === undefined || value === "") return "-";
-  if (typeof value === "boolean") return value ? (locale === "uz-Cyrl-UZ" ? "Ҳа" : "Да") : (locale === "uz-Cyrl-UZ" ? "Йўқ" : "Нет");
-  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "-";
-  if (typeof value === "string") return value.trim() || "-";
-  return JSON.stringify(value);
+type CompareSectionKey =
+  | "price"
+  | "display"
+  | "performance"
+  | "camera"
+  | "battery"
+  | "memory"
+  | "connectivity"
+  | "design"
+  | "other";
+
+type CompareProductOffer = {
+  shopId: string;
+  shopName: string;
+  price: number;
+  deliveryDays: number | null;
+  inStock: boolean;
+  url: string | null;
 };
 
-const hasDiffInRow = (values: unknown[], locale: Locale) => {
-  const unique = new Set(values.map((value) => normalizeValue(value, locale)));
-  return unique.size > 1;
+type CompareProduct = {
+  id: string;
+  slug: string;
+  name: string;
+  image: string | null;
+  brand: string;
+  category: string;
+  minPrice: number;
+  priceDrop: number;
+  offerCount: number;
+  offers: CompareProductOffer[];
+  bestOfferUrl: string | null;
 };
 
-const parseNumeric = (value: unknown): number | null => {
+type CompareSpecValue = {
+  raw: string | number | null;
+  display: string;
+};
+
+type CompareSpec = {
+  key: string;
+  label: string;
+  section: CompareSectionKey;
+  unit?: string;
+  higherIsBetter: boolean;
+  values: Record<string, CompareSpecValue>;
+};
+
+type CompareResponse = {
+  products: CompareProduct[];
+  specs: CompareSpec[];
+};
+
+type SearchResultItem = {
+  id: string;
+  name: string;
+  slug: string;
+  image: string | null;
+  minPrice: number;
+  category: string | null;
+};
+
+const STORAGE_KEY = "doxx_compare";
+const SWIPE_HINT_STORAGE_KEY = "doxx_compare_hint_seen";
+
+const SECTION_ORDER: Array<{ key: CompareSectionKey; label: string }> = [
+  { key: "price", label: "Нархлар" },
+  { key: "display", label: "Дисплей" },
+  { key: "performance", label: "Унумдорлик" },
+  { key: "camera", label: "Камера" },
+  { key: "battery", label: "Батарея" },
+  { key: "memory", label: "Хотира" },
+  { key: "connectivity", label: "Уланиш" },
+  { key: "design", label: "Дизайн" },
+  { key: "other", label: "Бошқа" },
+];
+
+const parseIdsParam = (value: string | null): string[] => {
+  if (!value) return [];
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const rawPart of value.split(",")) {
+    const id = rawPart.trim().toLowerCase();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+    if (ids.length >= COMPARE_LIMIT) break;
+  }
+  return ids;
+};
+
+const formatPriceWithSum = (value: number | null | undefined) => {
+  if (value == null || !Number.isFinite(value) || value <= 0) return "—";
+  return `${formatPrice(Math.round(value))} сўм`;
+};
+
+const parseNumeric = (value: string | number | null | undefined): number | null => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value !== "string") return null;
-  const normalized = value.replace(",", ".");
-  const match = normalized.match(/-?\d+(\.\d+)?/);
+  const match = value.replace(",", ".").match(/-?\d+(?:\.\d+)?/);
   if (!match) return null;
   const parsed = Number(match[0]);
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const lowerIsBetterHints = ["price", "cost", "weight", "thickness", "depth", "height", "width", "length", "latency", "delay"];
-
-const scoreNetworkStandard = (value: unknown): number | null => {
-  if (typeof value !== "string") return null;
-  const lower = value.toLowerCase();
-  let score = 0;
-  if (/\b2g\b/i.test(lower)) score += 2;
-  if (/\b3g\b/i.test(lower)) score += 3;
-  if (/\b4g\b/i.test(lower)) score += 4;
-  if (/\blte\b/i.test(lower)) score += 0.5;
-  if (/\b5g\b/i.test(lower)) score += 5;
-  if (/\b6g\b/i.test(lower)) score += 6;
-  return score > 0 ? score : null;
+const getSpecDifference = (spec: CompareSpec, productIds: string[]) => {
+  const unique = new Set<string>();
+  for (const productId of productIds) {
+    const value = spec.values[productId];
+    unique.add(String(value?.display ?? "—").trim() || "—");
+  }
+  return unique.size > 1;
 };
 
-const scoreWifiStandard = (value: unknown): number | null => {
-  if (typeof value !== "string") return null;
-  const lower = value.toLowerCase();
+const buildOffersMatrix = (products: CompareProduct[]) => {
+  const shopMap = new Map<string, string>();
+  const valueMap = new Map<string, Record<string, number | null>>();
 
-  const tokenRank: Record<string, number> = {
-    a: 1,
-    b: 1,
-    g: 2,
-    n: 3,
-    ac: 5,
-    ax: 6,
-    be: 7
-  };
-
-  const uniqueRanks = new Set<number>();
-  for (const match of lower.matchAll(/802\.11\s*([a-z0-9/\s,.-]+)/gi)) {
-    const chunk = String(match[1] ?? "").toLowerCase();
-    for (const rawToken of chunk.split(/[/,\s.-]+/g)) {
-      const token = rawToken.trim().toLowerCase();
-      if (tokenRank[token] !== undefined) uniqueRanks.add(tokenRank[token] ?? 0);
+  for (const product of products) {
+    for (const offer of product.offers) {
+      if (!offer.shopId) continue;
+      shopMap.set(offer.shopId, offer.shopName || "Дўкон");
+      const row = valueMap.get(offer.shopId) ?? {};
+      const current = row[product.id];
+      if (current == null || offer.price < current) row[product.id] = offer.price;
+      valueMap.set(offer.shopId, row);
     }
   }
-  for (const match of lower.matchAll(/802\.11([a-z]{1,2})/gi)) {
-    const token = String(match[1] ?? "").toLowerCase();
-    if (tokenRank[token] !== undefined) uniqueRanks.add(tokenRank[token] ?? 0);
-  }
 
-  const wifiGenMatch = lower.match(/wi[\s-]?fi\s*([4-7])/i);
-  const wifiGen = wifiGenMatch ? Number(wifiGenMatch[1]) : null;
-
-  const maxRank = Math.max(wifiGen ?? 0, ...Array.from(uniqueRanks));
-  if (maxRank <= 0) return null;
-  return maxRank * 10 + uniqueRanks.size;
+  return Array.from(shopMap.entries())
+    .map(([shopId, shopName]) => ({
+      shopId,
+      shopName,
+      values: valueMap.get(shopId) ?? {},
+    }))
+    .sort((left, right) => left.shopName.localeCompare(right.shopName, "uz-Cyrl"));
 };
 
-const parseComparableScore = (specKey: string, value: unknown): number | null => {
-  if (specKey === "network_standard" || specKey === "network") return scoreNetworkStandard(value);
-  if (specKey === "wifi_standard") return scoreWifiStandard(value);
-  if (specKey === "sim_count" || specKey === "sim_type" || specKey === "device_type") return null;
-  return parseNumeric(value);
-};
+function SearchModal({
+  open,
+  exclude,
+  onClose,
+  onSelect,
+}: {
+  open: boolean;
+  exclude: string[];
+  onClose: () => void;
+  onSelect: (item: SearchResultItem) => void;
+}) {
+  const [term, setTerm] = useState("");
+  const excludeParam = useMemo(() => exclude.join(","), [exclude]);
 
-const isLowerBetter = (specKey: string) => {
-  const key = specKey.toLowerCase();
-  return lowerIsBetterHints.some((hint) => key.includes(hint));
-};
-
-const getBestCellIndexes = (specKey: string, values: unknown[]) => {
-  if (specKey.includes("color")) return new Set<number>();
-
-  const numericValues = values
-    .map((value, index) => ({ index, value: parseComparableScore(specKey, value) }))
-    .filter((item): item is { index: number; value: number } => item.value !== null);
-
-  if (numericValues.length < 2) return new Set<number>();
-
-  const spread = Math.max(...numericValues.map((item) => item.value)) - Math.min(...numericValues.map((item) => item.value));
-  if (spread === 0) return new Set<number>();
-
-  const target = isLowerBetter(specKey)
-    ? Math.min(...numericValues.map((item) => item.value))
-    : Math.max(...numericValues.map((item) => item.value));
-
-  return new Set(numericValues.filter((item) => Math.abs(item.value - target) < 1e-9).map((item) => item.index));
-};
-
-const formatDateTime = (value: string, locale: Locale) => {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return formatLocalizedDateTime(date, locale);
-};
-
-const formatCategory = (value?: string) => {
-  if (!value) return undefined;
-  return value
-    .split(" ")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-};
-
-const normalizeCategory = (value: unknown) => {
-  if (typeof value !== "string") return undefined;
-  const normalized = value.trim().toLowerCase();
-  return normalized || undefined;
-};
-
-const rowPriorityOrder = ["price_min", "price_max", "store_count"];
-const keySpecHints = [
-  "price",
-  "store_count",
-  "display",
-  "screen",
-  "cpu",
-  "chip",
-  "ram",
-  "storage",
-  "battery",
-  "camera",
-  "network",
-  "wifi",
-  "bluetooth",
-  "weight",
-  "dimensions"
-];
-
-const renderCellValue = (rowKey: string, value: unknown, locale: Locale) => {
-  if (rowKey === "price_min" || rowKey === "price_max") {
-    const numeric = parseNumeric(value);
-    if (numeric !== null) return `${formatNumber(Math.round(numeric), locale, { maximumFractionDigits: 0 })} UZS`;
-  }
-  if (rowKey.includes("color") && typeof value === "string") return formatColorValue(value);
-  return normalizeValue(value, locale);
-};
-
-const isImageUrl = (value: unknown): value is string => {
-  if (typeof value !== "string") return false;
-  const normalized = value.trim();
-  return /^https?:\/\//i.test(normalized);
-};
-
-export function CompareClientPage() {
-  const { locale } = useLocale();
-  const isUz = locale === "uz-Cyrl-UZ";
-  const tr = (ru: string, uz: string) => (isUz ? uz : ru);
-  const itemCountLabel = (count: number) => {
-    if (isUz) return `${count} та товар`;
-    const mod10 = count % 10;
-    const mod100 = count % 100;
-    if (mod10 === 1 && mod100 !== 11) return `${count} товар`;
-    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return `${count} товара`;
-    return `${count} товаров`;
-  };
-
-  const searchParams = useSearchParams();
-  const compareItems = useCompareStore((s) => s.items);
-  const history = useCompareStore((s) => s.history);
-  const remove = useCompareStore((s) => s.remove);
-  const replace = useCompareStore((s) => s.replace);
-  const clear = useCompareStore((s) => s.clear);
-  const saveSnapshot = useCompareStore((s) => s.saveSnapshot);
-  const restoreSnapshot = useCompareStore((s) => s.restoreSnapshot);
-  const clearHistory = useCompareStore((s) => s.clearHistory);
-  const [onlyDiff, setOnlyDiff] = useState(false);
-  const [specQuery, setSpecQuery] = useState("");
-  const [focusMode, setFocusMode] = useState<"all" | "key">("all");
-  const [shareStatus, setShareStatus] = useState<string | null>(null);
-  const [lastShareUrl, setLastShareUrl] = useState<string | null>(null);
-  const [lastShareExpiresAt, setLastShareExpiresAt] = useState<string | null>(null);
-  const [appliedShareToken, setAppliedShareToken] = useState<string | null>(null);
-  const productIds = useMemo(() => compareItems.map((item) => item.id), [compareItems]);
-  const shareToken = useMemo(() => {
-    const raw = searchParams.get("share");
-    if (!raw) return null;
-    const normalized = raw.trim();
-    return normalized || null;
-  }, [searchParams]);
-  const compareQuery = useCompareProducts(productIds);
-  const createShare = useCreateCompareShare();
-  const sharedCompareQuery = useResolveCompareShare(shareToken);
-  const productMetaById = useMemo(() => new Map(compareItems.map((item) => [item.id, item])), [compareItems]);
-  const matrixMetaById = useMemo(() => new Map((compareQuery.data?.items ?? []).map((item) => [item.id, item])), [compareQuery.data?.items]);
-  const categoryScope = useMemo(() => {
-    for (const item of compareItems) {
-      const category = normalizeCategory(item.category);
-      if (category) return category;
-    }
-    return undefined;
-  }, [compareItems]);
+  const results = useQuery({
+    queryKey: ["compare", "search", term, excludeParam],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (term.trim()) params.set("q", term.trim());
+      if (excludeParam) params.set("exclude", excludeParam);
+      const response = await fetch(`/api/compare/search?${params.toString()}`, { cache: "no-store" });
+      if (!response.ok) return [] as SearchResultItem[];
+      return (await response.json()) as SearchResultItem[];
+    },
+    enabled: open,
+    staleTime: 30_000,
+  });
 
   useEffect(() => {
-    if (!compareQuery.isSuccess || compareItems.length < 2) return;
-    saveSnapshot(compareItems);
-  }, [compareItems, compareQuery.isSuccess, saveSnapshot]);
+    if (!open) setTerm("");
+  }, [open]);
 
-  useEffect(() => {
-    setAppliedShareToken(null);
-  }, [shareToken]);
-
-  useEffect(() => {
-    if (!shareToken || !sharedCompareQuery.data || appliedShareToken === shareToken) return;
-    let cancelled = false;
-    const hydrateSharedCompare = async () => {
-      const incomingIds = sharedCompareQuery.data.product_ids ?? [];
-      const nextItems: Array<{ id: string; title: string; slug: string; category?: string }> = [];
-      for (const id of incomingIds) {
-        const local = compareItems.find((item) => item.id === id);
-        if (local) {
-          nextItems.push({ id: local.id, title: local.title, slug: local.slug, category: local.category });
-          continue;
-        }
-        try {
-          const product = await catalogApi.getProduct(id);
-          nextItems.push({
-            id,
-            title: product.title || id,
-            slug: `${id}-${slugify(product.title || id)}`,
-            category: typeof product.category === "string" ? product.category : undefined
-          });
-        } catch {
-          continue;
-        }
-      }
-      if (cancelled) return;
-      if (nextItems.length < 2) {
-        setShareStatus(tr("Не удалось восстановить сравнение по ссылке.", "Солиштиришни ҳавола орқали тиклаб бўлмади."));
-        return;
-      }
-      replace(nextItems);
-      setAppliedShareToken(shareToken);
-      setShareStatus(
-        tr(
-          `Сравнение загружено по общей ссылке до ${formatDateTime(sharedCompareQuery.data.expires_at, locale)}.`,
-          `Солиштириш умумий ҳавола орқали ${formatDateTime(sharedCompareQuery.data.expires_at, locale)} гача юкланди.`
-        )
-      );
-    };
-    void hydrateSharedCompare();
-    return () => {
-      cancelled = true;
-    };
-  }, [appliedShareToken, compareItems, replace, shareToken, sharedCompareQuery.data]);
-
-  useEffect(() => {
-    if (!shareToken || !sharedCompareQuery.isError) return;
-    setShareStatus(tr("Ссылка сравнения недействительна или устарела.", "Солиштириш ҳаволаси амал қилмайди ёки эскирган."));
-  }, [shareToken, sharedCompareQuery.isError, tr]);
-
-  const rows = useMemo(() => {
-    const items = compareQuery.data?.items ?? [];
-    const normalizedItems = items.map((item) => normalizeSpecsMap({ ...(item.attributes ?? {}), ...(item.specs ?? {}) }));
-    const keys = Array.from(new Set(normalizedItems.flatMap((specs) => Object.keys(specs)))).sort((a, b) => {
-      const aPriority = rowPriorityOrder.indexOf(a);
-      const bPriority = rowPriorityOrder.indexOf(b);
-      if (aPriority !== -1 || bPriority !== -1) {
-        if (aPriority === -1) return 1;
-        if (bPriority === -1) return -1;
-        return aPriority - bPriority;
-      }
-      return a.localeCompare(b);
-    });
-
-    const allRows = keys.map((key) => {
-      const values = normalizedItems.map((specs) => specs[key]);
-      return { key, label: formatSpecLabel(key, locale), values, bestCellIndexes: getBestCellIndexes(key, values) };
-    });
-
-    const normalizedQuery = specQuery.trim().toLowerCase();
-
-    return allRows.filter((row) => {
-      if (onlyDiff && !hasDiffInRow(row.values, locale)) return false;
-      if (
-        focusMode === "key" &&
-        !keySpecHints.some((hint) => row.key.toLowerCase().includes(hint) || row.label.toLowerCase().includes(hint))
-      ) {
-        return false;
-      }
-      if (!normalizedQuery) return true;
-      return row.key.toLowerCase().includes(normalizedQuery) || row.label.toLowerCase().includes(normalizedQuery);
-    });
-  }, [compareQuery.data?.items, focusMode, locale, onlyDiff, specQuery]);
-
-  const diffRowsCount = useMemo(() => rows.filter((row) => hasDiffInRow(row.values, locale)).length, [locale, rows]);
-
-  const onCreateShareLink = async () => {
-    if (productIds.length < 2) {
-      setShareStatus(tr("Для общей ссылки выберите минимум 2 товара.", "Умумий ҳавола учун камида 2 та товар танланг."));
-      return;
-    }
-    try {
-      const response = await createShare.mutateAsync({ productIds, ttlDays: 30, source: "compare_page" });
-      const shareUrl = typeof window !== "undefined" ? `${window.location.origin}${response.share_path}` : response.share_path;
-      setLastShareUrl(shareUrl);
-      setLastShareExpiresAt(response.expires_at);
-      if (typeof navigator !== "undefined" && navigator.share) {
-        await navigator.share({ url: shareUrl, title: tr("Сравнение товаров", "Товарларни солиштириш") });
-        setShareStatus(tr("Ссылка сравнения отправлена через системный share.", "Солиштириш ҳаволаси тизимли share орқали юборилди."));
-        return;
-      }
-      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(shareUrl);
-        setShareStatus(tr("Ссылка сравнения скопирована в буфер.", "Солиштириш ҳаволаси буферга нусхаланди."));
-        return;
-      }
-      setShareStatus(
-        tr(
-          `Ссылка сравнения готова до ${formatDateTime(response.expires_at, locale)}.`,
-          `Солиштириш ҳаволаси ${formatDateTime(response.expires_at, locale)} гача тайёр.`
-        )
-      );
-    } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        setShareStatus(tr("Отправка ссылки отменена.", "Ҳаволани юбориш бекор қилинди."));
-        return;
-      }
-      setShareStatus(tr("Не удалось создать ссылку сравнения.", "Солиштириш ҳаволасини яратиб бўлмади."));
-    }
-  };
-
-  if (compareItems.length === 0) {
-    return (
-      <div className="mx-auto max-w-7xl space-y-3 px-4 py-6">
-        {shareToken ? (
-          <p className="text-sm text-muted-foreground">
-            {sharedCompareQuery.isPending
-              ? tr("Загружаем сравнение по ссылке...", "Ҳавола бўйича солиштириш юкланмоқда...")
-              : shareStatus ?? tr("Ожидаем данные сравнения...", "Солиштириш маълумотларини кутмоқдамиз...")}
-          </p>
-        ) : null}
-        <EmptyState
-          title={tr("Сравнение пока пустое", "Солиштириш ҳозирча бўш")}
-          message={tr("Добавьте товары из каталога или карточки товара, чтобы начать сравнение.", "Солиштиришни бошлаш учун каталогдан ёки товар карточкасидан товар қўшинг.")}
-        />
-        <Link href="/catalog">
-          <Button>{tr("Перейти в каталог", "Каталогга ўтиш")}</Button>
-        </Link>
-        {history.length ? (
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>{tr("Недавние сравнения", "Охирги солиштиришлар")}</CardTitle>
-              <Button variant="ghost" size="sm" onClick={clearHistory}>
-                {tr("Очистить историю", "Тарихни тозалаш")}
-              </Button>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {history.slice(0, 6).map((entry) => (
-                <div key={entry.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border p-3">
-                  <div>
-                    <p className="line-clamp-1 text-sm font-medium">{entry.items.map((item) => item.title).join(" vs ")}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {formatDateTime(entry.createdAt, locale)} | {itemCountLabel(entry.items.length)}
-                      {entry.category ? ` | ${formatCategory(entry.category)}` : ""}
-                    </p>
-                  </div>
-                  <Button size="sm" variant="outline" onClick={() => restoreSnapshot(entry.id)}>
-                    {tr("Восстановить", "Тиклаш")}
-                  </Button>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        ) : null}
-      </div>
-    );
-  }
-
-  if (compareItems.length === 1) {
-    const onlyItem = compareItems[0];
-    if (!onlyItem) return null;
-
-    return (
-      <div className="mx-auto max-w-7xl space-y-4 px-4 py-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>{tr("Для сравнения нужно минимум 2 товара", "Солиштириш учун камида 2 та товар керак")}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              {tr(
-                "Сейчас выбран только один товар. Добавьте ещё один, чтобы увидеть полную матрицу сравнения.",
-                "Ҳозир фақат битта товар танланган. Тўлиқ матрицани кўриш учун яна бир товар қўшинг."
-              )}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <Link href={`/product/${onlyItem.slug}`}>
-                <Button variant="outline">{tr("Открыть выбранный товар", "Танланган товарни очиш")}</Button>
-              </Link>
-              <Link href="/catalog">
-                <Button>{tr("Добавить ещё товар", "Яна товар қўшиш")}</Button>
-              </Link>
-              <Button variant="ghost" onClick={clear}>
-                {tr("Очистить", "Тозалаш")}
-              </Button>
-            </div>
-            {history.length ? (
-              <div className="space-y-2 border-t border-border pt-3">
-                <p className="text-xs text-muted-foreground">{tr("Недавние сравнения:", "Охирги солиштиришлар:")}</p>
-                <div className="flex flex-wrap gap-2">
-                  {history.slice(0, 4).map((entry) => (
-                    <Button key={entry.id} size="sm" variant="outline" onClick={() => restoreSnapshot(entry.id)}>
-                      {tr("Восстановить", "Тиклаш")} {entry.items.length}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  if (compareQuery.error) {
-    return (
-      <div className="mx-auto max-w-7xl px-4 py-6">
-        <ErrorState
-          title={tr("Не удалось построить сравнение", "Солиштиришни тузиб бўлмади")}
-          message={tr("Попробуйте убрать недоступные товары и повторите.", "Мавжуд эмас товарларни олиб ташлаб, қайта уриниб кўринг.")}
-        />
-      </div>
-    );
-  }
-
-  const columns = compareQuery.data?.items ?? [];
+  if (!open) return null;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4 }}
-      className="mx-auto max-w-7xl space-y-6 px-4 py-8"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="space-y-1.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="font-heading text-2xl font-extrabold">{tr("Сравнение", "Солиштириш")}</h1>
-            <span className="rounded-md bg-secondary px-2.5 py-1 text-xs font-medium">
-              {tr(`${compareItems.length}/${COMPARE_LIMIT} выбрано`, `${compareItems.length}/${COMPARE_LIMIT} танланган`)}
-            </span>
-            {categoryScope ? (
-              <span className="rounded-md bg-accent/10 px-2.5 py-1 text-xs font-medium text-accent">
-                {formatCategory(categoryScope)}
-              </span>
-            ) : null}
-            {compareQuery.isFetching ? (
-              <span className="rounded-md bg-secondary px-2.5 py-1 text-xs text-muted-foreground">{tr("Обновляем...", "Янгиланмоқда...")}</span>
-            ) : null}
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-2 md:items-center md:p-4">
+      <div className="w-full max-w-xl rounded-2xl border border-border bg-background shadow-xl">
+        <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-secondary/50">
+            <Search className="h-4 w-4 text-muted-foreground" />
           </div>
-          <p className="text-xs text-muted-foreground">
-            {tr(
-              "Сравнение работает в рамках одной категории. Заголовки и первая колонка закреплены.",
-              "Солиштириш битта категория доирасида ишлайди. Сарлавҳа ва биринчи устун қотирилган."
+          <h3 className="text-sm font-semibold md:text-base">Товар қўшиш</h3>
+          <button type="button" className="ml-auto rounded-md p-1 text-muted-foreground hover:bg-secondary" onClick={onClose} aria-label="Ёпиш">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-3 p-4">
+          <Input value={term} onChange={(event) => setTerm(event.target.value)} placeholder="Товар номи ёки модели..." />
+
+          <div className="max-h-[320px] space-y-2 overflow-y-auto">
+            {results.isLoading ? (
+              <p className="text-sm text-muted-foreground">Қидирилмоқда...</p>
+            ) : (results.data ?? []).length === 0 ? (
+              <p className="text-sm text-muted-foreground">Мос товар топилмади.</p>
+            ) : (
+              (results.data ?? []).map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => onSelect(item)}
+                  className="flex w-full items-center gap-3 rounded-xl border border-border bg-card px-3 py-2 text-left transition hover:border-accent/40 hover:bg-secondary/20"
+                >
+                  <div className="relative h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-white">
+                    {item.image ? (
+                      <Image src={item.image} alt={item.name} fill className="object-contain p-1" sizes="48px" />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">—</div>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="line-clamp-2 text-sm font-medium">{item.name}</p>
+                    <p className="text-xs text-accent">дан {formatPriceWithSum(item.minPrice)}</p>
+                  </div>
+                </button>
+              ))
             )}
-          </p>
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span className="inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-1 text-success">
-              <span className="h-2 w-2 rounded-full bg-success" /> {tr("Лучшее значение", "Энг яхши қиймат")}
-            </span>
-            <span>{tr("Подсветка лучшего значения рассчитывается по эвристике.", "Энг яхши қиймат ёритилиши эвристика асосида ҳисобланади.")}</span>
           </div>
-          {shareStatus ? <p className="text-xs text-accent">{shareStatus}</p> : null}
-          {lastShareUrl ? (
-            <p className="text-xs text-muted-foreground">
-              {tr("Ссылка:", "Ҳавола:")}{" "}
-              <a href={lastShareUrl} className="text-accent underline underline-offset-2" target="_blank" rel="noreferrer">
-                {tr("открыть", "очиш")}
-              </a>
-              {lastShareExpiresAt
-                ? tr(
-                  ` (действует до ${formatDateTime(lastShareExpiresAt, locale)})`,
-                  ` (амал қилади: ${formatDateTime(lastShareExpiresAt, locale)})`
-                )
-                : ""}
-            </p>
-          ) : null}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant={onlyDiff ? "default" : "outline"} size="sm" onClick={() => setOnlyDiff((prev) => !prev)}>
-            {onlyDiff ? tr("Показаны отличия", "Фарқлар кўрсатилган") : tr("Показать только отличия", "Фақат фарқларни кўрсатиш")}
-          </Button>
-          <Button variant={focusMode === "key" ? "default" : "outline"} size="sm" onClick={() => setFocusMode((prev) => (prev === "all" ? "key" : "all"))}>
-            {focusMode === "key" ? tr("Ключевые характеристики", "Калит хусусиятлар") : tr("Фокус: ключевые", "Фокус: калит")}
-          </Button>
-          <Button variant="outline" size="sm" onClick={onCreateShareLink} disabled={createShare.isPending || productIds.length < 2}>
-            {createShare.isPending ? tr("Готовим ссылку...", "Ҳавола тайёрланмоқда...") : tr("Поделиться", "Улашиш")}
-          </Button>
-          <Button variant="ghost" size="sm" onClick={clear}>
-            {tr("Очистить всё", "Барчасини тозалаш")}
-          </Button>
-          {history.length ? (
-            <Button variant="ghost" size="sm" onClick={clearHistory}>
-              {tr("Очистить историю", "Тарихни тозалаш")}
-            </Button>
-          ) : null}
         </div>
       </div>
-      <div className="grid gap-2 md:grid-cols-[minmax(280px,420px)_1fr] md:items-center">
-        <Input
-          value={specQuery}
-          onChange={(event) => setSpecQuery(event.target.value)}
-          placeholder={tr("Поиск по характеристикам: например, камера, ram, wifi", "Хусусият бўйича қидирув: масалан, камера, ram, wifi")}
-          aria-label={tr("Поиск характеристики в матрице сравнения", "Солиштириш матрицасида хусусият қидириш")}
-          className="h-9"
-        />
-        <p className="text-xs text-muted-foreground">
-          {tr(`Строк в матрице: ${rows.length}, отличий: ${diffRowsCount}.`, `Матрица қаторлари: ${rows.length}, фарқлар: ${diffRowsCount}.`)}
-        </p>
-      </div>
-
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        {compareItems.map((item) => (
-          <Card key={item.id}>
-            <CardContent className="space-y-2 p-4">
-              {(() => {
-                const matrixItem = matrixMetaById.get(item.id);
-                const image = isImageUrl(matrixItem?.main_image) ? matrixItem.main_image : null;
-                if (!image) return null;
-                return (
-                  <Link href={`/product/${item.slug}`} className="block">
-                    <div className="relative mb-2 aspect-square overflow-hidden rounded-lg border border-border bg-card">
-                      <Image src={image} alt={item.title} fill className="object-contain p-2" sizes="(max-width: 1280px) 50vw, 25vw" />
-                    </div>
-                  </Link>
-                );
-              })()}
-              <Link href={`/product/${item.slug}`} className="line-clamp-2 text-sm font-semibold text-accent hover:underline">
-                {item.title}
-              </Link>
-              <div className="flex gap-2">
-                <Link href={`/product/${item.slug}`}>
-                  <Button size="sm" variant="outline">
-                    {tr("Открыть", "Очиш")}
-                  </Button>
-                </Link>
-                <Button size="sm" variant="ghost" onClick={() => remove(item.id)}>
-                  {tr("Убрать", "Олиб ташлаш")}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      <Card className="overflow-hidden">
-        <CardContent className="p-0">
-          {compareQuery.isLoading ? (
-            <div className="p-4 text-sm text-muted-foreground">{tr("Загружаем матрицу сравнения...", "Солиштириш матрицаси юкланмоқда...")}</div>
-          ) : (
-            <table className="min-w-[760px] w-full border-collapse">
-              <thead>
-                <tr className="border-b border-border bg-card">
-                  <th className="sticky left-0 top-0 z-30 min-w-56 bg-card px-4 py-3 text-left text-sm font-semibold">{tr("Характеристика", "Хусусият")}</th>
-                  {columns.map((item) => {
-                    const local = productMetaById.get(item.id);
-                    const title = local?.title || item.normalized_title;
-                    const slug = local?.slug || `${item.id}-${slugify(item.normalized_title)}`;
-                    const image = isImageUrl(item.main_image) ? item.main_image : null;
-                    return (
-                      <th key={item.id} className="sticky top-0 z-20 min-w-56 bg-card px-4 py-3 text-left text-sm font-semibold">
-                        <div className="space-y-2">
-                          {image ? (
-                            <Link href={`/product/${slug}`} className="block">
-                              <div className="relative h-24 w-24 overflow-hidden rounded-lg border border-border bg-background">
-                                <Image src={image} alt={title} fill className="object-contain p-1" sizes="96px" />
-                              </div>
-                            </Link>
-                          ) : null}
-                          <Link href={`/product/${slug}`} className="font-medium hover:text-accent">
-                            {title}
-                          </Link>
-                        </div>
-                      </th>
-                    );
-                  })}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.length === 0 ? (
-                  <tr>
-                    <td className="sticky left-0 z-10 bg-card px-4 py-3 text-sm text-muted-foreground">{tr("Отличий не найдено", "Фарқлар топилмади")}</td>
-                    {columns.map((item) => (
-                      <td key={item.id} className="px-4 py-3 text-sm text-muted-foreground">
-                        -
-                      </td>
-                    ))}
-                  </tr>
-                ) : (
-                  rows.map((row, rowIndex) => (
-                    <tr key={row.key} className={cn("border-t border-border", rowIndex % 2 === 1 && "bg-secondary/15")}>
-                      <td className="sticky left-0 z-10 bg-card px-4 py-3 text-sm font-medium">{row.label}</td>
-                      {row.values.map((value, index) => (
-                        <td
-                          key={`${row.key}:${columns[index]?.id ?? index}`}
-                          className={cn("px-4 py-3 text-sm text-muted-foreground", row.bestCellIndexes.has(index) && "bg-success/15 font-semibold text-success")}
-                        >
-                          {renderCellValue(row.key, value, locale)}
-                        </td>
-                      ))}
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          )}
-        </CardContent>
-      </Card>
-
-      {history.length ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>{tr("Недавние сравнения", "Охирги солиштиришлар")}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {history.slice(0, 6).map((entry) => (
-              <div key={entry.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border p-3">
-                <div>
-                  <p className="line-clamp-1 text-sm font-medium">{entry.items.map((item) => item.title).join(" vs ")}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatDateTime(entry.createdAt, locale)} | {itemCountLabel(entry.items.length)}
-                    {entry.category ? ` | ${formatCategory(entry.category)}` : ""}
-                  </p>
-                </div>
-                <Button size="sm" variant="outline" onClick={() => restoreSnapshot(entry.id)}>
-                  {tr("Восстановить", "Тиклаш")}
-                </Button>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      ) : null}
-    </motion.div>
+    </div>
   );
 }
 
-const slugify = (text: string) =>
-  text
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, "")
-    .trim()
-    .replace(/\s+/g, "-");
+function EmptyCompare({
+  onApplyPreset,
+  presets,
+}: {
+  onApplyPreset: (ids: string[]) => void;
+  presets: {
+    smartphones: string[];
+    laptops: string[];
+    loading: boolean;
+  };
+}) {
+  return (
+    <div className="mx-auto max-w-3xl space-y-5 px-4 py-10 text-center">
+      <div className="mx-auto flex h-20 w-20 items-center justify-center">
+        <div className="relative h-14 w-14">
+          <div className="absolute left-0 top-1 h-10 w-10 rounded-lg border-2 border-border bg-card" />
+          <div className="absolute left-4 top-4 h-10 w-10 rounded-lg border-2 border-accent/60 bg-background" />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <h1 className="text-2xl font-semibold">Солиштириш учун товар қўшинг</h1>
+        <p className="text-sm text-muted-foreground">Товарлар хусусиятлари ва нархларини бир жойда солиштиринг</p>
+      </div>
+
+      <div className="space-y-2">
+        <p className="text-sm font-medium">Оммабоп солиштиришлар:</p>
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <button
+            type="button"
+            disabled={presets.loading || presets.smartphones.length < 2}
+            onClick={() => onApplyPreset(presets.smartphones)}
+            className="rounded-full border border-border px-4 py-2 text-sm transition hover:border-accent/50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Топ смартфонлар
+          </button>
+          <button
+            type="button"
+            disabled={presets.loading || presets.laptops.length < 2}
+            onClick={() => onApplyPreset(presets.laptops)}
+            className="rounded-full border border-border px-4 py-2 text-sm transition hover:border-accent/50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Ноутбуклар 20 млн гача
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <Link href="/catalog">
+          <Button>Каталогга ўтиш</Button>
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function ProductColumn({
+  product,
+  onRemove,
+  isFavorite,
+  onToggleFavorite,
+}: {
+  product: CompareProduct;
+  onRemove: (id: string) => void;
+  isFavorite: boolean;
+  onToggleFavorite: () => void;
+}) {
+  return (
+    <div className="relative space-y-2 p-2 text-left">
+      <button
+        type="button"
+        onClick={onToggleFavorite}
+        className={cn(
+          "absolute left-1 top-1 rounded-full border border-border bg-background p-1",
+          isFavorite ? "text-rose-600" : "text-muted-foreground",
+        )}
+        aria-label="Сараланганларга қўшиш"
+      >
+        <Heart className={cn("h-3.5 w-3.5", isFavorite && "fill-current")} />
+      </button>
+
+      <button
+        type="button"
+        onClick={() => onRemove(product.id)}
+        className="absolute right-1 top-1 rounded-full border border-border bg-background p-1 text-muted-foreground hover:text-foreground"
+        aria-label="Олиб ташлаш"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+
+      <div className="relative h-[60px] w-[60px] overflow-hidden rounded-lg border border-border bg-white md:h-20 md:w-20">
+        {product.image ? (
+          <Image src={product.image} alt={product.name} fill className="object-contain p-1.5" sizes="80px" />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">—</div>
+        )}
+      </div>
+
+      <Link href={`/product/${product.slug}`} className="line-clamp-2 text-xs font-medium hover:text-accent md:text-sm">
+        {product.name}
+      </Link>
+
+      <p className="text-sm font-semibold md:text-base">дан {formatPriceWithSum(product.minPrice)}</p>
+      <p className="text-xs text-muted-foreground">{product.offerCount} магазинда</p>
+
+      {product.priceDrop > 0 ? (
+        <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">↓ {product.priceDrop}%</span>
+      ) : null}
+
+      <button
+        type="button"
+        onClick={() => {
+          if (!product.bestOfferUrl) return;
+          window.open(product.bestOfferUrl, "_blank", "noopener,noreferrer");
+        }}
+        disabled={!product.bestOfferUrl}
+        className="inline-flex rounded-md border border-border px-2 py-1 text-xs font-medium text-accent transition hover:bg-accent/10 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        Энг яхши нарх →
+      </button>
+    </div>
+  );
+}
+
+function SpecRow({
+  spec,
+  products,
+}: {
+  spec: CompareSpec;
+  products: CompareProduct[];
+}) {
+  const cells = products.map((product) => spec.values[product.id] ?? { raw: null, display: "—" });
+  const uniqueValues = new Set(cells.map((cell) => (String(cell.display).trim() || "—").toLowerCase()));
+  const isSame = uniqueValues.size <= 1;
+
+  const numeric = cells
+    .map((cell, index) => ({ index, value: parseNumeric(cell.raw) }))
+    .filter((item): item is { index: number; value: number } => item.value != null);
+
+  let bestValue: number | null = null;
+  let worstValue: number | null = null;
+  if (!isSame && numeric.length > 1) {
+    bestValue = spec.higherIsBetter
+      ? Math.max(...numeric.map((item) => item.value))
+      : Math.min(...numeric.map((item) => item.value));
+    worstValue = spec.higherIsBetter
+      ? Math.min(...numeric.map((item) => item.value))
+      : Math.max(...numeric.map((item) => item.value));
+  }
+
+  return (
+    <tr className="group border-t border-border hover:bg-secondary/20">
+      <td className="sticky left-0 z-[5] bg-background px-3 py-2 text-xs font-medium md:text-sm">{spec.label}</td>
+      {cells.map((cell, index) => {
+        const numericValue = parseNumeric(cell.raw);
+        const display = String(cell.display || "—");
+        const isMissing = display === "—" || !display.trim();
+        const isBest = bestValue != null && numericValue != null && Math.abs(numericValue - bestValue) < 1e-9;
+        const isWorst =
+          worstValue != null &&
+          numericValue != null &&
+          Math.abs(numericValue - worstValue) < 1e-9 &&
+          products.length > 1;
+
+        return (
+          <td
+            key={`${spec.key}-${products[index]?.id ?? index}`}
+            className={cn(
+              "px-3 py-2 text-xs md:text-sm",
+              (isSame || isMissing || isWorst) && "text-muted-foreground",
+              isBest && "font-medium text-emerald-600",
+            )}
+          >
+            {display}
+            {spec.unit && !display.includes(spec.unit) && display !== "—" ? ` ${spec.unit}` : ""}
+          </td>
+        );
+      })}
+    </tr>
+  );
+}
+
+function CompareVerdict({
+  products,
+  specs,
+}: {
+  products: CompareProduct[];
+  specs: CompareSpec[];
+}) {
+  const verdict = useMemo(() => {
+    if (products.length < 2) return [];
+
+    const wins = new Map<string, string[]>();
+    for (const product of products) wins.set(product.id, []);
+
+    const validPrices = products.filter((product) => product.minPrice > 0);
+    if (validPrices.length >= 2) {
+      const bestPrice = Math.min(...validPrices.map((product) => product.minPrice));
+      for (const product of validPrices) {
+        if (product.minPrice === bestPrice) wins.get(product.id)?.push(`нарх (${formatPriceWithSum(product.minPrice)})`);
+      }
+    }
+
+    for (const spec of specs) {
+      if (spec.section === "price") continue;
+      const numericValues = products
+        .map((product) => {
+          const value = spec.values[product.id];
+          return {
+            productId: product.id,
+            raw: parseNumeric(value?.raw),
+            display: value?.display ?? "—",
+          };
+        })
+        .filter((item): item is { productId: string; raw: number; display: string } => item.raw != null);
+
+      if (numericValues.length < 2) continue;
+      const unique = new Set(numericValues.map((item) => item.raw));
+      if (unique.size <= 1) continue;
+
+      const best = spec.higherIsBetter
+        ? Math.max(...numericValues.map((item) => item.raw))
+        : Math.min(...numericValues.map((item) => item.raw));
+      for (const item of numericValues) {
+        if (Math.abs(item.raw - best) < 1e-9) {
+          wins.get(item.productId)?.push(`${spec.label} (${item.display})`);
+        }
+      }
+    }
+
+    return products
+      .map((product) => ({
+        product,
+        wins: (wins.get(product.id) ?? []).slice(0, 5),
+      }))
+      .filter((item) => item.wins.length > 0);
+  }, [products, specs]);
+
+  if (products.length < 2 || verdict.length === 0) return null;
+
+  return (
+    <section className="space-y-3 rounded-xl border border-border bg-card p-4">
+      <h2 className="text-lg font-semibold">Хулоса</h2>
+      <div className="space-y-2">
+        {verdict.map((item) => (
+          <p key={item.product.id} className="text-sm">
+            <span className="font-semibold">{item.product.name}:</span> {item.wins.join(", ")}
+          </p>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+export function CompareClientPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  const compareItems = useCompareStore((state) => state.items);
+  const add = useCompareStore((state) => state.add);
+  const remove = useCompareStore((state) => state.remove);
+  const clear = useCompareStore((state) => state.clear);
+  const replace = useCompareStore((state) => state.replace);
+  const favoritesQuery = useFavorites();
+  const toggleFavorite = useToggleFavorite();
+
+  const [showDiffOnly, setShowDiffOnly] = useState(false);
+  const [searchModalOpen, setSearchModalOpen] = useState(false);
+  const [isBootstrapped, setIsBootstrapped] = useState(false);
+  const [showSwipeHint, setShowSwipeHint] = useState(false);
+
+  const idsFromUrl = useMemo(() => parseIdsParam(searchParams.get("ids")), [searchParams]);
+  const currentIds = useMemo(() => compareItems.map((item) => item.id).slice(0, COMPARE_LIMIT), [compareItems]);
+  const currentIdsHash = useMemo(() => currentIds.join(","), [currentIds]);
+  const urlIdsHash = useMemo(() => idsFromUrl.join(","), [idsFromUrl]);
+
+  const hydrateFromIds = useCallback(
+    async (ids: string[]) => {
+      if (!ids.length) return;
+      const query = ids.join(",");
+      try {
+        const response = await fetch(`/api/compare?ids=${query}`, { cache: "no-store" });
+        if (!response.ok) return;
+        const data = (await response.json()) as CompareResponse;
+        const items = (data.products ?? []).slice(0, COMPARE_LIMIT).map((product) => ({
+          id: product.id,
+          title: product.name,
+          slug: product.slug,
+          category: product.category,
+          image: product.image ?? undefined,
+        }));
+        replace(items);
+      } catch {
+        // ignore hydration errors
+      }
+    },
+    [replace],
+  );
+
+  useEffect(() => {
+    if (isBootstrapped) return;
+    const bootstrap = async () => {
+      if (idsFromUrl.length) {
+        await hydrateFromIds(idsFromUrl);
+      } else {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          const parsed = JSON.parse(raw ?? "[]") as unknown;
+          const storedArray = Array.isArray(parsed) ? parsed : [];
+          const stored = parseIdsParam(storedArray.map((item) => String(item)).join(","));
+          if (stored.length) await hydrateFromIds(stored);
+        } catch {
+          // ignore storage errors
+        }
+      }
+      setIsBootstrapped(true);
+    };
+    void bootstrap();
+  }, [hydrateFromIds, idsFromUrl, isBootstrapped]);
+
+  useEffect(() => {
+    if (!isBootstrapped || !urlIdsHash) return;
+    if (urlIdsHash === currentIdsHash) return;
+    void hydrateFromIds(idsFromUrl);
+  }, [currentIdsHash, hydrateFromIds, idsFromUrl, isBootstrapped, urlIdsHash]);
+
+  useEffect(() => {
+    if (!isBootstrapped) return;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(currentIds));
+    } catch {
+      // ignore storage errors
+    }
+
+    const currentParam = String(searchParams.get("ids") ?? "");
+    if (currentParam === currentIdsHash) return;
+    const nextUrl = currentIdsHash ? `${pathname}?ids=${currentIdsHash}` : pathname;
+    router.replace(nextUrl, { scroll: false });
+  }, [currentIds, currentIdsHash, isBootstrapped, pathname, router, searchParams]);
+
+  useEffect(() => {
+    if (!isBootstrapped || currentIds.length < 2) return;
+    if (window.innerWidth >= 768) return;
+    try {
+      const seen = localStorage.getItem(SWIPE_HINT_STORAGE_KEY);
+      if (!seen) setShowSwipeHint(true);
+    } catch {
+      setShowSwipeHint(true);
+    }
+  }, [currentIds.length, isBootstrapped]);
+
+  const compareQuery = useQuery({
+    queryKey: ["compare", currentIdsHash],
+    queryFn: async () => {
+      const response = await fetch(`/api/compare?ids=${currentIdsHash}`, { cache: "no-store" });
+      if (!response.ok) return { products: [], specs: [] } satisfies CompareResponse;
+      return (await response.json()) as CompareResponse;
+    },
+    enabled: currentIds.length > 0,
+    staleTime: 30_000,
+  });
+
+  const presetSmartphones = useQuery({
+    queryKey: ["compare", "preset", "smartphones"],
+    queryFn: async () => {
+      const response = await fetch("/api/compare/preset?kind=smartphones_top", { cache: "no-store" });
+      if (!response.ok) return [] as string[];
+      const data = (await response.json()) as { ids?: string[] };
+      return parseIdsParam((data.ids ?? []).join(","));
+    },
+    enabled: currentIds.length === 0,
+    staleTime: 60_000,
+  });
+
+  const presetLaptops = useQuery({
+    queryKey: ["compare", "preset", "laptops"],
+    queryFn: async () => {
+      const response = await fetch("/api/compare/preset?kind=laptops_20m", { cache: "no-store" });
+      if (!response.ok) return [] as string[];
+      const data = (await response.json()) as { ids?: string[] };
+      return parseIdsParam((data.ids ?? []).join(","));
+    },
+    enabled: currentIds.length === 0,
+    staleTime: 60_000,
+  });
+
+  const products = useMemo(() => {
+    const byId = new Map((compareQuery.data?.products ?? []).map((product) => [product.id, product]));
+    return currentIds.map((id) => byId.get(id)).filter((product): product is CompareProduct => Boolean(product));
+  }, [compareQuery.data?.products, currentIds]);
+  const favoriteSet = useMemo(
+    () => new Set((favoritesQuery.data ?? []).map((item) => item.product_id)),
+    [favoritesQuery.data],
+  );
+
+  const specs = useMemo(() => compareQuery.data?.specs ?? [], [compareQuery.data?.specs]);
+
+  const sections = useMemo(() => {
+    const productIds = products.map((product) => product.id);
+    return SECTION_ORDER.map((section) => {
+      const rows = specs
+        .filter((spec) => spec.section === section.key && section.key !== "price")
+        .map((spec) => ({
+          ...spec,
+          isDifferent: getSpecDifference(spec, productIds),
+        }))
+        .filter((spec) => !showDiffOnly || spec.isDifferent);
+      return {
+        ...section,
+        rows,
+      };
+    }).filter((section) => section.key === "price" || section.rows.length > 0);
+  }, [products, showDiffOnly, specs]);
+
+  const offersRows = useMemo(() => buildOffersMatrix(products), [products]);
+
+  const addProduct = useCallback(
+    (item: SearchResultItem) => {
+      const result = add({
+        id: item.id,
+        title: item.name,
+        slug: item.slug,
+        category: item.category ?? undefined,
+        image: item.image ?? undefined,
+      });
+      const showAddResultToast = (value: CompareToggleResult) => {
+        if (value === "limit_reached") toast.error("Энг кўпи 4 та товар солиштириш мумкин.");
+        if (value === "already_added") toast.info("Бу товар аллақачон қўшилган.");
+        if (value === "category_mismatch") toast.error("Бир хил категориядаги товарлар солиштирилади.");
+      };
+      showAddResultToast(result);
+      if (result === "added") setSearchModalOpen(false);
+    },
+    [add],
+  );
+
+  const applyPreset = useCallback(
+    async (ids: string[]) => {
+      if (ids.length < 2) return;
+      await hydrateFromIds(ids.slice(0, COMPARE_LIMIT));
+    },
+    [hydrateFromIds],
+  );
+
+  const copyShareLink = useCallback(async () => {
+    if (!currentIds.length) return;
+    try {
+      const response = await fetch(`/api/compare/share?ids=${currentIds.join(",")}`, { cache: "no-store" });
+      const payload = (await response.json().catch(() => ({ url: `/compare?ids=${currentIds.join(",")}` }))) as { url?: string };
+      const sharePath = payload.url ?? `/compare?ids=${currentIds.join(",")}`;
+      const full = `${window.location.origin}${sharePath}`;
+      await navigator.clipboard.writeText(full);
+      toast.success("Ҳавола нусхаланди ✓");
+    } catch {
+      toast.error("Ҳаволани нусхалашда хатолик.");
+    }
+  }, [currentIds]);
+
+  if (!isBootstrapped && currentIds.length === 0) {
+    return <div className="mx-auto max-w-7xl px-4 py-8 text-sm text-muted-foreground">Солиштириш юкланмоқда...</div>;
+  }
+
+  if (currentIds.length === 0) {
+    return (
+      <EmptyCompare
+        onApplyPreset={applyPreset}
+        presets={{
+          smartphones: presetSmartphones.data ?? [],
+          laptops: presetLaptops.data ?? [],
+          loading: presetSmartphones.isLoading || presetLaptops.isLoading,
+        }}
+      />
+    );
+  }
+
+  return (
+    <div className="mx-auto max-w-7xl space-y-4 px-3 py-4 md:px-4 md:py-6">
+      <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-border bg-background px-1 py-2">
+        <h1 className="text-lg font-semibold md:text-xl">Солиштириш</h1>
+        <span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-medium">{currentIds.length} товар</span>
+        <span className="flex-1" />
+
+        <label className="hidden items-center gap-2 text-sm md:inline-flex">
+          <input type="checkbox" checked={showDiffOnly} onChange={(event) => setShowDiffOnly(event.target.checked)} className="h-4 w-4 rounded border-border" />
+          Фақат фарқлар
+        </label>
+
+        <Button variant="ghost" size="sm" className="gap-1.5" onClick={copyShareLink}>
+          Улашиш <Copy className="h-3.5 w-3.5" />
+        </Button>
+        <Button variant="ghost" size="sm" onClick={clear}>
+          Тозалаш
+        </Button>
+      </div>
+
+      <div className="sticky top-[54px] z-20 w-fit md:hidden">
+        <button
+          type="button"
+          onClick={() => setShowDiffOnly((current) => !current)}
+          className={cn(
+            "inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-medium",
+            showDiffOnly ? "border-accent bg-accent text-white" : "border-border bg-background",
+          )}
+        >
+          Фақат фарқлар
+        </button>
+      </div>
+
+      {showSwipeHint ? (
+        <div className="md:hidden rounded-lg border border-accent/20 bg-accent/10 px-3 py-2 text-xs text-accent">
+          <div className="flex items-center justify-between gap-2">
+            <span>← Ўнгга суринг</span>
+            <button
+              type="button"
+              onClick={() => {
+                setShowSwipeHint(false);
+                try {
+                  localStorage.setItem(SWIPE_HINT_STORAGE_KEY, "1");
+                } catch {
+                  // ignore storage errors
+                }
+              }}
+              className="rounded border border-accent/30 px-1.5 py-0.5 text-[10px]"
+            >
+              Тушунарли
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="overflow-x-auto rounded-xl border border-border">
+        <table className="w-full min-w-[560px] border-collapse">
+          <thead className="sticky top-[48px] z-10 bg-background">
+            <tr className="border-b border-border align-top">
+              <th className="sticky left-0 z-[15] w-40 min-w-40 bg-background px-3 py-2 text-left text-xs font-semibold md:text-sm">Хусусият</th>
+              {products.map((product) => (
+                <th key={product.id} className="w-44 min-w-[220px] border-l border-border bg-background">
+                  <ProductColumn
+                    product={product}
+                    onRemove={remove}
+                    isFavorite={favoriteSet.has(product.id)}
+                    onToggleFavorite={() =>
+                      toggleFavorite.mutate({
+                        productId: product.id,
+                        currentPrice: product.minPrice,
+                      })
+                    }
+                  />
+                </th>
+              ))}
+              {currentIds.length < COMPARE_LIMIT ? (
+                <th className="w-44 min-w-[220px] border-l border-border bg-background p-2">
+                  <button
+                    type="button"
+                    onClick={() => setSearchModalOpen(true)}
+                    className="flex h-40 w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border text-muted-foreground transition hover:border-blue-400 hover:bg-blue-50 hover:text-blue-500"
+                  >
+                    <span className="text-3xl">+</span>
+                    <span className="text-sm">Товар қўшиш</span>
+                  </button>
+                </th>
+              ) : null}
+            </tr>
+          </thead>
+          <tbody>
+            {sections.map((section) => {
+              const columnCount = products.length + (currentIds.length < COMPARE_LIMIT ? 2 : 1);
+              if (section.key === "price") {
+                return (
+                  <FragmentSection key={section.key} label={section.label} columnCount={columnCount}>
+                    {offersRows.map((offerRow) => {
+                      const availablePrices = products
+                        .map((product) => offerRow.values[product.id] ?? null)
+                        .filter((value): value is number => value != null && value > 0);
+                      const best = availablePrices.length ? Math.min(...availablePrices) : null;
+                      return (
+                        <tr key={offerRow.shopId} className="group border-t border-border hover:bg-secondary/20">
+                          <td className="sticky left-0 z-[5] bg-background px-3 py-2 text-xs font-medium md:text-sm">{offerRow.shopName}</td>
+                          {products.map((product) => {
+                            const price = offerRow.values[product.id] ?? null;
+                            const isBest = best != null && price != null && price === best;
+                            return (
+                              <td key={`${offerRow.shopId}-${product.id}`} className={cn("px-3 py-2 text-xs md:text-sm", !price && "text-muted-foreground", isBest && "font-medium text-emerald-600")}>
+                                {price ? formatPriceWithSum(price) : "—"}
+                              </td>
+                            );
+                          })}
+                          {currentIds.length < COMPARE_LIMIT ? <td className="px-3 py-2" /> : null}
+                        </tr>
+                      );
+                    })}
+
+                    <tr className="border-t border-border">
+                      <td className="sticky left-0 z-[5] bg-background px-3 py-2 text-xs font-medium md:text-sm">Барча таклифлар</td>
+                      {products.map((product) => (
+                        <td key={`offers-link-${product.id}`} className="px-3 py-2">
+                          <Link href={`/product/${product.slug}#offers`} className="inline-flex rounded-md border border-border px-2 py-1 text-xs text-accent hover:bg-accent/10">
+                            Барча таклифлар →
+                          </Link>
+                        </td>
+                      ))}
+                      {currentIds.length < COMPARE_LIMIT ? <td className="px-3 py-2" /> : null}
+                    </tr>
+                  </FragmentSection>
+                );
+              }
+
+              return (
+                <FragmentSection key={section.key} label={section.label} columnCount={columnCount}>
+                  {section.rows.map((spec) => (
+                    <SpecRow key={spec.key} spec={spec} products={products} />
+                  ))}
+                </FragmentSection>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <CompareVerdict products={products} specs={specs} />
+
+      <SearchModal
+        open={searchModalOpen}
+        exclude={currentIds}
+        onClose={() => setSearchModalOpen(false)}
+        onSelect={(item) => addProduct(item)}
+      />
+    </div>
+  );
+}
+
+function FragmentSection({
+  label,
+  columnCount,
+  children,
+}: {
+  label: string;
+  columnCount: number;
+  children: ReactNode;
+}) {
+  return (
+    <>
+      <tr className="border-t border-border bg-secondary/30">
+        <td colSpan={columnCount} className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {label}
+        </td>
+      </tr>
+      {children}
+    </>
+  );
+}
